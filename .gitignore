@@ -1,0 +1,6 @@
+*/
+*.mp4
+!client/
+*.session
+*test.py
+*.session-journal
