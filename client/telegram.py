@@ -41,5 +41,6 @@ class Telegram:
             "file_id": file_id,
             "file_uniqueId": file_uniqueId,
             "message_id": message_id,
+            "chat_id": self.CHAT_ID
         }
-             
+        

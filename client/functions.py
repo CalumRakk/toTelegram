@@ -116,4 +116,5 @@ def compress_file(path: str, output: str, quality=-1, verbose=True) -> None:
         print(completedProcess.stderr.decode())
         return False
     print(completedProcess.stdout.decode() or completedProcess.stderr.decode())
+    os.remove(path)
     return os.path.basename(output)

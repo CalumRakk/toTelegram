@@ -49,6 +49,8 @@ properties:
               type : string
             file_unique_id:
              type: string
+            chat_id:
+             type: string
             message_id:
               type: integer
 required:
