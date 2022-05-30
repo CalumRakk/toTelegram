@@ -4,3 +4,6 @@
 *.session
 *test.py
 *.session-journal
+!schema/
+*config.yaml
+*.pickle

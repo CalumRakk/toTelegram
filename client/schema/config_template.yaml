@@ -1,0 +1,7 @@
+# Para subir archivos a Telegram se requieren completar los siguientes campos.
+# Estas credenciales se pueden conseguir en : https://my.telegram.org/auth?to=apps
+API_HASH: ''
+API_ID: 0
+TOKEN: ''
+USERNAME: 'me'
+CHAT_ID: -1

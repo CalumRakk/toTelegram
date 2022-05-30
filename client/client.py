@@ -2,27 +2,46 @@
 import os
 
 from .logging_ import Logging
-from .constants import EXT_GZ
-from .functions import split_file, compress_file
-
+from .constants import FILESIZE
+from .functions import split_file, compress_file, load_config
+from .telegram import Telegram
 
 class Client(Logging):
     def __init__(self, path, md5sum,**kwargs):
         # self= Logging(self.path, md5sum)
-        super().__init__(**kwargs)
+        self.kwargs= kwargs
+        super().__init__(path,md5sum)
          
-    def split(self,**kwargs):
-        path= self.path
-        folder= self.folder
+    def split(self,size=FILESIZE,verbose=True,quality=-1,**kwargs):
+        """
+        Divide el archivo en trozos de tamaño size y comprime cada trozo.
+        """
+        if not self.is_complete_split:
+            files= split_file(self.path, self.folder, size=size, verbose=verbose)            
+            self.split_files= files
+            self.is_complete_split= True
+            
+        if not self.is_complete_compressed:
+            for file in self.split_files:
+                if file not in self.compressed_files:
+                    path= os.path.join(self.folder, file)
+                    compress_file(path, self.folder, verbose=verbose,quality=quality)
+                    self.compressed_files= file
+            self.is_complete_compressed= True
+    def update(self,**kwargs):
+        """
+        Actualiza el archivo con los archivos que se encuentran en el directorio.
+        """
+        config= load_config()
+        telegram= Telegram(config)
         
-        if len(self.splitters)<1:           
-            splitters= split_file(input_=path, output_folder=folder, **kwargs)
-            self.splitters= splitters
-        
-        for file in self.splitters:
-            if not self.is_compressed(file):
-                gzfile= compress_file(file,output_folder=folder)
-                self.add_to_compressed_files(gzfile)
-                os.remove(file)
-        
+        self.split(**kwargs)
+        if not self.is_complete_uploaded:
+            for file in self.compressed_files:
+                if not self.is_file_uploaded(file):
+                    path= os.path.join(self.folder, file)
+                    response= telegram.upload_file(path)
+                    self.uploaded_files= response
+            
+            self.is_complete_uploaded= True
         

@@ -1,0 +1,58 @@
+title: JSON Schema Validation
+description: 'Demo : working with json schemas'
+type: object
+additionalProperties: false
+properties:
+  command:
+    description: El último comando usado.
+    type: string
+  split_files:
+    description: Proceso padre
+    type: object
+    properties:
+      is_complete:
+        description: True si todos los trozos de video han sido comprimidos.
+        type: boolean
+      files:
+        description: file que ha completado su proceso padre.
+        type: array
+        items:
+          type: string
+  compressed_files:
+    description: Proceso padre
+    type: object
+    properties:
+      is_complete:
+        description: True si todos los trozos de video han sido comprimidos.
+        type: boolean
+      files:
+        description: file que ha completado su proceso padre.
+        type: array
+        items:
+          type: string
+  uploaded_files:
+    description: Proceso padre
+    type: object
+    properties:
+      is_complete:
+        description: True si todos los files se han subido.
+        type: boolean
+      files:
+        description: file que ha completado su proceso padre.
+        type: array
+        items:
+          type : object
+          properties:
+            filename : 
+             type : string
+            file_id :
+              type : string
+            file_unique_id:
+             type: string
+            message_id:
+              type: integer
+required:
+- command
+- split_files
+- compressed_files
+- uploaded_files

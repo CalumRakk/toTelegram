@@ -1,0 +1,10 @@
+command: ""
+split_files:
+    is_complete: False
+    files: []
+compressed_files:
+    is_complete: False
+    files: []
+uploaded_files:
+    is_complete: False
+    files: []

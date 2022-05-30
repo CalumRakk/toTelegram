@@ -1,3 +1,4 @@
+from client.constants import FILESIZE
 import argparse
 from argparse import ArgumentTypeError
 import os.path
@@ -23,8 +24,10 @@ parser_split.add_argument('--size', help="El tamaño de los trozos en bytes a lo
 
 
 # # crea el analizador ("parser") para el commando "enlistar"
-# parser_b = subparsers.add_parser('update')
-# parser_b.add_argument('path', help="extension de los archivos para enlistar",type=str)
+parser_update = subparsers.add_parser('update')
+parser_update.add_argument('path', help="La ubicación del archivo para subir", type=lambda value: filepath(value))
+parser_update.add_argument('--md5sum', help="El md5sum del archivo.", type=lambda value: check_md5sum(value))
+parser_update.add_argument('--size', help="El tamaño de los trozos en bytes a los que se dividirá el archivo.", type=int)
 
 # # crea el analizador ("parser") para el commando "pack"
 # parser_a = subparsers.add_parser('pack')
@@ -33,10 +36,13 @@ parser_split.add_argument('--size', help="El tamaño de los trozos en bytes a lo
 # parser_a.add_argument('--json', help="el json que contiene la info de los archivos que conforman el archivo que será gifeado", required=True,type=argparse.FileType('r'))
 
 
-args = parser.parse_args(["split", "--md5sum", "bcf33063a4b6d221cd80ca9b1ed452ed", "--size", "1000000", "video.mp4"])
-command= args.command
+args = parser.parse_args()
 
-if command=='split':
-    kwargs= vars(args)    
+command= args.command
+kwargs= vars(args)
+if command=='split':        
     client = Client(**kwargs)
     client.split(**kwargs)
+elif command=="update":
+    client = Client(**kwargs)
+    client.update(**kwargs)

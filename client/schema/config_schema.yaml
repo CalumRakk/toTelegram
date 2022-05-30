@@ -1,0 +1,28 @@
+title: JSON Schema Validation
+description: "Demo : working with json schemas"
+type: object
+additionalProperties: false
+properties:
+  USERNAME:
+    description: Añadir una description
+    type: string
+  API_HASH:
+    description: Añadir una description
+    type: string
+    pattern: "[A-z0-9]{32}"
+  API_ID:
+    description: Añadir una description
+    type: integer
+    minimum: 1
+  TOKEN:
+    description: Añadir una description
+    type: string
+  CHAT_ID:
+    description: Añadir una description
+    type: integer 
+required:
+  - USERNAME
+  - API_HASH
+  - API_ID
+  - TOKEN
+  - CHAT_ID
