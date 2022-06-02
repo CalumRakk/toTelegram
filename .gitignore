@@ -1,9 +1,13 @@
 */
 *.mp4
 !client/
+!toTelegram/
 *.session
 *test.py
 *.session-journal
-!schema/
 *config.yaml
 *.pickle
+*.yaml
+*test2.py
+!toTelegram/schema/*.yaml
+*reader_pickles.py

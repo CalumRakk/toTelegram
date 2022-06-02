@@ -1,11 +1,8 @@
 title: JSON Schema Validation
 description: "Demo : working with json schemas"
 type: object
-additionalProperties: false
+additionalProperties: True
 properties:
-  USERNAME:
-    description: Añadir una description
-    type: string
   API_HASH:
     description: Añadir una description
     type: string
@@ -14,15 +11,10 @@ properties:
     description: Añadir una description
     type: integer
     minimum: 1
-  TOKEN:
-    description: Añadir una description
-    type: string
   CHAT_ID:
     description: Añadir una description
     type: integer 
 required:
-  - USERNAME
   - API_HASH
   - API_ID
-  - TOKEN
   - CHAT_ID
