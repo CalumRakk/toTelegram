@@ -1,0 +1,37 @@
+title: JSON Schema Validation
+description: 'Demo : working with json schemas'
+type: object
+additionalProperties: false
+properties:
+  is_split_required:
+    description: True si el archivo fue dividodo y por lo canto requiere ser concatenado.
+    type: boolean
+  filename:
+    description: El nombre del archivo con su extension
+    type: string
+  md5sum:
+    description: El md5sum del archivo.
+    type: string
+  mime:
+    description: el mime - categoria y subcategoria del archivo.
+    type: string   
+  chat_id:
+    description: el id donde se subieron los archivos.
+    type: integer
+  files:
+    description: Las partes que componen al archivo.
+    type: array
+    items:
+      type : object
+      properties:
+        filename : 
+          type : string
+        message_id:
+          type: integer
+required:
+- filename
+- md5sum
+- mime
+- chat_id
+- is_split_required
+- files
