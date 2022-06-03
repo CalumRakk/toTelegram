@@ -1,10 +1,10 @@
 **toTelegram**
 
-Script para guarda archivos del PC en Telegram sin importar el tamaño.
+Script para almacenar en Telegram archivos sin importar el tamaño.
 
 **Comandos**
 
-El siguiente comando se usa para subir archivos a Telegram. Si el archivo supera los limites de Telegram (2gb) se divide en diferentes partes. Al finalizar la subida se genera un archivo .yaml
+El siguiente comando se usa para subir archivos a Telegram. Si el archivo supera los limites de Telegram (2 GB) se divide en varias partes. Al finalizar la subida se genera un archivo .yaml
 
         python toTelegram update myfile.mp4
 
@@ -38,5 +38,4 @@ Con el siguiente comando se valida si las credenciales permiten la conección co
         python toTelegram test config
 
 Si la conección es valida, para subir
-
 

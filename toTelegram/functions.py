@@ -1,22 +1,59 @@
 import re
-import os.path
-import subprocess
 import subprocess
 import os
 import re
-import pathlib
 from argparse import ArgumentTypeError
 import pickle
+from typing import Union, Dict
 
 from jsonschema import validate, FormatChecker
 import yaml
 import filetype
+from pyrogram.types.messages_and_media.message import Message
+from pyrogram.types.messages_and_media.document import Document
 
-from .constants import (FILESIZE_LIMIT, PATH_CONFIG_FILE, PATH_FILEYAML_TEMPLATE, PATH_FILEYAML_SCHEMA, PATH_CONFIG_FILE,
+from .constants import (PATH_CONFIG_FILE, PATH_CONFIG_FILE,
                         PATH_CONFIG_SCHEMA, PATH_CONFIG_TEMPLATE, EXT_PICKLE, WORKTABLE)
 
-regex_get_split = re.compile("(?<=').*?(?=')")
+regex_get_part_of_filepart = re.compile(r'(?<=_)\d+-\d+')
+regex_get_filepart_of_string = re.compile("(?<=').*?(?=')")
 regex_md5sum = re.compile(r'([a-f0-9]{32})')
+
+
+def get_part_filepart(filepart):
+    """
+    Obtiene el numero de parte de un archivo/filepart
+    """
+
+    match = regex_get_part_of_filepart.search(str(filepart))
+    if match:
+        return match.group()
+
+
+def create_filedocument(message: Union[Message, dict]) -> dict:
+    """filedocument
+
+    es un diccionario con los datos del archivo subido a Telegram:
+        { "filename": file_name, "message_id": message_id,"part": part }
+
+    Nota: si file_name de message no tiene parte,se presupone que es archivo completo y part vale None
+    """
+    # el filanem debe ser obtenido del message, no del fileyaml. Esto es debido a que telegram o la api te pueden cambiar el nombre del archivo.
+    
+    value = message.media
+    if type(value)==str:
+        document: Document = getattr(message, value)
+    else:        
+        document: Document = getattr(message, value.value)
+ 
+    part = get_part_filepart(document.file_name)
+    file_name = document.file_name
+
+    message_id = message.message_id if getattr(message, "message_id", None) else message.id
+    
+    return {"filepart": file_name, "message_id": message_id, "part": part}
+
+# VALIDADORES DE TIPO
 
 
 def filepath(path):
@@ -25,7 +62,7 @@ def filepath(path):
     """
     if not os.path.isfile(path):
         raise ArgumentTypeError("The file does not exist: {}".format(path))
-    return path
+    return os.path.abspath(path)
 
 
 def check_md5sum(md5sum):
@@ -41,20 +78,22 @@ def check_fileyaml_object(md5sum):
     """
     Comprueba si existe un objeto fileyaml
     """
-    filename= md5sum + EXT_PICKLE
-    path= os.path.join(WORKTABLE, filename)
+    filename = md5sum + EXT_PICKLE
+    path = os.path.join(WORKTABLE, filename)
     if os.path.exists(path):
         return True
     return False
-        
+
+
 def load_fileyaml_object(md5sum):
     """
     Carga un objecto fileyaml existente de lo contrario da error.
     """
-    filename= md5sum + EXT_PICKLE
-    path= os.path.join(WORKTABLE, filename)
+    filename = md5sum + EXT_PICKLE
+    path = os.path.join(WORKTABLE, filename)
     with open(path, 'rb') as file:
         return pickle.load(file)
+
 
 def get_mime(path):
     kind = filetype.guess(path)
@@ -107,61 +146,6 @@ def get_md5sum(path):
     if os.path.exists(path):
         string = fr'md5sum "{path}"'
         md5sum = str(subprocess.run(string, capture_output=True).stdout)
-        value= regex_md5sum.search(md5sum).group()
+        value = regex_md5sum.search(md5sum).group()
         return value
     raise Exception("[MD5SUM] No se pudo generar el md5sum")
-
-
-def split_file(path) -> list:
-    """
-    Divide un archivo en partes de tamaño size.
-    path: path del archivo a dividir
-    output: carpeta donde se guardará los archivos divididos
-    size: tamaño de cada parte
-    verbose: mostrar mensajes en consola
-    """
-    verbose = "--verbose" if verbose else ""
-
-    # path y formato de salida de los archivos. Ejemplo, con output='folder/video.mp4_' el archivo será guardado en folder/video.mp4_01,...
-    filename = os.path.basename(path)
-    name = filename + "_"
-    output = os.path.join(WORKTABLE, name)
-
-    string = f'split "{path}" -b {FILESIZE_LIMIT} -d {verbose} "{output}"'
-    completedProcess = subprocess.run(
-        string, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-
-    if completedProcess.returncode == 1:
-        print("[SPLIT] No se pudo dividir el archivo\n",
-              completedProcess.stderr.decode())
-        raise
-    print(completedProcess.stdout.decode())
-    return [os.path.basename(regex_get_split.search(text).group()) for text in completedProcess.stdout.decode().split("\n")[:-1]]
-
-def compress_file(path: str, output: str, quality=-1, verbose=True) -> None:
-    """
-    Comprime un archivo a ".gz"
-    path: path del archivo comprimir
-    output: carpeta donde se guardará el archivo comprimido
-    """
-    verbose = "--verbose" if verbose else ""
-
-    # formatea la salida:
-    filename = os.path.basename(path)
-    name = filename + ".gz"
-    output = os.path.join(output, name)
-
-    # Convierte el string que representa una ruta de windows (barra invertida "\") a una ruta de linux (con barra inclinada "/")
-    input_ = pathlib.PurePath(path).as_posix()
-    output = pathlib.PurePath(output).as_posix()
-
-    cmd = fr'gzip -k {verbose} {quality} -c "{input_}" > "{output}"'
-    completedProcess = subprocess.run(
-        cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-
-    if completedProcess.returncode == 1:
-        print(completedProcess.stderr.decode())
-        raise
-    print(completedProcess.stdout.decode() or completedProcess.stderr.decode())
-    os.remove(path)
-    return os.path.basename(output)
