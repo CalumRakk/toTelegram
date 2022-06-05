@@ -54,14 +54,25 @@ def create_filedocument(message: Union[Message, dict]) -> dict:
     return {"filepart": file_name, "message_id": message_id, "part": part}
 
 # VALIDADORES DE TIPO
-
+def file_name_length(path):
+    # File name length up to 60 characters, others will be trimmed out
+    filename= os.path.basename(path)
+    limit=55
+    if len(filename) > limit:
+        print("Example:", filename[0:limit])
+        raise ArgumentTypeError(f"The filename is too long - max  {limit} characters")
 
 def filepath(path):
     """
     Validaor de tipo de argparse
     """
+    path=path.replace('"',"").replace("'","")
+        
+    path=fr"{path}"
     if not os.path.isfile(path):
         raise ArgumentTypeError("The file does not exist: {}".format(path))
+    file_name_length(path)
+    print(os.path.basename(path))
     return os.path.abspath(path)
 
 

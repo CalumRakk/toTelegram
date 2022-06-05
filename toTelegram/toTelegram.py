@@ -51,6 +51,8 @@ class ToTelegram:
         return self._client
 
     def update(self, path, md5sum=None, **kwargs):
+        
+        md5sum= md5sum if md5sum else get_md5sum(path)            
         if check_md5document(md5sum):
             md5document = load_md5document(md5sum)
         else:
@@ -61,10 +63,11 @@ class ToTelegram:
         if not temp.is_complete_filedocument:
             if not temp.is_split_required:
                 filename = os.path.basename(path)
+                print("\n\t",filename)
                 message = self.client.send_document(
                     self.chat_id, path, file_name=filename, caption=filename, progress=progress)
                 filedocument = create_filedocument(message)
-                temp.add_filedocument(filedocument)
+                temp.add_filedocument(filedocument)                
             else:
                 verbose = kwargs.get("verbose", True)
                 for filepart in split(temp, verbose):
@@ -75,6 +78,7 @@ class ToTelegram:
                             self.chat_id, path, file_name=filename, progress=progress)
                         filedocument = create_filedocument(message)
                         temp.add_filedocument(filedocument)
+                        temp.remove_local_filepart(filepart)
             temp.create_fileyaml(self.chat_id)
         else:
             print("El archivo ya está completo")

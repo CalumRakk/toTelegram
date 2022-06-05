@@ -126,14 +126,22 @@ class Temp:
         with open(path, 'w') as f:
             yaml.dump(fileyaml, f)
         return path
+    
+    def remove_local_filepart(self, filepart):
+        """
+        Elimina el filepart local.
+        """
+        filepart_path = os.path.join(WORKTABLE, filepart)
+        if os.path.exists(filepart_path):
+            os.remove(filepart_path)
 
 
-def create_md5document(path, md5sum=None):
+def create_md5document(path, md5sum):
     path = os.path.abspath(path)
 
     # No se deben modificar.
     mime = get_mime(path)
-    md5sum = md5sum if md5sum else get_md5sum(path)
+    md5sum = md5sum
     size = os.path.getsize(path)
     is_split_required = size > FILESIZE_LIMIT
     count_parts = math.ceil(size / FILESIZE_LIMIT)
@@ -186,6 +194,7 @@ def split(temp: Temp, verbose=True) -> list:
     output = os.path.join(WORKTABLE, name)
     # split video.mp4 -b 1000000 -d --verbose --numeric-suffixes=2 --suffix-length=1 --additional-suffix=test video.mp4_
     digits = len(str(temp.count_parts))
+    print("[Split]\n",f"{temp.count_parts} partes")
     cmd = f'split "{temp.path}" -b {FILESIZE_LIMIT} -d {verbose} --suffix-length={digits} --numeric-suffixes=1 --additional-suffix=-{temp.count_parts} "{output}"'
     #cmd = f'split "{temp.path}" -b {FILESIZE_LIMIT} -d {verbose} "{output}"'
     completedProcess = subprocess.run(cmd, stdout=PIPE, stderr=PIPE)
