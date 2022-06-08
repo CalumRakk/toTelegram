@@ -20,9 +20,27 @@ regex_get_filepart_of_string = re.compile("(?<=').*?(?=')")
 regex_md5sum = re.compile(r'([a-f0-9]{32})')
 
 
+def get_key_value_of_dictionary(dictionay: dict):
+    """
+    Obtiene el valor key de un diccionario, ejemplo:
+    Del siguiente diccionario se obtiene el valor de la clave "key":
+    { "key": "value" }
+    """
+    return list(dictionay.keys())[0]
+
+
+def get_filepart_of_string(string):
+    """
+    Obtiene el filepart de un string
+    """
+    match = regex_get_filepart_of_string.search(string)
+    if match:
+        return match.group()
+
+
 def get_part_filepart(filepart):
     """
-    Obtiene el numero de parte de un archivo/filepart
+    Obtiene la part de un filepart
     """
 
     match = regex_get_part_of_filepart.search(str(filepart))
@@ -30,7 +48,7 @@ def get_part_filepart(filepart):
         return match.group()
 
 
-def create_filedocument(message: Union[Message, dict]) -> dict:
+def create_filedocument(message: Union[Message, dict], chat_id=False) -> dict:
     """filedocument
 
     es un diccionario con los datos del archivo subido a Telegram:
@@ -39,36 +57,45 @@ def create_filedocument(message: Union[Message, dict]) -> dict:
     Nota: si file_name de message no tiene parte,se presupone que es archivo completo y part vale None
     """
     # el filanem debe ser obtenido del message, no del fileyaml. Esto es debido a que telegram o la api te pueden cambiar el nombre del archivo.
-    
+
     value = message.media
-    if type(value)==str:
+    if type(value) == str:
         document: Document = getattr(message, value)
-    else:        
+    else:
         document: Document = getattr(message, value.value)
- 
+
     part = get_part_filepart(document.file_name)
     file_name = document.file_name
 
-    message_id = message.message_id if getattr(message, "message_id", None) else message.id
-    
-    return {"filepart": file_name, "message_id": message_id, "part": part}
+    message_id = message.message_id if getattr(
+        message, "message_id", None) else message.id
+    size= document.file_size
+
+    document = {"filename": file_name, "message_id": message_id, "part": part,"size": size}
+    if chat_id == True:
+        document["chat_id"] = message.chat.id
+    return document
 
 # VALIDADORES DE TIPO
+
+
 def file_name_length(path):
     # File name length up to 60 characters, others will be trimmed out
-    filename= os.path.basename(path)
-    limit=55
+    filename = os.path.basename(path)
+    limit = 55
     if len(filename) > limit:
         print("Example:", filename[0:limit])
-        raise ArgumentTypeError(f"The filename is too long - max  {limit} characters")
+        raise ArgumentTypeError(
+            f"The filename is too long - max  {limit} characters")
+
 
 def filepath(path):
     """
     Validaor de tipo de argparse
     """
-    path=path.replace('"',"").replace("'","")
-        
-    path=fr"{path}"
+    path = path.replace('"', "").replace("'", "")
+
+    path = fr"{path}"
     if not os.path.isfile(path):
         raise ArgumentTypeError("The file does not exist: {}".format(path))
     file_name_length(path)

@@ -5,17 +5,20 @@ import math
 from typing import List
 
 import yaml
+from yaml.reader import ReaderError
 
-from .constants import WORKTABLE, FILESIZE_LIMIT, EXT_YAML
-from .functions import get_mime, regex_get_filepart_of_string, get_md5sum
-from .functions import get_part_filepart, create_filedocument
+from .constants import WORKTABLE, FILESIZE_LIMIT, EXT_YAML,VERSION
+from .functions import get_mime, get_part_filepart, regex_get_filepart_of_string
+
 
 class Temp:
     def __init__(self, md5document) -> None:
         self.md5document = md5document
+
     @property
     def filename(self):
         return os.path.basename(self.path)
+
     @property
     def is_split_required(self):
         return self.md5document["is_split_required"]
@@ -49,7 +52,7 @@ class Temp:
         filedocument = self.filedocuments[0]
         part = filedocument["part"]
 
-        if  part is None and len(self.filedocuments) > 1:
+        if part is None and len(self.filedocuments) > 1:
             raise Exception(
                 "Debe haber un solo filedocument para archivos menores a 2gb")
 
@@ -114,19 +117,21 @@ class Temp:
         path = os.path.join(WORKTABLE, self.md5sum + EXT_YAML)
         with open(path, 'w') as f:
             yaml.dump(self.md5document, f)
-    
+
     def create_fileyaml(self, chat_id):
-        fileyaml={
+        fileyaml = {
             "md5sum": self.md5sum,
             "chat_id": chat_id,
-            "filedocuments":self.filedocuments
+            "files": self.filedocuments,
+            "version": VERSION
         }
-        dirname= os.path.dirname(self.path)
-        path= os.path.join(dirname, self.filename+ EXT_YAML)
+        dirname = os.path.dirname(self.path)
+        name = os.path.splitext(self.filename)[0]
+        path = os.path.join(dirname, name + EXT_YAML)
         with open(path, 'w') as f:
             yaml.dump(fileyaml, f)
         return path
-    
+
     def remove_local_filepart(self, filepart):
         """
         Elimina el filepart local.
@@ -147,7 +152,7 @@ def create_md5document(path, md5sum):
     count_parts = math.ceil(size / FILESIZE_LIMIT)
 
     fileparts = []
-    filedocuments= []
+    filedocuments = []
     return {
         "path": path,
         "mime": mime,
@@ -159,22 +164,31 @@ def create_md5document(path, md5sum):
         "filedocuments": filedocuments,
     }
 
-def check_md5document(md5sum)->bool:
+
+def check_md5document(md5sum) -> bool:
     """
     Comprueba si existe el documento md5sum
     """
-    filename= md5sum + EXT_YAML
-    path= os.path.join(WORKTABLE, filename)
+    filename = md5sum + EXT_YAML
+    path = os.path.join(WORKTABLE, filename)
     if os.path.exists(path):
         return True
     return False
+
 
 def load_md5document(md5sum, **kwargs):
     path = os.path.join(WORKTABLE, md5sum + EXT_YAML)
     if not os.path.exists(path):
         return None
-    with open(path, 'rb') as f:
-        md5document = yaml.load(f, Loader=yaml.FullLoader)
+    try:
+        with open(path, 'rb') as f:
+            md5document = yaml.load(f, Loader=yaml.FullLoader)
+    except ReaderError:
+        print("Error al leer el archivo temporal: " + path)
+        print("Intente subir de nuevo el archivo.")
+        os.remove(path)
+        exit()
+
     md5document.update(kwargs)
     return md5document
 
@@ -185,6 +199,7 @@ def split(temp: Temp, verbose=True) -> list:
     Administra el tema de Split. Decide si es necesario hacer split o no.
     también actualiza hace cambios sobre temp.
     """
+    # TODO: volver process asíncrono para que devuelve las partes que va dividiendo.
     if temp.is_complete_split:
         return temp.fileparts
 
@@ -194,7 +209,7 @@ def split(temp: Temp, verbose=True) -> list:
     output = os.path.join(WORKTABLE, name)
     # split video.mp4 -b 1000000 -d --verbose --numeric-suffixes=2 --suffix-length=1 --additional-suffix=test video.mp4_
     digits = len(str(temp.count_parts))
-    print("[Split]\n",f"{temp.count_parts} partes")
+    print("[Split]\n", f"{temp.count_parts} partes")
     cmd = f'split "{temp.path}" -b {FILESIZE_LIMIT} -d {verbose} --suffix-length={digits} --numeric-suffixes=1 --additional-suffix=-{temp.count_parts} "{output}"'
     #cmd = f'split "{temp.path}" -b {FILESIZE_LIMIT} -d {verbose} "{output}"'
     completedProcess = subprocess.run(cmd, stdout=PIPE, stderr=PIPE)

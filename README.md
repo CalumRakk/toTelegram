@@ -2,33 +2,25 @@
 
 Script para almacenar en Telegram archivos sin importar el tamaño.
 
-**Comandos**
+# Comandos
 
-El siguiente comando se usa para subir archivos a Telegram. Si el archivo supera los limites de Telegram (2 GB) se divide en varias partes. Al finalizar la subida se genera un archivo .yaml
+El siguiente comando se usa para subir un archivo a Telegram.
 
         python toTelegram update myfile.mp4
 
-El archivo .yaml se puede usar para descargar el archivo de Telegram, por ejemplo:
+Si el archivo supera los limites de Telegram (2 GB) se divide en varias partes. Al finalizar la subida siempre se genera un archivo .yaml
+
+El archivo .yaml se puede usar para descargar el archivo subido de una manera más simple.
 
         python toTelegram download myfile.yaml
 
-También se puede comprobar si un archivo ya ha sido subido a Telegram
+El comando «download» también puede recibir uno o una lista de 'enlaces de post de Telegram' para descargar el contenido: 
 
-        python toTelegram check myfile.mp4
+        python toTelegram download https://t.me/1xxxx64760/102 https://t.me/1xxxx64760/103 https://t.me/1xxxx64760/104
 
+<!-- También se puede comprobar si un archivo ya ha sido subido a Telegram
 
-**En caso de no tener el archivo .yaml**
-se puede descargar el contenido pasando un enlace o una lista de enlaces separado con un espacio:
-
-        python toTelegram download "https://t.me/c/1xxxx64760/27"
-
-Para archivos grandes que han sidos dividos en partes por superer los limites de Telegram, el comando download puede recibir el argumento concatenate para volver a unir las partes en un solo archivo una vez se descarguen.
-
-        python toTelegram download "https://t.me/1xxxx64760/2" "https://t.me/1xxxx64760/3" "https://t.me/1xxxx64760/4" -concatenate
-
-o si ya tienes todos los archivos descargados se puede concatenar asi:
-
-        python toTelegram concatenate myfile.mp4_*
+        python toTelegram check myfile.mp4 -->
 
 # config.yaml
 El primer paso es completar el archivo de configuración.

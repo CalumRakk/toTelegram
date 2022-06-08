@@ -1,6 +1,6 @@
 import os.path
 # GB (KB) binary
-
+VERSION= "0.0.1"
 FILESIZE_LIMIT = 2097152000 # 1000000 #2147483648
 EXT_YAML = ".yaml"
 EXT_GZ = ".gz"
