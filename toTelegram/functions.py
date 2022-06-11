@@ -1,33 +1,15 @@
 import re
 import subprocess
 import os
-import re
 from argparse import ArgumentTypeError
-import pickle
-from typing import Union, Dict
 
 from jsonschema import validate, FormatChecker
-import yaml
 import filetype
-from pyrogram.types.messages_and_media.message import Message
-from pyrogram.types.messages_and_media.document import Document
 
-from .constants import (PATH_CONFIG_FILE, PATH_CONFIG_FILE,
-                        PATH_CONFIG_SCHEMA, PATH_CONFIG_TEMPLATE, EXT_PICKLE, WORKTABLE)
-
+from .constants import FILE_NAME_LENGTH_LIMIT
 regex_get_part_of_filepart = re.compile(r'(?<=_)\d+-\d+')
 regex_get_filepart_of_string = re.compile("(?<=').*?(?=')")
-regex_md5sum = re.compile(r'([a-f0-9]{32})')
-
-
-def get_key_value_of_dictionary(dictionay: dict):
-    """
-    Obtiene el valor key de un diccionario, ejemplo:
-    Del siguiente diccionario se obtiene el valor de la clave "key":
-    { "key": "value" }
-    """
-    return list(dictionay.keys())[0]
-
+regex_md5sum = re.compile(r'([a-f0-9]{32})')      
 
 def get_filepart_of_string(string):
     """
@@ -37,7 +19,6 @@ def get_filepart_of_string(string):
     if match:
         return match.group()
 
-
 def get_part_filepart(filepart):
     """
     Obtiene la part de un filepart
@@ -46,118 +27,6 @@ def get_part_filepart(filepart):
     match = regex_get_part_of_filepart.search(str(filepart))
     if match:
         return match.group()
-
-
-def create_filedocument(message: Union[Message, dict], chat_id=False) -> dict:
-    """filedocument
-
-    es un diccionario con los datos del archivo subido a Telegram:
-        { "filename": file_name, "message_id": message_id,"part": part }
-
-    Nota: si file_name de message no tiene parte,se presupone que es archivo completo y part vale None
-    """
-    # el filanem debe ser obtenido del message, no del fileyaml. Esto es debido a que telegram o la api te pueden cambiar el nombre del archivo.
-
-    value = message.media
-    if type(value) == str:
-        document: Document = getattr(message, value)
-    else:
-        document: Document = getattr(message, value.value)
-
-    part = get_part_filepart(document.file_name)
-    file_name = document.file_name
-
-    message_id = message.message_id if getattr(
-        message, "message_id", None) else message.id
-    size= document.file_size
-
-    document = {"filename": file_name, "message_id": message_id, "part": part,"size": size}
-    if chat_id == True:
-        document["chat_id"] = message.chat.id
-    return document
-
-# VALIDADORES DE TIPO
-
-
-def file_name_length(path):
-    # File name length up to 60 characters, others will be trimmed out
-    filename = os.path.basename(path)
-    limit = 55
-    if len(filename) > limit:
-        print("Example:", filename[0:limit])
-        raise ArgumentTypeError(
-            f"The filename is too long - max  {limit} characters")
-
-
-def filepath(path):
-    """
-    Validaor de tipo de argparse
-    """
-    path = path.replace('"', "").replace("'", "")
-
-    path = fr"{path}"
-    if not os.path.isfile(path):
-        raise ArgumentTypeError("The file does not exist: {}".format(path))
-    file_name_length(path)
-    print(os.path.basename(path))
-    return os.path.abspath(path)
-
-
-def check_md5sum(md5sum):
-    """
-    Validaor de tipo de argparse
-    """
-    if not len(md5sum) == 32:
-        raise ArgumentTypeError("The md5sum must be 32 characters long")
-    return md5sum
-
-
-def check_fileyaml_object(md5sum):
-    """
-    Comprueba si existe un objeto fileyaml
-    """
-    filename = md5sum + EXT_PICKLE
-    path = os.path.join(WORKTABLE, filename)
-    if os.path.exists(path):
-        return True
-    return False
-
-
-def load_fileyaml_object(md5sum):
-    """
-    Carga un objecto fileyaml existente de lo contrario da error.
-    """
-    filename = md5sum + EXT_PICKLE
-    path = os.path.join(WORKTABLE, filename)
-    with open(path, 'rb') as file:
-        return pickle.load(file)
-
-
-def get_mime(path):
-    kind = filetype.guess(path)
-    if kind is None:
-        print('Cannot guess file type!')
-        return "idk"
-    return kind.mime
-
-
-def load_config():
-    if os.path.exists(PATH_CONFIG_FILE):
-        with open(PATH_CONFIG_SCHEMA, 'r') as file:
-            schema = yaml.load(file, Loader=yaml.FullLoader)
-
-        with open(PATH_CONFIG_FILE) as f:
-            config = yaml.safe_load(f)
-
-        return schema_validation(schema, config)
-    else:
-        with open(PATH_CONFIG_TEMPLATE, 'r') as file:
-            TEMPLATE = yaml.safe_load(file)
-        with open(PATH_CONFIG_FILE, 'w') as file:
-            yaml.dump(TEMPLATE, file, default_flow_style=False)
-        print("Es necesario configurar el archivo de configuración")
-        exit()
-
 
 def schema_validation(schema, document):
     response = {
@@ -177,7 +46,6 @@ def schema_validation(schema, document):
         exit()
     return document
 
-
 def get_md5sum(path):
     print("[MD5SUM] Generando...")
     #md5sum = str(subprocess.run(["md5sum","--tag", os.path.abspath(path)],capture_output=True).stdout).split("= ")[1].replace("\\n'","")
@@ -186,4 +54,47 @@ def get_md5sum(path):
         md5sum = str(subprocess.run(string, capture_output=True).stdout)
         value = regex_md5sum.search(md5sum).group()
         return value
-    raise Exception("[MD5SUM] No se pudo generar el md5sum")
+    raise Exception("[MD5SUM] El archivo no existe")
+
+# VALIDADORES DE TIPO
+
+def file_name_length(path):
+    # File name length up to 60 characters, others will be trimmed out
+    filename = os.path.basename(path)
+    limit = FILE_NAME_LENGTH_LIMIT
+    if len(filename) > limit:
+        print("Example:", filename[0:limit])
+        raise ArgumentTypeError(
+            f"The filename is too long - max  {limit} characters")
+
+def filepath(path):
+    """
+    Validaor de tipo de argparse
+    """
+    path = path.replace('"', "").replace("'", "")
+
+    path = fr"{path}"
+    if not os.path.isfile(path):
+        raise ArgumentTypeError("The file does not exist: {}".format(path))
+    file_name_length(path)
+    print(os.path.basename(path))
+    return os.path.abspath(path)
+
+def check_md5sum(md5sum,response=".null"):
+    """
+    Validaor de tipo de argparse.
+    si response está presente, devuelve en valor de response en caso de error.
+    """
+    if bool(md5sum)==False or not len(md5sum) == 32:
+        if response!=".null":
+            return response
+        raise ArgumentTypeError("The md5sum must be 32 characters long")
+    
+    return md5sum
+
+def get_mime(path):
+    kind = filetype.guess(path)
+    if kind is None:
+        print('Cannot guess file type!')
+        return "idk"
+    return kind.mime

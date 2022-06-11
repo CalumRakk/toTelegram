@@ -10,3 +10,5 @@
 *test2.py
 *reader_pickles.py
 *.mp4.yaml
+*.vscode/
+*___toTelegram/

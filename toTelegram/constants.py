@@ -1,19 +1,15 @@
 import os.path
-# GB (KB) binary
-VERSION= "0.0.1"
-FILESIZE_LIMIT = 2097152000 # 1000000 #2147483648
+
+VERSION= "0.0.2"
+FILESIZE_LIMIT = 2097152000 # 2500000 #  2097152000 #2147483648
 EXT_YAML = ".yaml"
 EXT_GZ = ".gz"
 EXT_PICKLE = ".pickle"
 
 WORKTABLE = ".temp"
-
-PATH_FILEYAML_TEMPLATE = os.path.join(
-    "toTelegram", "schema", "fileyaml_template.yaml")
-PATH_FILEYAML_SCHEMA = os.path.join(
-    "toTelegram", "schema", "fileyaml_schema.yaml")
-
+# NO CAMBIAR EL LIMITE. TODA LA LÓGICA DEPENDE DE ESTO.
+FILE_NAME_LENGTH_LIMIT=55
 PATH_CONFIG_FILE = os.path.join(".", "config.yaml")
-PATH_CONFIG_TEMPLATE = os.path.join(
-    "toTelegram", "schema", "config_template.yaml")
-PATH_CONFIG_SCHEMA = os.path.join("toTelegram", "schema", "config_schema.yaml")
+
+if not os.path.exists(WORKTABLE):
+    os.mkdir(WORKTABLE)
