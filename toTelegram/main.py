@@ -1,52 +1,92 @@
 import os
-from typing import List
+from typing import List, Union
+
+import yaml
 
 from .file import File
-from .constants import WORKTABLE
-from .telegram import Telegram
+from .constants import WORKTABLE, EXT_YAML, REGEX_MESSAGE_LINK
+from .telegram import TELEGRAM
 from .chunk import Chunk
+from .file_online import File_Online
 
-def download_messages(messages: list, telegram:Telegram):
-    paths = []
-    for message in messages:
-        size = message.size
-        filepart = message.filepart
-        path = os.path.join(WORKTABLE, filepart)
-        if os.path.exists(path) and os.path.getsize(path) == size:
+
+def get_files_online(messagesplus) -> List[File_Online]:
+    files = []
+    for messageplus in messagesplus:
+        file = File_Online(messageplus, messagesplus)
+        if not any(file.filename == item.filename for item in files):
+            files.append(file)
+    return files
+
+
+def get_messages(links):
+    messagesplus = []
+    bad_links = []
+    for link in links:
+        if not REGEX_MESSAGE_LINK.search(link):
+            bad_links.append(link)
             continue
-        paths.append(telegram.client.download_media(message, path="path"))
-    return paths
+        messagesplus.append(TELEGRAM.get_message(link))
+    return messagesplus, bad_links
 
-def update(path,md5sum,**kwargs):
+
+def download_yaml(target: str, output: str):
+    with open(target, "r") as f:
+        document = yaml.load(f, Loader=yaml.UnsafeLoader)
+
+
+def update(path, md5sum, **kwargs):
     file = File(path, md5sum)
     if not file.is_upload_finished:
         if file.exceed_file_size_limit:
-            if not file.is_split_finalized: 
-                file.save()                
-            
-            chunks:List[Chunk]=file.chunks
+            if not file.is_split_finalized:
+                file.split()
+
+            chunks: List[Chunk] = file.chunks
             for chunk in chunks:
                 if not chunk.is_online:
                     chunk.update()
         else:
             file.update()
+        file.create_fileyaml()
+    else:
+        print("File already uploaded")
 
-def download(Links: list, **kwargs):
-    telegram= Telegram()
+
+def download(target: Union[str, list], **kwargs):
+    # TODO: cada parte crea un file , por lo que se itera por partes repetidas.
     output = kwargs.get("output", "")
 
-    messages = [telegram.get_message(link) for link in Links]
+    if type(target) == str and target.endswith(EXT_YAML):
+        # TODO : añadir una funcion para descargar un archivo yml
+        return download_yaml(target, output)
 
-    checked_messages = find_part(messages[0], messages)
-    paths = download_messages(checked_messages["good"], telegram=telegram)
+    messagesplus, bad_links = get_messages(target)
+    incomplete_files = []
+    #files = [File_Online(message, messagesplus) for message in messagesplus]
+    files = get_files_online(messagesplus)
 
-    path = os.path.join(output, filename)
-    if not os.path.exists(output):
-        # hago toda la ruta.
-        pass
+    for file in files:
+        if not file.is_complete:
+            incomplete_files.append(file)
+            continue
+        dst = os.path.join(output, file.filename)
+        temp_path = os.path.join(WORKTABLE, file.filename)
+        if not os.path.exists(dst):
+            paths = file.download()  # descarga tipo split o unsplit.
+            if file.type == "split":
+                with open(temp_path, "wb") as f:
+                    for path in paths:
+                        with open(path, "rb") as p:
+                            for chunk in iter(lambda: p.read(1024 * 8), b''):
+                                f.write(chunk)
+                os.rename(temp_path, dst)
+        else:
+            print("Ya existe el archivo", dst)
 
-    with open(path, "wb") as f:
-        for absolute_path in paths:
-            with open(absolute_path, "rb") as p:
-                for chunk in iter(lambda: p.read(1024 * 8), b''):
-                    f.write(chunk)
+    print("\nArchivos incompletos:", len(incomplete_files))
+    # TODO : imprimer los incompletos en vez de los que se tiene.
+    for index, file in enumerate(incomplete_files):
+        print(f"\t{index+1}")
+        print(f"\tfilename: {file.file_name}\n" + f"\tlink: {file.link}")
+    print("\nLinks incorrectos:", len(bad_links))

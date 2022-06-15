@@ -9,6 +9,6 @@
 *.pickle
 *test2.py
 *reader_pickles.py
-*.mp4.yaml
+*.yaml
 *.vscode/
 *___toTelegram/
