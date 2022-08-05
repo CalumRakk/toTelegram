@@ -8,6 +8,7 @@ from .constants import WORKTABLE, EXT_YAML, REGEX_MESSAGE_LINK
 from .telegram import TELEGRAM
 from .chunk import Chunk
 from .file_online import File_Online
+from .functions import check_of_input
 
 
 def get_files_online(messagesplus) -> List[File_Online]:
@@ -35,25 +36,35 @@ def download_yaml(target: str, output: str):
         document = yaml.load(f, Loader=yaml.UnsafeLoader)
 
 
-def update(path, md5sum, **kwargs):
-    file = File(path, md5sum)
-    if not file.is_upload_finished:
-        if file.exceed_file_size_limit:
-            if not file.is_split_finalized:
-                file.split()
+def update(path, md5sum: str, **kwargs):
+    cut=kwargs.get("cut", False)
+    path= check_of_input(path,cut=cut)
+    for item in path:
+        if type(item)==tuple:
+            print(item)
+            continue
+        
+        print(os.path.basename(item))
+        file = File(item, md5sum)
+        if not file.is_upload_finished:
+            if file.exceed_file_size_limit:
+                if not file.is_split_finalized:
+                    file.split()
 
-            chunks: List[Chunk] = file.chunks
-            for chunk in chunks:
-                if not chunk.is_online:
-                    chunk.update()
+                chunks: List[Chunk] = file.chunks
+                for chunk in chunks:
+                    if not chunk.is_online:
+                        chunk.update()
+                        chunk.remove()
+            else:
+                file.update()
+            file.create_fileyaml()
         else:
-            file.update()
-        file.create_fileyaml()
-    else:
-        print("File already uploaded")
+            print("File already uploaded")
 
 
 def download(target: Union[str, list], **kwargs):
+    # FIXME: Si paso enlaces desordenados la concatenación sale erronea. Toca organizar file.parts y las rutas que devuelve file.download()
     # TODO: cada parte crea un file , por lo que se itera por partes repetidas.
     output = kwargs.get("output", "")
 

@@ -2,7 +2,8 @@ from __future__ import annotations
 import subprocess
 import os
 from argparse import ArgumentTypeError
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Union
+import hashlib
 
 from jsonschema import validate, FormatChecker
 import filetype
@@ -57,42 +58,84 @@ def schema_validation(schema, document):
     return document
 
 
+def get_md5sum_by_hashlib(path):
+    print("GENERANDO MD5SUM")
+    hash_md5 = hashlib.md5()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(4096), b""):
+            hash_md5.update(chunk)
+    return hash_md5.hexdigest()
+
+
 def get_md5sum(path):
     print("[MD5SUM] Generando...")
     #md5sum = str(subprocess.run(["md5sum","--tag", os.path.abspath(path)],capture_output=True).stdout).split("= ")[1].replace("\\n'","")
     if os.path.exists(path):
-        string = fr'md5sum "{path}"'
-        md5sum = str(subprocess.run(string, capture_output=True).stdout)
+        string = fr"{path}"
+        args = ['md5sum', '"', string, '"']
+        md5sum = str(subprocess.run(args, capture_output=True).stdout)
         value = REGEX_MD5SUM.search(md5sum).group()
+
         return value
     raise Exception("[MD5SUM] El archivo no existe")
 
 # VALIDADORES DE TIPO
 
 
-def file_name_length(path):
-    # File name length up to 60 characters, others will be trimmed out
-    filename = os.path.basename(path)
-    limit = FILE_NAME_LENGTH_LIMIT
-    if len(filename) > limit:
-        print("Example:", filename[0:limit])
-        raise ArgumentTypeError(
-            f"The filename is too long - max  {limit} characters")
-
-
-def filepath(path):
+def check_of_input(path: str, cut):
     """
-    Validador de tipo.
+    Valia la longitud del nombre de los archivos.
+    Devuelve una lista de path
     """
     path = path.replace('"', "").replace("'", "")
+    if os.path.exists(path):
+        if os.path.isfile(path):
+            if not check_file_name_length(path):
+                if cut:
+                    return [cut_filename(path)]
+                raise ArgumentTypeError(
+                    f"El nombre del archivo es muy grande - Maximo de caracteres es {FILE_NAME_LENGTH_LIMIT}")
+            return [path]
+            
+        paths = [os.path.join(path, file) for file in os.listdir(path)]
+        for path in paths[:]:
+            if not os.path.isfile(path):
+                paths.remove(path)
+            
+            if path.endswith(".txt") or path.endswith(".yaml") or path.endswith(".yml"):
+                paths.remove(path)
+            
+            if not check_file_name_length(path):
+                if cut:
+                    paths.append(cut_filename(path))
+                paths.remove(path)
+        return paths
 
-    path = fr"{path}"
-    if not os.path.isfile(path):
-        raise ArgumentTypeError("The file does not exist: {}".format(path))
-    file_name_length(path)
-    print(os.path.basename(path))
-    return os.path.abspath(path)
+    raise ArgumentTypeError(f"No existe la ruta: {path}")
 
+
+def check_file_name_length(path) -> Union[str, bool]:
+    """
+    True si el nombre del archivo es menor a FILE_NAME_LENGTH_LIMIT
+    Se incluye la extensión del archivo.
+    """
+    filename = os.path.basename(path)
+    if len(filename) <= FILE_NAME_LENGTH_LIMIT:
+        return True
+    return False
+
+
+def cut_filename(path):
+    folder = os.path.dirname(path)
+    filename: str = os.path.basename(path)
+    ext = os.path.splitext(filename)[1]
+
+    new_name = filename.replace(ext, "")[:FILE_NAME_LENGTH_LIMIT]+ext
+    new_path = os.path.join(folder, new_name)
+    os.rename(path, new_path)
+    with open("files_renamed.txt", "a") as f:
+        f.write(f"{filename} -> {new_name}\n")
+    return new_path
 
 def check_md5sum(md5sum, response=".null"):
     """

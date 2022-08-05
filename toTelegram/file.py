@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, List
 import yaml
 from yaml.reader import ReaderError
 
-from .functions import check_md5sum, get_md5sum, check_md5sum, get_md5sum
+from .functions import check_md5sum, get_md5sum_by_hashlib, check_md5sum, get_md5sum, get_md5sum_by_hashlib
 from .constants import FILESIZE_LIMIT, WORKTABLE, EXT_YAML, VERSION, REGEX_FILEPART_OF_STRING
 from .telegram import Telegram, TELEGRAM
 from .messageplus import Messageplus
@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 
 class File:
     def __init__(self, path: str, md5sum: str = None) -> None:
-        self.md5sum = check_md5sum(md5sum, None) or get_md5sum(path)
+        self.md5sum = check_md5sum(md5sum, None) or get_md5sum_by_hashlib(path)
         object_ = self._load()
         if object_ is None:
             self.is_split_finalized = False
@@ -33,6 +33,7 @@ class File:
             self.save()
         else:
             self.__dict__ = object_.__dict__
+            self.path=os.path.abspath(path)
         # debe ir de último sino, no se añade.
         self.telegram: Telegram = TELEGRAM
 

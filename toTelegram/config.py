@@ -6,6 +6,7 @@ from .constants import PATH_CONFIG_FILE
 
 class Config:
     def __init__(self) -> None:
+        # TODO: atributos deben ser en minúsculas.
         config = self.load()
         if config is None:
             self.USERNAME = "me"

@@ -12,3 +12,4 @@
 *.yaml
 *.vscode/
 *___toTelegram/
+*.txt
