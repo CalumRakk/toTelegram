@@ -96,15 +96,17 @@ def check_of_input(path: str, cut):
                 raise ArgumentTypeError(
                     f"El nombre del archivo es muy grande - Maximo de caracteres es {FILE_NAME_LENGTH_LIMIT}")
             return [path]
-            
+
         paths = [os.path.join(path, file) for file in os.listdir(path)]
         for path in paths[:]:
             if not os.path.isfile(path):
                 paths.remove(path)
-            
+                continue
+
             if path.endswith(".txt") or path.endswith(".yaml") or path.endswith(".yml"):
                 paths.remove(path)
-            
+                continue
+
             if not check_file_name_length(path):
                 if cut:
                     paths.append(cut_filename(path))
@@ -125,6 +127,20 @@ def check_file_name_length(path) -> Union[str, bool]:
     return False
 
 
+def add_num(path):
+    num = 1
+    while True:
+        dirname = os.path.dirname(path)
+        filename = os.path.basename(path)
+        ext = os.path.splitext(filename)[1]
+        name = filename.replace(ext, "")
+
+        new_filename = f"{name} {num}{ext}"
+        new_path = os.path.join(dirname, new_filename)
+        if not os.path.exists(new_path):
+            return new_path
+        num += 1
+
 def cut_filename(path):
     folder = os.path.dirname(path)
     filename: str = os.path.basename(path)
@@ -132,10 +148,17 @@ def cut_filename(path):
 
     new_name = filename.replace(ext, "")[:FILE_NAME_LENGTH_LIMIT]+ext
     new_path = os.path.join(folder, new_name)
-    os.rename(path, new_path)
-    with open("files_renamed.txt", "a") as f:
-        f.write(f"{filename} -> {new_name}\n")
+    try:
+        os.rename(path, new_path)
+        with open("files_renamed.txt", "a") as f:
+            f.write(f"{filename} -> {new_name}\n")
+    except FileExistsError:
+        new_path = add_num(new_path)
+        os.rename(path, new_path)
+        with open("files_renamed.txt", "a") as f:
+            f.write(f"{filename} -> {new_name}\n")
     return new_path
+
 
 def check_md5sum(md5sum, response=".null"):
     """
