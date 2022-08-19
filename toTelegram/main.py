@@ -3,10 +3,9 @@ from typing import List, Union
 
 import yaml
 
-from .file import File
+from .file.file import File
 from .constants import WORKTABLE, EXT_YAML, REGEX_MESSAGE_LINK
-from .telegram import TELEGRAM
-from .chunk import Chunk
+from .file.piece import Chunk
 from .file_online import File_Online
 from .functions import check_of_input
 

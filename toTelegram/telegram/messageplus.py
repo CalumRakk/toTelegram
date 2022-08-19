@@ -3,13 +3,12 @@ import os.path
 from pyrogram.types.messages_and_media.document import Document
 from pyrogram.types.messages_and_media.message import Message
 
-from .functions import get_part_filepart, progress
-from .constants import WORKTABLE
+from ..functions import get_part_filepart, progress
+from ..constants import WORKTABLE
 
 
 class Messageplus:
     def __init__(self, message: Message) -> None:
-
         mediatype = message.media
         if type(mediatype) == str:
             media: Document = getattr(message, mediatype)
@@ -22,7 +21,8 @@ class Messageplus:
         self.size = media.file_size
         self.chat_id = message.chat.id
         self.link = message.link
-
+    def to_json(self) -> dict:
+        return self.__dict__.copy()
     @property
     def telegram(self):
         if getattr(self, "_telegram", None) is None:
@@ -36,17 +36,6 @@ class Messageplus:
             self._message = self.telegram.client.get_messages(
                 self.chat_id, self.message_id)
         return self._message
-
-    def __getstate__(self):
-        # Usado por YAML para serializar el objeto
-        state = self.__dict__.copy()
-        if state.get("link"):
-            del state["link"]
-        if state.get("_telegram"):
-            del state["_telegram"]
-        if state.get("link"):
-            del state["link"]
-        return state
 
     @property
     def part(self):

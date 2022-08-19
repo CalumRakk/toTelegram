@@ -1,13 +1,14 @@
 import os.path
 import re
 
-VERSION = "0.0.3"
+VERSION = "1.0"
 FILESIZE_LIMIT = 2097152000  # 2500000  # 2500000  #2147483648
 EXT_YAML = ".yaml"
 EXT_GZ = ".gz"
 EXT_PICKLE = ".pickle"
+EXT_JSON= ".json"
 
-WORKTABLE = os.path.join("D:\.TEMP","toTelegram") 
+WORKTABLE = os.path.join("D:\.TEMP","toTelegram","test") 
 # NO CAMBIAR EL LIMITE. TODA LA LÓGICA DEPENDE DE ESTO.
 FILE_NAME_LENGTH_LIMIT = 55
 PATH_CONFIG_FILE = os.path.join(".", "config.yaml")

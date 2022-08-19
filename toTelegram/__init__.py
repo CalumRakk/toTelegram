@@ -1,2 +1,2 @@
-from .main import update, download
-from .functions import check_of_input,check_md5sum
+from .file.file import File
+from .file.file import get_file

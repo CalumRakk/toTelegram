@@ -1,7 +1,7 @@
 import os.path
 from typing import List
 
-from .messageplus import Messageplus
+from .telegram.messageplus import Messageplus
 from .constants import WORKTABLE
 
 

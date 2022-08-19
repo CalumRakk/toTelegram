@@ -1,19 +1,12 @@
-from __future__ import annotations
 import subprocess
 import os
 from argparse import ArgumentTypeError
-from typing import TYPE_CHECKING, Union
+from typing import Union
 import hashlib
 
-from jsonschema import validate, FormatChecker
 import filetype
 
-from .constants import FILE_NAME_LENGTH_LIMIT, REGEX_FILEPART_OF_STRING, REGEX_PART_OF_FILEPART, REGEX_MD5SUM
-
-if TYPE_CHECKING:
-    from .messageplus import Messageplus
-    from .telegram import Telegram
-
+from .constants import FILE_NAME_LENGTH_LIMIT, REGEX_FILEPART_OF_STRING, REGEX_PART_OF_FILEPART, REGEX_MD5SUM, VERSION, WORKTABLE,FILESIZE_LIMIT
 
 def progress(current, total):
     print(f"\t\t{current * 100 / total:.1f}%", end="\r")
@@ -38,26 +31,6 @@ def get_part_filepart(filepart):
         return match.group()
     return ""
 
-
-def schema_validation(schema, document):
-    response = {
-        "code": 0,
-        "msm": ""
-    }
-    try:
-        validate(
-            schema=schema,
-            instance=document,
-        )
-        response["msm"] = "the schama is valid"
-    except Exception as ex:
-        response["code"] = -1
-        response["msm"] = str(ex)
-        print(response["msm"])
-        exit()
-    return document
-
-
 def get_md5sum_by_hashlib(path):
     print("GENERANDO MD5SUM")
     hash_md5 = hashlib.md5()
@@ -81,13 +54,13 @@ def get_md5sum(path):
 
 # VALIDADORES DE TIPO
 
-
 def check_of_input(path: str, cut):
     """
     Valia la longitud del nombre de los archivos.
     Devuelve una lista de path
     """
     path = path.replace('"', "").replace("'", "")
+    path= fr"{path}"
     if os.path.exists(path):
         if os.path.isfile(path):
             if not check_file_name_length(path):

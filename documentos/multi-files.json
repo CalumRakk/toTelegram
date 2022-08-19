@@ -1,0 +1,14 @@
+{
+    "filename": "filename.zip",
+    "type": "multi-file",
+    "chat_id": -1001488151006,
+    "message_id": 648,
+    "files":[
+      {
+        "filename": "SORA-385.mp4",
+        "size":51451313315,
+        "md5sum": "md5sum"
+      }
+    ],
+    "version": "1.0"
+}

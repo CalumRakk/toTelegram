@@ -13,3 +13,6 @@
 *.vscode/
 *___toTelegram/
 *.txt
+*test*.py
+!test3.py
+!documentos/
