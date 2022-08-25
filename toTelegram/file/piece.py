@@ -1,21 +1,30 @@
-
+from email.message import Message
+from ..telegram import Messageplus
 from ..functions import get_part_filepart
 
-class Piece:
-    def __init__(self, json_data: dict):
-        self.path = json_data["path"]
-        self.filename= json_data["filename"]
-        self.message= json_data.get("message", None)
-    
-    @property
-    def part(self)->str:
-        return get_part_filepart(self.path)
-    
-    def to_json(self)->dict:
-        return {
-            "path": self.path,
-            "filename": self.filename,
-            "message": self.message.to_json() if self.message else None
-        }
-        
 
+class Piece:
+    def __init__(self, path, filename, size, message: Messageplus = None):
+        self.path = path
+        self.filename = filename
+        self.size = size
+        self.message = message
+
+    def to_json(self):
+        filedocument = self.__dict__.copy()
+        filedocument["message"] =self.message.to_json() if type(self.message) == Messageplus else self.message
+        return filedocument
+
+    def to_fileyaml(self):
+        filename= self.filename
+        size= self.size
+        message= self.message.to_json() if type(self.message) == Messageplus else self.message
+        return {
+            "filename":filename,
+            "size": size,
+            "message": message
+        }
+
+    @property
+    def part(self) -> str:
+        return get_part_filepart(self.path)

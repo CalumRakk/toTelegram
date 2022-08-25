@@ -91,7 +91,7 @@ def check_of_input(path: str, cut):
 
 def check_file_name_length(path) -> Union[str, bool]:
     """
-    True si el nombre del archivo es menor a FILE_NAME_LENGTH_LIMIT
+    True si el nombre del archivo es menor a FILE_NAME_LENGTH_LIMIT\n
     Se incluye la extensión del archivo.
     """
     filename = os.path.basename(path)

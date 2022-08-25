@@ -1,4 +1,5 @@
 import os.path
+from typing import Union
 
 from pyrogram.types.messages_and_media.document import Document
 from pyrogram.types.messages_and_media.message import Message
@@ -23,6 +24,13 @@ class Messageplus:
         self.link = message.link
     def to_json(self) -> dict:
         return self.__dict__.copy()
+    
+    def download(self) -> str:
+        path = os.path.join(WORKTABLE, self.file_name)
+        if os.path.exists(path) and os.path.getsize(path) == self.size:
+            return path
+        return self.message.download(file_name=path, progress=progress)
+    
     @property
     def telegram(self):
         if getattr(self, "_telegram", None) is None:
@@ -45,8 +53,4 @@ class Messageplus:
     def filename(self):
         return self.file_name.replace("_"+self.part, "")
 
-    def download(self) -> str:
-        path = os.path.join(WORKTABLE, self.file_name)
-        if os.path.exists(path) and os.path.getsize(path) == self.size:
-            return path
-        return self.message.download(file_name=path, progress=progress)
+

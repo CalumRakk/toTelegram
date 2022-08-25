@@ -50,3 +50,4 @@ class Telegram(Config):
         message = self.client.get_messages(chat_id, iD)
         return Messageplus(message)
 
+telegram= Telegram()
