@@ -10,7 +10,7 @@ from ..functions import get_md5sum_by_hashlib
 
 class File:
     def __init__(self, path: Union[Path, str], md5sum=True):
-        self.path = getattr(path, "_str", None) or path
+        self.path = str(path)
         self.filename = getattr(path, "name", None) or os.path.basename(path)
         self.suffix = getattr(
             path, "suffix", None) or os.path.splitext(self.filename)[1]

@@ -35,7 +35,7 @@ class Piecesfile:
         """
         if self.pieces:
             for piece in self.pieces:
-                if piece.message == False:
+                if bool(piece.message) == False:
                     return False
             return True
         return False
@@ -59,9 +59,10 @@ class Piecesfile:
         if json_data:
             json_pieces: dict = json_data["pieces"]
             for json_piece in json_pieces:
-                path = json_data["path"]
+                path = json_piece["path"]
                 filename = json_piece["filename"]
                 size = json_piece["size"]
+                md5sum= json_piece["md5sum"]
                 message = None
 
                 json_message = json_piece["message"]
@@ -70,7 +71,7 @@ class Piecesfile:
                     message = telegram.get_message(link)
 
                 piece = Piece(path=path, filename=filename,
-                              size=size, message=message)
+                              size=size, md5sum=md5sum, message=message)
                 pieces.append(piece)
         return pieces
 

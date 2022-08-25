@@ -33,6 +33,8 @@ class Telegram(Config):
         # ValueError
         # pyrogram.errors.exceptions.bad_request_400.UsernameInvalid
         # caption= filepart if temp.exceed_file_size_limit else ""
+        if caption==filename:
+            caption=""
         message = self.client.send_document(
             chat_id=self.CHAT_ID,
             document=path,

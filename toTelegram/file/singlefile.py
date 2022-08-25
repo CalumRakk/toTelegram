@@ -52,7 +52,7 @@ class Singlefile:
 
     def to_json(self):
         filedocument = self.file.to_json()
-        filedocument["message"] = None if self.message is None else self.message.to_json()
+        filedocument["message"] = None if self.message == None else self.message.to_json()
         return filedocument
 
     def to_fileyaml(self):
