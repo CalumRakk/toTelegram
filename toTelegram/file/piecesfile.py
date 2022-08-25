@@ -11,13 +11,13 @@ from ..constants import FILESIZE_LIMIT, WORKTABLE, REGEX_FILEPART_OF_STRING, EXT
 from .piece import Piece
 from .file import File
 from ..telegram import Telegram, Messageplus, telegram
-from ..functions import check_file_name_length
 
 
 class Piecesfile:
     def __init__(self, file: File) -> None:
         self.file = file
         self.pieces = self._load_pieces(telegram)
+
     @property
     def is_split_finalized(self):
         """
@@ -26,18 +26,20 @@ class Piecesfile:
         if self.pieces:
             return True
         return False
+
     @property
-    def is_finalized(self): 
+    def is_finalized(self):
         """
         True si todas las piezas han sido subido.
         False si el atributo pieces es una lista vacia o alguna pieza no ha sido subido.
         """
-        if self.pieces:       
+        if self.pieces:
             for piece in self.pieces:
-                if piece.message==False:
+                if piece.message == False:
                     return False
-            return True      
-        return False                    
+            return True
+        return False
+
     def save(self):
         filename = str(self.file.dev) + "-" + str(self.file.inodo) + EXT_JSON
         path = os.path.join(WORKTABLE, filename)
@@ -65,7 +67,7 @@ class Piecesfile:
                 json_message = json_piece["message"]
                 if json_message:
                     link = json_message["link"]
-                    message = Messageplus(telegram.get_message(link))
+                    message = telegram.get_message(link)
 
                 piece = Piece(path=path, filename=filename,
                               size=size, message=message)
@@ -78,11 +80,11 @@ class Piecesfile:
         """
         # TODO: volver process asíncrono para que devuelve las partes que va dividiendo.
         print("[Split]...\n")
-                
-        name = self.file.md5sum + self.file.suffix + "_" 
-        if not check_file_name_length(self.file.path):        
-            name = self.file.filename + "_" 
-        
+
+        # name = self.file.md5sum + self.file.suffix + "_"
+        # if not check_file_name_length(self.file.path):
+        #     name = self.file.filename + "_"
+        name = self.file.filename + "_"
         output = os.path.join(WORKTABLE, name)
         count_part = math.ceil(self.file.size / FILESIZE_LIMIT)
         digits = len(str(count_part))
@@ -106,7 +108,8 @@ class Piecesfile:
         for filepart in fileparts:
             path = os.path.join(WORKTABLE, filepart)
             size = os.path.getsize(path)
-            piece = Piece(path=path, filename=filepart, size=size)
+            piece = Piece(path=path, filename=filepart,
+                          size=size, md5sum=self.file.md5sum)
             pieces.append(piece)
         return pieces
 
@@ -135,4 +138,4 @@ class Piecesfile:
         name = filename.replace(ext, "") + EXT_YAML
         path = os.path.join(dirname, name)
         with open(path, "w") as file:
-            yaml.dump(json_data, file,sort_keys=False)
+            yaml.dump(json_data, file, sort_keys=False)

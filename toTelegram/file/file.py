@@ -22,9 +22,9 @@ class File:
         self.type = "pieces-file" if self.size > FILESIZE_LIMIT else "single-file"
 
         json_data = self._load_file()
-        self.md5sum = json_data.get('size') or get_md5sum_by_hashlib(
+        self.md5sum = json_data.get('md5sum') or get_md5sum_by_hashlib(
             self.path) if md5sum == True else None
-        self.version = json_data.get('size') or VERSION
+        self.version = json_data.get('version') or VERSION
 
     def _load_file(self):
         filename = self.inodo_name + EXT_JSON

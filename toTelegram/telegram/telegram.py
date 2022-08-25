@@ -1,5 +1,4 @@
 from __future__ import annotations
-import os.path
 
 from pyrogram import Client  # pip install pyrogram
 from pyrogram.types.messages_and_media.message import Message
@@ -30,17 +29,15 @@ class Telegram(Config):
             self.is_client_initialized = True
         return self._client
 
-    def update(self, path: str, caption=None) -> Message:
+    def update(self, path: str, caption: str, filename: str) -> Message:
         # ValueError
         # pyrogram.errors.exceptions.bad_request_400.UsernameInvalid
         # caption= filepart if temp.exceed_file_size_limit else ""
-        filename = os.path.basename(path)
-
         message = self.client.send_document(
             chat_id=self.CHAT_ID,
             document=path,
             file_name=filename,
-            caption=filename if caption else "",
+            caption=caption,
             progress=progress)
         return Messageplus(message)
 

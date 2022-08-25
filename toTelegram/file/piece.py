@@ -1,15 +1,16 @@
+import os
+
 from email.message import Message
 from ..telegram import Messageplus
-from ..functions import get_part_filepart
-
+from ..functions import get_part_filepart, check_file_name_length
 
 class Piece:
-    def __init__(self, path, filename, size, message: Messageplus = None):
+    def __init__(self, path, filename, size, md5sum, message: Messageplus = None):
         self.path = path
         self.filename = filename
         self.size = size
         self.message = message
-
+        self.md5sum= md5sum
     def to_json(self):
         filedocument = self.__dict__.copy()
         filedocument["message"] =self.message.to_json() if type(self.message) == Messageplus else self.message
@@ -24,7 +25,12 @@ class Piece:
             "size": size,
             "message": message
         }
-
+    @property
+    def filename_for_telegram(self):
+        if check_file_name_length(self.filename):        
+            return self.filename
+        suffix= os.path.splitext(self.filename)[1]
+        return  self.md5sum + suffix 
     @property
     def part(self) -> str:
         return get_part_filepart(self.path)

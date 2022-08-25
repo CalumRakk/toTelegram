@@ -91,7 +91,7 @@ def check_of_input(path: str, cut):
 
 def check_file_name_length(path) -> Union[str, bool]:
     """
-    True si el nombre del archivo es menor a FILE_NAME_LENGTH_LIMIT\n
+    True si el nombre del archivo no pasa el limite de caracteres de telegram para el filename\n
     Se incluye la extensión del archivo.
     """
     filename = os.path.basename(path)
