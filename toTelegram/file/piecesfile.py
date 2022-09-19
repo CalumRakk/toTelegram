@@ -7,16 +7,19 @@ from pathlib import Path
 
 import yaml
 
-from ..constants import FILESIZE_LIMIT, WORKTABLE, REGEX_FILEPART_OF_STRING, EXT_JSON, EXT_YAML
-from .piece import Piece
+from ..constants import FILESIZE_LIMIT, WORKTABLE, REGEX_FILEPART_OF_STRING, EXT_JSON, EXT_YAML,VERSION
+from .singlefile import Singlefile
+from ..telegram import Messageplus
 from .file import File
-from ..telegram import Telegram, Messageplus, telegram
 
 
 class Piecesfile:
-    def __init__(self, file: File) -> None:
+    def __init__(self,
+                 file: File,
+                 pieces: List[Singlefile]=[]
+                 ):
         self.file = file
-        self.pieces = self._load_pieces(telegram)
+        self.pieces = pieces
 
     @property
     def is_split_finalized(self):
@@ -40,42 +43,36 @@ class Piecesfile:
             return True
         return False
 
-    def save(self):
-        filename = str(self.file.dev) + "-" + str(self.file.inodo) + EXT_JSON
+    def save(self,version=True):
+        filename = self.file.inodo_name + EXT_JSON
         path = os.path.join(WORKTABLE, filename)
-        json_data = self.to_json()
-
+        document= self.__dict__.copy()
+        if version:            
+            document["version"]= VERSION 
         with open(path, "w") as file:
-            json.dump(json_data, file)
+            json.dump(document,file, default= lambda x: x.to_json())
 
     def to_json(self):
-        filedocument = self.file.to_json()
-        filedocument["pieces"] = [piece.to_json() for piece in self.pieces]
-        return filedocument
+        document = self.__dict__.copy()
+        document["file"]= self.file.to_json()
+        document["pieces"] = [piece.to_json() for piece in self.pieces]
+        return document
 
-    def _load_pieces(self, telegram: Telegram):
-        json_data = self.file._load_file()
+    def load(self):
+        """
+        
+        """
+        json_data = self.file._load()
         pieces = []
         if json_data:
-            json_pieces: dict = json_data["pieces"]
-            for json_piece in json_pieces:
-                path = json_piece["path"]
-                filename = json_piece["filename"]
-                size = json_piece["size"]
-                md5sum= json_piece["md5sum"]
-                message = None
+            for document in json_data["pieces"]:
+                file= File(**document["file"])
+                message= Messageplus(**document["message"]) if document["message"] else None
+                pieces.append(Singlefile(file, message))
+        self.pieces= pieces
+        return self
 
-                json_message = json_piece["message"]
-                if json_message:
-                    link = json_message["link"]
-                    message = telegram.get_message(link)
-
-                piece = Piece(path=path, filename=filename,
-                              size=size, md5sum=md5sum, message=message)
-                pieces.append(piece)
-        return pieces
-
-    def split(self) -> List[Piece]:
+    def split(self) -> List[Singlefile]:
         """
         Divide el archivo en partes al limite de Telegram
         """
@@ -109,10 +106,9 @@ class Piecesfile:
         for filepart in fileparts:
             path = os.path.join(WORKTABLE, filepart)
             size = os.path.getsize(path)
-            piece = Piece(path=path, filename=filepart,
-                          size=size, md5sum=self.file.md5sum)
-            pieces.append(piece)
-        return pieces
+            singlefile = Singlefile(File(path,md5sum=False))
+            pieces.append(singlefile)
+        self.pieces=pieces
 
     def to_fileyaml(self):
         filename = self.file.filename
@@ -131,12 +127,12 @@ class Piecesfile:
         }
 
     def create_fileyaml(self, path: Union[str, Path]):
-        json_data = self.to_fileyaml()
-        filename = getattr(path, "name", None) or os.path.basename(path)
-        dirname = str(getattr(path, "parent", None)) or os.path.dirname(path)
+        # json_data = self.to_fileyaml()
+        filename = os.path.basename(self.file.filename)
+        dirname = os.path.dirname(self.file.path)
         ext = getattr(path, "suffix", None) or os.path.splitext(path)[1]
 
         name = filename.replace(ext, "") + EXT_YAML
         path = os.path.join(dirname, name)
         with open(path, "w") as file:
-            yaml.dump(json_data, file, sort_keys=False)
+            yaml.dump(self.to_json(), file, sort_keys=False)

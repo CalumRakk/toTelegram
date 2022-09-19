@@ -1,4 +1,4 @@
-**toTelegram**
+
 
 Script para almacenar en Telegram archivos sin importar el tamaño.
 
@@ -20,3 +20,5 @@ Para descargar un archivo subido se usa el domando download.
 El comando download puede recibir la ruta del archivo .yaml generado 
 
         python toTelegram download myfile.yaml
+
+Inspirado en los tar incrementales, los backups concatables también usan un archivo .snac para saber cuales archivos requieren backups.

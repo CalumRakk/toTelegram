@@ -1,13 +1,15 @@
 import os.path
 import re
 
-VERSION = "1.0"
-FILESIZE_LIMIT = 2097152000  # 2500000  # 2500000  #2147483648
+VERSION = "2.0"
+FILESIZE_LIMIT = 2097152000 #2500000 #     # 2500000  #2147483648
 EXT_YAML = ".yaml"
 EXT_GZ = ".gz"
 EXT_PICKLE = ".pickle"
 EXT_JSON= ".json"
+EXT_TAR= ".tar"
 
+FILE_NOT_FOUND="Archivo no encontrado"
 WORKTABLE = os.path.join("D:\.TEMP","toTelegram","test") 
 # NO CAMBIAR EL LIMITE. TODA LA LÓGICA DEPENDE DE ESTO.
 FILE_NAME_LENGTH_LIMIT = 55
@@ -19,4 +21,4 @@ REGEX_MD5SUM = re.compile(r'([a-f0-9]{32})')
 REGEX_MESSAGE_LINK = re.compile(r'(?<=https://t.me/c/).*?(?=/)')
 
 if not os.path.exists(WORKTABLE):
-    os.mkdir(WORKTABLE)
+    os.makedirs(WORKTABLE)
