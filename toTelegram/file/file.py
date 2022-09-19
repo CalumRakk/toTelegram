@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from typing import Union,Optional
 
-from ..constants import VERSION, FILESIZE_LIMIT, WORKTABLE, EXT_JSON,FILE_NOT_FOUND
+from ..constants import VERSION, FILESIZE_LIMIT, WORKTABLE, EXT_JSON,FILE_NOT_FOUND,BACKUP
 from ..functions import get_md5sum_by_hashlib
 
 
@@ -23,18 +23,21 @@ class File:
     def __init__(self, 
             path: Optional[Union[Path, str]]=None, # 
             filename:Optional[str]=None,
-            suffix: Optional[str]=None,
+            # suffix: Optional[str]=None,
             size: Optional[int]=None,
             md5sum: Optional[Union[str,bool]]=True, # Por defecto los files no generan el md5sum a menos que se establezca en True
             # version: Optional[str]=None, 
         ):
         self._path = path if type(path) == str else str(path)         
         self.filename = filename or os.path.basename(self.path)
-        self.suffix= suffix or self.Path.suffix
+        # self.suffix= suffix or self.Path.suffix
         self.size = size or self.stat_result.st_size
         self.md5sum = self.get_md5sum(md5sum)
         # self.version = version or VERSION
     
+    @property
+    def suffix(self):
+        return self.Path.suffix        
     @property
     def Path(self):
         if self.exists:            
@@ -48,10 +51,11 @@ class File:
         if not getattr(self, '_exists',False):
             self._exists= os.path.exists(self._path)
             if self._exists==False:
-                build_path= os.path.join(os.path.join(WORKTABLE,self.filename))
-                if os.path.exists(build_path):
-                    self._path= build_path
-                    self._exists=True
+                for folder in [WORKTABLE, BACKUP]:
+                    build_path= os.path.join(folder, self.filename)
+                    if os.path.exists(build_path):
+                        self._path= build_path
+                        self._exists=True
         return self._exists
     @property
     def type(self):

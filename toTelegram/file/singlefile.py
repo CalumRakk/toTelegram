@@ -76,7 +76,9 @@ class Singlefile:
         path = os.path.join(dirname, name)
         with open(path, "w") as file:
             yaml.dump(self.to_json(), file, sort_keys=False)
-    
+    @property
+    def type(self):
+        return self.file.type
     @property
     def filename(self):
         return self.file.filename        

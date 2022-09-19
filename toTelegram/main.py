@@ -1,10 +1,37 @@
-from pathlib import Path
+
+from .folder.folder import Folder
 import os
+from . import File, Piecesfile, Singlefile
 
-from . import File, Piecesfile, Singlefile, telegram
-
-# TODO: ELIMINAR LA PIEZA DEL PC CUANDO SE SUBA.
-
+def concatenate(args):
+    path=args.path
+    path_snapshot= args.snapshot or os.path.join(os.path.dirname(path), os.path.basename(path) + ".snar")  
+    
+    folder= Folder(path,path_snapshot)
+    if folder.is_new:
+        files= folder.get_files()            
+        folder.create_backup(files)
+        folder.save()
+        # if get_bytes(files) > x:      
+        #     folder.create_backup(files)
+        #     folder.save()
+            
+    for backup in folder.backups:
+        if backup.file.type=="pieces-file":        
+            if not backup.file.is_split_finalized:
+                backup.file.split()
+                folder.save()
+                
+            for piece in backup.file.pieces:
+                if not piece.message:
+                    piece.update(remove=True)
+                    folder.save()
+        else:  
+            if not backup.file.message:
+                backup.update(remove=True)
+                folder.save()
+    
+    
 
 def update(path):
     file = File(path) # File(path).load()
@@ -26,37 +53,3 @@ def update(path):
             singlefile.update()
             singlefile.save()
         singlefile.create_fileyaml(path)
-        
-        
-# def update(path):
-#     path = Path(path)
-#     paths = [i for i in path.glob("*.*")] if path.is_dir() else [path]
-#     for path in paths:
-#         if path.suffix in [".yaml",".json",".xml",".jpg",".png",".gif",".svg",".ico",".icov"]:
-#             continue
-#         file = File(path)
-#         if file.type == "pieces-file":
-#             piecesfile = Piecesfile(file)
-#             if not piecesfile.is_finalized:
-#                 if not piecesfile.is_split_finalized:
-#                     pieces = piecesfile.split()
-#                     piecesfile.pieces = pieces
-#                     piecesfile.save()
-#                 for piece in piecesfile.pieces:
-#                     if piece.message==None:
-#                         caption = piece.filename
-#                         filename = piece.filename_for_telegram
-#                         piece.message = telegram.update(
-#                             piece.path, caption=caption, filename=filename)
-#                         os.remove(piece.path)
-#                         piecesfile.save()
-#             piecesfile.create_fileyaml(path)
-#         else:
-#             singlefile = Singlefile(file)
-#             if not singlefile.is_finalized:
-#                 filename = singlefile.filename_for_telegram
-#                 caption = singlefile.file.filename
-#                 singlefile.message = telegram.update(
-#                     path=path, filename=filename, caption=caption)
-#                 singlefile.save()
-#             singlefile.create_fileyaml(path)

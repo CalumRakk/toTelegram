@@ -20,7 +20,9 @@ class Piecesfile:
                  ):
         self.file = file
         self.pieces = pieces
-
+    @property
+    def type(self):
+        return self.file.type
     @property
     def is_split_finalized(self):
         """
