@@ -13,9 +13,9 @@ class Multifile:
                  size: Optional[int] = None,
                  md5sum: Optional[str] = None
                  ):
-        self.path = str(path) if type(path)==Path else path 
-        self.size = size or os.stat(self.path).st_size
-        self.md5sum = md5sum or get_md5sum_by_hashlib(self.path)
+        self.path = path 
+        self.size = size or os.path.getsize(self.path)
+        self.md5sum = md5sum or get_md5sum_by_hashlib(path,mute=True)
 
     def to_json(self):
         document = self.__dict__.copy()

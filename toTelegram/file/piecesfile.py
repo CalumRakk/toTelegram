@@ -4,6 +4,7 @@ import os
 import json
 from typing import List, Union
 from pathlib import Path
+import asyncio
 
 import yaml
 
@@ -20,6 +21,9 @@ class Piecesfile:
                  ):
         self.file = file
         self.pieces = pieces
+    @property
+    def path(self):
+        return self.file.path
     @property
     def type(self):
         return self.file.type
@@ -107,7 +111,6 @@ class Piecesfile:
         pieces = []
         for filepart in fileparts:
             path = os.path.join(WORKTABLE, filepart)
-            size = os.path.getsize(path)
             singlefile = Singlefile(File(path,md5sum=False))
             pieces.append(singlefile)
         self.pieces=pieces

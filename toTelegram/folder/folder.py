@@ -1,3 +1,4 @@
+import enum
 import os
 import tarfile
 import json
@@ -24,14 +25,15 @@ class Folder:
                  ):
         self.folder = str(path)
         self.snapshot = str(snapshot)
-        self._json_date = self._load()
-        self.backups = self._get_backups() or backups
+
+        self.backups = self._get_backups()
         self.version = version
 
     def _get_backups(self):
         backups = []
-        if self._json_date.get("backups"):
-            for backup_document in self._json_date["backups"]:
+        json_data= self._load().get("backups")
+        if json_data:
+            for backup_document in json_data:
                 file_document: dict = backup_document["file"]["file"]
                 files_document: list = backup_document["files"]
                 files = [Multifile(**document)
@@ -82,9 +84,14 @@ class Folder:
             res.extend([os.path.join(dir_path, filename)
                        for filename in file_names])
         files=[]
-        for path in res:
+        count_files=len(files)
+        print("Generando md5sum de files")
+        for index,path in enumerate(res):
+            index+=1
+            print(f"{index}/{count_files}",end='\r')
             file=Multifile(path)
             files.append(file)
+        print("Done.")
         return files
 
     def to_json(self):

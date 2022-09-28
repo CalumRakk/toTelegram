@@ -14,7 +14,7 @@ WORKTABLE = os.path.join("D:\.TEMP","toTelegram","test")
 BACKUP= os.path.join(WORKTABLE,"backups") 
 # NO CAMBIAR EL LIMITE. TODA LA LÓGICA DEPENDE DE ESTO.
 FILE_NAME_LENGTH_LIMIT = 55
-PATH_CONFIG_FILE = os.path.join(".", "config.yaml")
+PATH_CONFIG_FILE = os.path.join("setting", "config.yaml")
 
 REGEX_PART_OF_FILEPART = re.compile(r'(?<=_)\d+-\d+')
 REGEX_FILEPART_OF_STRING = re.compile("(?<=').*?(?=')")

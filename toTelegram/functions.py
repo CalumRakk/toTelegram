@@ -31,8 +31,9 @@ def get_part_filepart(filepart):
         return match.group()
     return ""
 
-def get_md5sum_by_hashlib(path):
-    print("GENERANDO MD5SUM")
+def get_md5sum_by_hashlib(path,mute=True):
+    if mute:
+        print("GENERANDO MD5SUM")
     hash_md5 = hashlib.md5()
     with open(path, "rb") as f:
         for chunk in iter(lambda: f.read(4096), b""):

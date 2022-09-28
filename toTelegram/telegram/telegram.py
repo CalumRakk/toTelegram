@@ -14,7 +14,7 @@ class Telegram(Config):
         self.is_client_initialized = False
 
     def _start(self):
-        client = Client(self.USERNAME, self.API_ID, self.API_HASH)
+        client = Client(self.USERNAME, self.API_ID, self.API_HASH,workdir= "setting")
         client.start()
         return client
 
