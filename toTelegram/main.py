@@ -43,7 +43,7 @@ def concatenate(args):
 def update(path):
     path= Path(path)
         
-    paths= path.glob("*.") if path.is_dir() else [path]
+    paths= path.glob("*.*") if path.is_dir() else [path]
         
     for path in paths:        
         file = File(path) # File(path).load()
@@ -56,8 +56,10 @@ def update(path):
                 
                 for piece in piecesfile.pieces:
                     if piece.message==None:
-                        piecesfile.update(remove=True)
+                        piece.update()
+                        os.remove(piece.file.path)
                         piecesfile.save()
+                    
             piecesfile.create_fileyaml(path)
         else:
             singlefile = Singlefile(file).load().save()
@@ -65,3 +67,6 @@ def update(path):
                 singlefile.update()
                 singlefile.save()
             singlefile.create_fileyaml(path)
+     
+
+      
