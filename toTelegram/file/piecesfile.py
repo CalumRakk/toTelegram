@@ -86,14 +86,29 @@ class Piecesfile:
         if len(pieces) == 0:
             json_data = self.file._load()
             if json_data:
-                for document in json_data["pieces"]:   
-                    file_document= document["file"]
-                    filename=file_document["filename"]
+                # for piece_document in json_data["pieces"]:   
+                #     file_document= document["file"]
+                #     filename=file_document["filename"]
+                #     path= os.path.join(WORKTABLE,filename)                      
+                #     size= file_document["size"]   
+                #     md5sum= self.file.md5sum     
+                #     message = Messageplus(
+                #         **document["message"]) if document["message"] else None
+
+                #     piece= Piece(path=path, filename=filename,size=size, message=message, md5sum=md5sum)
+                #     pieces.append(piece)
+                for piece_document in json_data["pieces"]:   
+                    if piece_document.get("file"):
+                        message_document= piece_document["message"]
+                        piece_document= piece_document["file"]
+                    else:
+                        message_document= piece_document["message"]
+                    filename=piece_document["filename"]
                     path= os.path.join(WORKTABLE,filename)                      
-                    size= file_document["size"]   
+                    size= piece_document["size"]   
                     md5sum= self.file.md5sum     
                     message = Messageplus(
-                        **document["message"]) if document["message"] else None
+                        **message_document) if message_document else None
 
                     piece= Piece(path=path, filename=filename,size=size, message=message, md5sum=md5sum)
                     pieces.append(piece)
