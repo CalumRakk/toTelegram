@@ -108,7 +108,7 @@ class File:
                     return json.load(f)
             except JSONDecodeError:
                 pass
-        return {}
+        return None
 
     def to_json(self):
         """
