@@ -1,8 +1,10 @@
 
-from .folder.folder import Folder
 import os
-from . import File, Piecesfile, Singlefile
 from pathlib import Path
+
+from . import File, Piecesfile, Singlefile
+from .folder.folder import Folder
+
 
 def concatenate(args):
     path=args.path

@@ -1,11 +1,12 @@
+import json
 import os
 from json.decoder import JSONDecodeError
-import json
 from pathlib import Path
-from typing import Union,Optional
+from typing import Optional, Union
 
-from ..constants import VERSION, FILESIZE_LIMIT, WORKTABLE, EXT_JSON
+from ..constants import EXT_JSON, FILESIZE_LIMIT, VERSION, WORKTABLE
 from ..functions import get_md5sum_by_hashlib
+
 
 class Multifile:
     def __init__(self,

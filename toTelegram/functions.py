@@ -1,12 +1,15 @@
-import subprocess
+import hashlib
 import os
+import subprocess
 from argparse import ArgumentTypeError
 from typing import Union
-import hashlib
 
 import filetype
 
-from .constants import FILE_NAME_LENGTH_LIMIT, REGEX_FILEPART_OF_STRING, REGEX_PART_OF_FILEPART, REGEX_MD5SUM, VERSION, WORKTABLE,FILESIZE_LIMIT
+from .constants import (FILE_NAME_LENGTH_LIMIT, FILESIZE_LIMIT,
+                        REGEX_FILEPART_OF_STRING, REGEX_MD5SUM,
+                        REGEX_PART_OF_FILEPART, VERSION, WORKTABLE)
+
 
 def progress(current, total):
     print(f"\t\t{current * 100 / total:.1f}%", end="\r")

@@ -1,20 +1,37 @@
-import shutil
-import os
-import tarfile
+
 import json
+import os
+import shutil
+import tarfile
 from json.decoder import JSONDecodeError
 from typing import List, Optional
 
+from ..constants import EXT_TAR, VERSION, WORKTABLE
 from ..file.file import File
+from ..file.piece import Piece
 from ..file.piecesfile import Piecesfile
 from ..file.singlefile import Singlefile
-from ..file.piece import Piece
-from ..telegram.messageplus import Messageplus
 from ..telegram import telegram
-
+from ..telegram.messageplus import Messageplus
 from .backup import Backup
-from ..constants import EXT_TAR, WORKTABLE, VERSION
 from .multifile import Multifile
+
+
+class Audio:
+    pass
+
+class Image:
+    def __init__(self, width, height):
+        self.width = width
+        self.height = height
+
+
+class Video(Image):
+    def __init__(self, bitrate,fps, width, height, durationMillis):
+        self.durationMillis = durationMillis
+        self.bitrate = bitrate
+        self.fps= fps
+        super().__init__(width, height)
 
 
 class Folder:
@@ -39,18 +56,19 @@ class Folder:
                 files_document: list = backup_document["files"]
                 files = [Multifile(**document)
                          for document in files_document]
-                
+
                 file = File(**file_document)
                 if file.type == "pieces-file":
                     pieces = []
                     for piece_document in backup_document["file"]["pieces"]:
-                        filename=piece_document["filename"]
-                        path= os.path.join(WORKTABLE,filename)                      
-                        size= piece_document["size"]   
-                        md5sum= file.md5sum     
+                        filename = piece_document["filename"]
+                        path = os.path.join(WORKTABLE, filename)
+                        size = piece_document["size"]
+                        md5sum = file.md5sum
                         message = Messageplus(
                             **piece_document["message"]) if piece_document["message"] else None
-                        piece= Piece(path=path, filename=filename,size=size, message=message, md5sum=md5sum)        
+                        piece = Piece(path=path, filename=filename,
+                                      size=size, message=message, md5sum=md5sum)
                         pieces.append(piece)
 
                     piecesfile = Piecesfile(file, pieces)
@@ -61,7 +79,7 @@ class Folder:
                         **message)
                     file_ = backup_document["file"]["file"]
                     singlefile = Singlefile(File(**file_), messageplus)
-                    backup = Backup(singlefile, files)                
+                    backup = Backup(singlefile, files)
                 backups.append(backup)
         return backups
 
@@ -179,11 +197,21 @@ class Folder:
                     singlefile.message = telegram.update(
                         path, caption=caption, filename=filename)
                     self.save()
-                    os.remove(self.path)
+                    os.remove(singlefile.file.path)
             if os.path.exists(backup.file.path):
                 os.remove(backup.file.path)
+
             if os.path.exists(self.path):
-                source = r"D:\Usuarios\Leo\Escritorio\github Leo\toTelegram\toTelegram\assets\Desktop.ini"
+                source = r"D:\Usuarios\Leo\Escritorio\github Leo\toTelegram\toTelegram\assets\Desktop.txt"
                 out = os.path.join(self.path, "Desktop.ini")
-                shutil.copyfile(source, out)
+                with open(source, "r") as f:
+                    with open(out, "w") as file:
+                        file.write(f.read())
                 os.system(f'attrib +s "{self.path}"')
+
+
+class MediaUpdate:
+    def __init__(self,path):
+        self.path= path
+        self.file = File.fromPath(path)
+    

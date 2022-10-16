@@ -1,5 +1,6 @@
 import argparse
-from toTelegram import update,concatenate
+
+from toTelegram import concatenate, update
 
 parser = argparse.ArgumentParser()
 subparsers = parser.add_subparsers(dest='command')

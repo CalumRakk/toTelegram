@@ -1,8 +1,9 @@
 import os
-
 from email.message import Message
+
+from ..functions import check_file_name_length, get_part_filepart
 from ..telegram import Messageplus
-from ..functions import get_part_filepart, check_file_name_length
+
 
 class Piece:
     def __init__(self, path, filename, size, md5sum, message: Messageplus = None):

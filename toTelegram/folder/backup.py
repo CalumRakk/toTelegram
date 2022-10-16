@@ -2,10 +2,10 @@
 import os
 from typing import List, Union
 
-from .multifile import Multifile
-from ..telegram import telegram
 from ..file.piecesfile import Piecesfile
 from ..file.singlefile import Singlefile
+from ..telegram import telegram
+from .multifile import Multifile
 
 
 class Backup:

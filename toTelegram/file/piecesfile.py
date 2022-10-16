@@ -1,16 +1,17 @@
-import subprocess
+import json
 import math
 import os
-import json
-from typing import List, Union
+import subprocess
 from pathlib import Path
+from typing import List, Union
 
 import yaml
 
-from ..constants import FILESIZE_LIMIT, WORKTABLE, REGEX_FILEPART_OF_STRING, EXT_JSON, EXT_YAML, VERSION
-from .piece import Piece
+from ..constants import (EXT_JSON, EXT_YAML, FILESIZE_LIMIT,
+                         REGEX_FILEPART_OF_STRING, VERSION, WORKTABLE)
 from ..telegram import Messageplus, telegram
 from .file import File
+from .piece import Piece
 
 
 class Piecesfile:
