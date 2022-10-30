@@ -7,18 +7,26 @@ from argparse import ArgumentTypeError
 from typing import Union, List
 from datetime import datetime
 
-import humanize
 import exiftool
 import filetype
 import ffmpeg
 
-from .constants import (FILE_NAME_LENGTH_LIMIT, PATH_METADATA,
+from .constants import (FILE_NAME_LENGTH_LIMIT, PATH_METADATA,VERSION,
                         REGEX_FILEPART_OF_STRING, REGEX_MD5SUM,
                         REGEX_PART_OF_FILEPART, PYTHON_DATA_TYPES, PATH_MD5SUM)
 
 EXCLUDE_FOLLOWING_KEY = ["SourceFile", "File:FileName", "File:Directory", "File:FileModifyDate",
                          "File:FileAccessDate", "File:FilePermissions", "File:FileSize", "File:ZoneIdentifier"]
 
+class TemplateSnapshot:
+    def __init__(self,manager):
+        self.kind= manager.kind
+        self.manager= manager
+        self.createdTime= datetime.utcnow()
+        self.version= VERSION
+    def to_json(self):
+        return attributes_to_json(self)
+        
 def get_size_of_files(files):
     """
     Consigue el tamaño en bytes de una lista de instancias de File
@@ -203,8 +211,6 @@ def create_md5sum(path):
 
         return value
     raise Exception("[MD5SUM] El archivo no existe")
-
-# VALIDADORES DE TIPO
 
 
 def check_of_input(path: str, cut):

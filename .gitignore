@@ -1,7 +1,7 @@
 
 
 __pycache__
-/.venv
+.venv
 /.vscode
 /documentos
 /setting
@@ -11,7 +11,12 @@ __pycache__
 /me.session
 /README.md
 /test.py
+config.yaml
+*.txt
 
 !toTelgram/
 /.toTelegram_old
 /.ELIMINAR
+/tests
+!/split
+!/requirements.txt

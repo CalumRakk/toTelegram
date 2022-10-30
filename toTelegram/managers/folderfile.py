@@ -6,8 +6,8 @@ import tarfile
 from json.decoder import JSONDecodeError
 from typing import List, Optional
 
-from ..constants import EXT_TAR, PATH_BACKUPS, VERSION, WORKTABLE, EXT_JSON_XZ, MINIMUM_SIZE_TO_BACKUP
-from ..functions import attributes_to_json, get_all_files_in_directory, get_size_of_files
+from ..constants import EXT_TAR, PATH_BACKUPS, EXT_JSON_XZ, MINIMUM_SIZE_TO_BACKUP
+from ..functions import attributes_to_json, get_all_files_in_directory, get_size_of_files, TemplateSnapshot
 from ..file import SubFile, File
 from .singlefile import SingleFile
 from .piecesfile import PiecesFile
@@ -69,7 +69,7 @@ class FolderFile:
 
         if os.path.exists(snapshot_path):
             with lzma.open("file.xz") as f:
-                json_data = f.read()
+                json_data = f.read()["manager"]
             backups = []
             backups_file_found = [Backup.from_json(
                 **doc) for doc in json_data["backups_file_found"]]
@@ -166,13 +166,14 @@ class FolderFile:
         return attributes_to_json(self)
     
     def create_snapshot(self):
-        json_data= self.to_json()
+        template= TemplateSnapshot(self)
 
         if self._snapshot_output==None:
             snapshot_output= os.path.join(self.folder_path, self.filename + EXT_JSON_XZ)
         
-        with lzma.open(snapshot_output, "w") as f:
-            f.write(json_data)
+        with lzma.open(snapshot_output, "wt") as f:
+            f.write(template.to_json())
+            
     def update(self):
         """
         Hace backup a una carpeta.

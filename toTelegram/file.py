@@ -27,16 +27,10 @@ class File:
 
     @classmethod
     def from_path(cls, path):
-        """
-        La mayoria de los atributos de un objeto file pueden cambiar.
-        Por ejemplo un archivo puede cambiar de nombre, pero su contenido es el mismo o un archivo puede cambiar de contenido cuando el path es el mismo.
-        Por eso, los archivos de un path vuelven a generar la mayoria de sus atributos exceptos los que no cambian como su md5sum o los metadatos asociados a ese md5sum.
-        """
         path = str(path)
         filename = os.path.basename(path)
         fileExtension = os.path.splitext(path)[1]
         mimeType = create_mimeType(path)
-        createdTime = str(datetime.utcnow())
         md5sum = get_or_create_md5sum(path)
         size = os.path.getsize(path)
         metadata = get_or_create_metadata(path, mimeType, md5sum)
@@ -44,7 +38,6 @@ class File:
         file = File(filename=filename,
                     fileExtension=fileExtension,
                     mimeType=mimeType,
-                    createdTime=createdTime,
                     md5sum=md5sum,
                     size=size,
                     metadata=metadata
@@ -52,12 +45,11 @@ class File:
         file._path = path
         return file
 
-    def __init__(self, filename=None, fileExtension=None, mimeType=None, createdTime=None, md5sum=None, size=None, metadata=None):
+    def __init__(self, filename=None, fileExtension=None, mimeType=None, md5sum=None, size=None, metadata=None):
         self.kind = "file"
         self.filename = filename
         self.fileExtension = fileExtension
         self.mimeType = mimeType
-        self.createdTime = createdTime
         self.md5sum = md5sum
         self.size = size
         self.metadata = metadata
@@ -93,7 +85,6 @@ class SubFile(File):
         filename = os.path.basename(path)
         fileExtension = os.path.splitext(path)[1]
         mimeType = create_mimeType(path)
-        createdTime = str(datetime.utcnow())
         md5sum = get_or_create_md5sum(path)
         size = os.path.getsize(path)
         metadata = get_or_create_metadata(path, mimeType, md5sum)
@@ -102,7 +93,6 @@ class SubFile(File):
                     filename=filename,
                     fileExtension=fileExtension,
                     mimeType=mimeType,
-                    createdTime=createdTime,
                     md5sum=md5sum,
                     size=size,
                     metadata=metadata
@@ -111,8 +101,8 @@ class SubFile(File):
         return file
     
         
-    def __init__(self, folder, filename=None, fileExtension=None, mimeType=None, createdTime=None, md5sum=None, size=None, metadata=None):
+    def __init__(self, folder, filename=None, fileExtension=None, mimeType=None, md5sum=None, size=None, metadata=None):
         self.folder = folder
         super().__init__(filename=filename, fileExtension=fileExtension, mimeType=mimeType,
-                         createdTime=createdTime, md5sum=md5sum, size=size, metadata=metadata)
+                          md5sum=md5sum, size=size, metadata=metadata)
     

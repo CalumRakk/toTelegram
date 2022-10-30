@@ -19,4 +19,4 @@ if __name__ == "__main__":
     args = parser.parse_args()
     options = vars(args)
     if options["command"] == 'update':
-        update(args)
+        update(args.path)

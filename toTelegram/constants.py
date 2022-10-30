@@ -13,8 +13,7 @@ EXT_JSON_XZ= EXT_JSON + EXT_JZMA
 MINIMUM_SIZE_TO_BACKUP= 524288000 # 500 MB
 
 FILE_NOT_FOUND="Archivo no encontrado"
-WORKTABLE = os.path.join("D:\.TEMP","toTelegram","test") 
-BACKUP= os.path.join(WORKTABLE,"backups") 
+WORKTABLE = os.path.join("D:\.TEMP","toTelegram","test")  
 FILE_NAME_LENGTH_LIMIT = 55 # NO CAMBIAR EL LIMITE. TODA LA LÓGICA DEPENDE DE ESTO.
 PATH_CONFIG_FILE = os.path.join("setting", "config.yaml")
 
@@ -38,4 +37,6 @@ if not os.path.exists(PATH_CHUNK): os.makedirs(PATH_CHUNK)
 if not os.path.exists(PATH_METADATA): os.makedirs(PATH_METADATA)
 
 if not os.path.exists(PATH_BACKUPS): os.makedirs(PATH_BACKUPS)
-    
+
+
+IGNORE_THESE_FILES= [".yaml",".json",".xml",".jpg",".png",".gif",".svg",".ico",".icov"]

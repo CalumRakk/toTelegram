@@ -1,21 +1,18 @@
 
 import json
-import math
 import os
-import subprocess
 from pathlib import Path
 from typing import List, Union
 import json
+import lzma
 
-import yaml
-
-from ..constants import (EXT_JSON, EXT_YAML, FILESIZE_LIMIT,
+from ..constants import (EXT_JSON_XZ, FILESIZE_LIMIT,
                         REGEX_FILEPART_OF_STRING, VERSION, PATH_CHUNK, PYTHON_DATA_TYPES, WORKTABLE)
 from ..telegram import MessagePlus, telegram
 from ..file import File
-from ..functions import attributes_to_json, check_file_name_length, get_part_filepart
+from ..functions import attributes_to_json, check_file_name_length, get_part_filepart, TemplateSnapshot
 
-from modulos.split import Split
+from ..split import Split
 
 
 class Piece:
@@ -143,3 +140,13 @@ class PiecesFile:
             piece = Piece.from_path(path)
             pieces.append(piece)
         return pieces
+    
+    def create_snapshot(self):
+        template= TemplateSnapshot(self)
+                           
+        dirname= os.path.dirname(self.file.path)
+        filename= os.path.basename(self.file.path)
+        path= os.path.join(dirname, filename+ EXT_JSON_XZ)
+                    
+        with lzma.open(path, "wt") as f:
+            f.write(template.to_json())
