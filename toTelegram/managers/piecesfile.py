@@ -1,18 +1,17 @@
 
 import json
 import os
-from pathlib import Path
-from typing import List, Union
 import json
 import lzma
+from typing import List
 
-from ..constants import (EXT_JSON_XZ, FILESIZE_LIMIT,
-                        REGEX_FILEPART_OF_STRING, VERSION, PATH_CHUNK, PYTHON_DATA_TYPES, WORKTABLE)
+
 from ..telegram import MessagePlus, telegram
 from ..file import File
 from ..functions import attributes_to_json, check_file_name_length, get_part_filepart, TemplateSnapshot
-
 from ..split import Split
+from ..constants import (EXT_JSON_XZ, FILESIZE_LIMIT,
+                        VERSION, PATH_CHUNK, WORKTABLE)
 
 
 class Piece:

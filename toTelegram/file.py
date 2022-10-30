@@ -1,26 +1,12 @@
 
 import os
 import json
-from typing import Optional, Union
 from .functions import get_or_create_md5sum, attributes_to_json, create_mimeType, get_or_create_metadata
-from datetime import datetime
 from .constants import FILESIZE_LIMIT, WORKTABLE
 from pathlib import Path
 
 
 class File:
-    """ 
-    Representa a un archivo.
-
-    Parametros:
-        id (``int``, *optional*):
-            path es la ubicación del archivo. Si no se pasa el path se intenta buscar el archivo por medio del filename
-
-        md5sum (Union[``str``,``bool``]=True, *optional*):
-            True (Por defecto) se intenta cargar o generar el md5sum.\n
-            False se establece el valor en None.\n
-            str se establece al valor del string
-    """
     @classmethod
     def from_json(cls, Json):
         return File(**Json)

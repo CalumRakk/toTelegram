@@ -1,18 +1,17 @@
 
-import json
 import os
 import shutil
 import tarfile
-from json.decoder import JSONDecodeError
-from typing import List, Optional
+import shutil
+import lzma
+from typing import List
 
 from ..constants import EXT_TAR, PATH_BACKUPS, EXT_JSON_XZ, MINIMUM_SIZE_TO_BACKUP
 from ..functions import attributes_to_json, get_all_files_in_directory, get_size_of_files, TemplateSnapshot
 from ..file import SubFile, File
 from .singlefile import SingleFile
 from .piecesfile import PiecesFile
-import shutil
-import lzma
+from ..telegram import telegram
 
 
 class Backup:
@@ -20,12 +19,12 @@ class Backup:
     def from_json(cls, json_data):
         files = [SubFile.from_json(doc) for doc in json_data["files"]]
         is_in_telegram = json_data["is_in_telegram"]
-        if json_data["manager"]["kind"] == "pieces-file":
-            PiecesFile.from_json(json_data["manager"])
-        else:
-            SingleFile(file, message=None)
-
-            return Backup(**json_data)
+        # if json_data["manager"]["kind"] == "pieces-file":
+        #     PiecesFile.from_json(json_data["manager"])
+        
+        # else:
+        #     SingleFile(file, message=None)
+        #     return Backup(**json_data)
 
     def __init__(self, manager=None, files=None, is_in_telegram=None):
         self.kind = "backup"

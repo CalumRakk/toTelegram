@@ -2,9 +2,8 @@
 import hashlib
 import os
 import json
-import subprocess
 from argparse import ArgumentTypeError
-from typing import Union, List
+from typing import Union
 from datetime import datetime
 
 import exiftool

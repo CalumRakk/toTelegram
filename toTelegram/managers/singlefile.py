@@ -1,13 +1,10 @@
 import json
 import os
-from pathlib import Path
-from typing import Union
-
 import lzma
 
-from ..constants import EXT_JSON, EXT_YAML, VERSION, WORKTABLE, EXT_JSON_XZ
+from ..constants import EXT_JSON_XZ
 from ..functions import check_file_name_length, attributes_to_json,TemplateSnapshot
-from ..telegram import MessagePlus, telegram
+from ..telegram import telegram
 from ..file import File
 
 

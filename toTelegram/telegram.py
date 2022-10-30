@@ -1,20 +1,17 @@
 
 from __future__ import annotations
-from tempfile import gettempdir
-from typing import Union, Optional
+from typing import Optional
 import yaml
 import os
-import time
 
-from pyrogram import Client  # pip install pyrogram
+from pyrogram import Client
 from pyrogram.types.messages_and_media.message import Message
-from pyrogram.types import User
-
-from .functions import (progress,
-                        attributes_to_json, progress)
 from pyrogram.types.messages_and_media.document import Document
 from pyrogram.types.messages_and_media.message import Message
 from pyrogram.errors import UserAlreadyParticipant, PhoneNumberInvalid, FloodWait
+
+from .functions import (progress,
+                        attributes_to_json, progress)
 
 
 INVITE_LINK_RE = Client.__dict__["INVITE_LINK_RE"]
@@ -228,12 +225,14 @@ class Telegram(Config):
         """
         Prueba si hace parte del grupo y prueba si tiene permisos para subir archivos.
         - Entra al grupo si chat_id es una invitación valida
-        """
-        match = INVITE_LINK_RE.match(self.chat_id)          
-        if match:           
-            chatMember=self._join_group(self.chat_id)            
-            self.chat_id= chatMember.id
-            self._save_file_config()
+        """  
+        if  type(self.chat_id)==str:
+            match = INVITE_LINK_RE.match(self.chat_id) 
+            if match:           
+                chatMember=self._join_group(self.chat_id)            
+                self.chat_id= chatMember.id
+                self._save_file_config()
+            raise Exception(f"Chat id desconocido",self.chat_id)
         else:
             chatMember = self.client.get_chat(self.chat_id)
             

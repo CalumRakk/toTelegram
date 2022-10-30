@@ -43,6 +43,6 @@ CHAT_ID: "https://t.me/+Fz1aDRT"
 Lo que se ve es:
 - `API_HASH` : es la credencial `api_hash` de una aplicación de Telegram, necesaria para autorizar tu cuenta de Telegram. 
 - `API_ID`: es la credencial `api_id` de una aplicación de Telegram, necesaria para autorizar tu cuenta de Telegram.
-- `CHAT_ID` : El ID del Canal,grupo o chat donde desea subir los archivos. En caso de desconocer el ID, el valor de `CHAT_ID` puede ser un enlace de invitacón como en el ejemplo de arriba. Cuando ejecute programa se reemplazará el valor por el ID correcto. 
+- `CHAT_ID` : El ID del Canal,grupo o chat donde desea subir los archivos. En caso de desconocer el ID, el valor de CHAT_ID puede ser un enlace de invitacón como en el ejemplo de arriba. Cuando ejecute el programa se reemplazará el valor por el ID correcto. 
 
 Eso es todo. Ahora podemos usar los siguientes comandos para subir o descargar archivos en Telegram...
