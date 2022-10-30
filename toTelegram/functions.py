@@ -79,6 +79,9 @@ def attributes_to_json(self):
         if key == "pieces":
             document[key]= [i.to_json() for i in document[key]]
             continue
+        if type(value)==datetime:
+            document[key]= str(value)
+            continue
         if type(value) not in PYTHON_DATA_TYPES:
             document[key]= value.to_json()
             continue

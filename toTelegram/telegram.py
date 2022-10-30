@@ -1,5 +1,6 @@
 
 from __future__ import annotations
+from tempfile import gettempdir
 from typing import Union, Optional
 import yaml
 import os
@@ -13,7 +14,7 @@ from .functions import (progress,
                         attributes_to_json, progress)
 from pyrogram.types.messages_and_media.document import Document
 from pyrogram.types.messages_and_media.message import Message
-from pyrogram.errors import UserAlreadyParticipant, PhoneNumberInvalid
+from pyrogram.errors import UserAlreadyParticipant, PhoneNumberInvalid, FloodWait
 
 
 INVITE_LINK_RE = Client.__dict__["INVITE_LINK_RE"]
@@ -201,9 +202,12 @@ class Telegram(Config):
         Intenta entrar a un grupo
         """
         try:
-            self.client.join_chat(invite_link)
-        except UserAlreadyParticipant:
-            return
+            return self.client.join_chat(invite_link)
+        except UserAlreadyParticipant as e:
+            return self.client.get_chat(self.chat_id)
+        except FloodWait as e:
+            print("Pyrogram ha generado una espera.", e.MESSAGE)
+            exit()
 
     def get_id_from_chat(self):
         """
@@ -221,14 +225,23 @@ class Telegram(Config):
         return chat.id
 
     def test_chat_id(self):
-        time.sleep(2)
-        match = INVITE_LINK_RE.match(self.chat_id)
-        if match:
-            self._join_group(self.chat_id)
-        chat_id = self.get_id_from_chat()
-        chatMember = self.client.get_chat(chat_id)
+        """
+        Prueba si hace parte del grupo y prueba si tiene permisos para subir archivos.
+        - Entra al grupo si chat_id es una invitación valida
+        """
+        match = INVITE_LINK_RE.match(self.chat_id)          
+        if match:           
+            chatMember=self._join_group(self.chat_id)            
+            self.chat_id= chatMember.id
+            self._save_file_config()
+        else:
+            chatMember = self.client.get_chat(self.chat_id)
+            
+        if getattr(chatMember, "id", False)==False:
+            print(f"El usuario no hace parte de chat_id {self.chat_id}")
+            exit()             
         if not chatMember.permissions.can_send_media_messages:
-            print(f"No tienes permisos para subir archivos en {self.chat_id}")
+            print(f"No tienes permisos para subir archivos en chat_id {self.chat_id}")
             exit()
 
 

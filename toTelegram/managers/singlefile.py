@@ -43,7 +43,7 @@ class SingleFile:
         path= os.path.join(dirname, filename+ EXT_JSON_XZ)
                     
         with lzma.open(path, "wt") as f:
-            f.write(template.to_json())
+            json.dump(template.to_json(), f)
     @property
     def type(self):
         return self.file.type
