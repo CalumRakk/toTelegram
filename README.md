@@ -1,7 +1,8 @@
 
 
 
-Este script sube archivos a Telegram sin importar el tamaño.
+Script para subir archivos a Telegramsin importar el tamaño.
+
 Si se está quedando sin espacio en su maquina, Telegram puede ser una gran opción para almacenar sus archivos.
 
 ---
@@ -13,7 +14,7 @@ Siga los siguientes pasos para comenzar a utilizar este proyecto.
 
 Github permite descargar este proyecto de varias formas, entre ella como un archivo .zip o usando git.
 
-Una vez descargado este proyecto. Hay que instalar todas las dependencias
+Una vez descargado este proyecto, hay que instalar todas las dependencias
 
      pip install -r requirements.txt
 
@@ -42,6 +43,6 @@ CHAT_ID: "https://t.me/+Fz1aDRT"
 Lo que se ve es:
 - `API_HASH` : es la credencial `api_hash` de una aplicación de Telegram, necesaria para autorizar tu cuenta de Telegram. 
 - `API_ID`: es la credencial `api_id` de una aplicación de Telegram, necesaria para autorizar tu cuenta de Telegram.
-- `CHAT_ID` : es el lugar de Telegram donde se subirán los archivos. Puede ser un enlace de invitación, username o chat_id. En este caso es un enlace de invitación incompleto.
+- `CHAT_ID` : es el lugar de Telegram donde se subirán los archivos. Puede ser un enlace de invitación, username o chat_id. En este ejemplo es un enlace de invitación incompleto.
 
-Eso es todo. Ahora podemos usar los siguientes comandos para subir o descargar archivos en Telegram.
+Eso es todo. Ahora podemos usar los siguientes comandos para subir o descargar archivos en Telegram...
