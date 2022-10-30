@@ -12,7 +12,7 @@ import filetype
 import ffmpeg
 
 from .constants import (FILE_NAME_LENGTH_LIMIT, PATH_METADATA,VERSION,
-                        REGEX_FILEPART_OF_STRING, REGEX_MD5SUM,
+                        REGEX_FILEPART_OF_STRING,
                         REGEX_PART_OF_FILEPART, PYTHON_DATA_TYPES, PATH_MD5SUM)
 
 EXCLUDE_FOLLOWING_KEY = ["SourceFile", "File:FileName", "File:Directory", "File:FileModifyDate",
@@ -75,10 +75,13 @@ def attributes_to_json(self):
     for key, value in list(document.items())[:]:
         if key.startswith("_"):
             document.pop(key)
+            continue
         if key == "pieces":
             document[key]= [i.to_json() for i in document[key]]
+            continue
         if type(value) not in PYTHON_DATA_TYPES:
             document[key]= value.to_json()
+            continue
     return document
 
 def get_or_create_metadata(path, mimetype=None, md5sum=None):
@@ -197,20 +200,6 @@ def create_md5sum_by_hashlib(path, mute=True):
         for chunk in iter(lambda: f.read(4096), b""):
             hash_md5.update(chunk)
     return hash_md5.hexdigest()
-
-
-def create_md5sum(path):
-    print("el método create_md5sum está en desuso.")
-    print("[MD5SUM] Generando...")
-    #md5sum = str(subprocess.run(["md5sum","--tag", os.path.abspath(path)],capture_output=True).stdout).split("= ")[1].replace("\\n'","")
-    if os.path.exists(path):
-        string = fr"{path}"
-        args = ['md5sum', '"', string, '"']
-        md5sum = str(subprocess.run(args, capture_output=True).stdout)
-        value = REGEX_MD5SUM.search(md5sum).group()
-
-        return value
-    raise Exception("[MD5SUM] El archivo no existe")
 
 
 def check_of_input(path: str, cut):

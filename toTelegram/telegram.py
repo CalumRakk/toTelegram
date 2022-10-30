@@ -1,24 +1,30 @@
 
-
 from __future__ import annotations
-import os.path
 from typing import Union, Optional
+import yaml
+import os
+import time
 
 from pyrogram import Client  # pip install pyrogram
 from pyrogram.types.messages_and_media.message import Message
 from pyrogram.types import User
 
-# from .config import Config
-from .functions import (get_part_filepart, progress,
+from .functions import (progress,
                         attributes_to_json, progress)
 from pyrogram.types.messages_and_media.document import Document
 from pyrogram.types.messages_and_media.message import Message
-from pyrogram.errors import UserAlreadyParticipant
+from pyrogram.errors import UserAlreadyParticipant, PhoneNumberInvalid
 
 
-INVITE_LINK_RE= Client.__dict__["INVITE_LINK_RE"]
+INVITE_LINK_RE = Client.__dict__["INVITE_LINK_RE"]
 
-telegram=None
+string = """
+> Session no encontrada.
+Por favor siga los pasos de Pyrogram para autorizar su cuenta de Telegram.            
+Pyrogram le pedirá su número telefonico. El número debe estar en formato internacional 
+por ejemplo, para españa debe incluir el +34
+"""
+
 
 class MessagePlus:
     @classmethod
@@ -81,38 +87,89 @@ class MessagePlus:
                 self.chat_id, self.message_id)
         return self._message
 
-class Api:
-    def __init__(self, api_hash, api_id):
-        self.api_hash = api_hash
-        self.api_id = api_id
 
-class Telegram:
-    def __init__(self, api_hash, api_id, chat_id: int=None, name: str = "me"):
-        self.name = name
-        self.api = Api(api_hash=api_hash,api_id=api_id )
-        self.chat_id = chat_id
-        
-        self.is_client_initialized = False
+class Config:
+    def __init__(self):
+        self._path = "config.yaml"
+        config = self._load_file_config()
 
-    
-    @property
-    def api_hash(self):
-        return self.api.api_hash
+        self.api_hash = config["api_hash"]
+        self.api_id = config["api_id"]
+        self.chat_id = config["chat_id"]
+        self.session_string = config.get("session_string", None)
 
     @property
-    def api_id(self):
-        return self.api.api_id
+    def path(self):
+        return self._path
 
-    def _start(self):
-        client = Client(name=self.name, api_id=self.api_id, api_hash=self.api_hash,workdir="setting")
+    def to_json(self):
+        return attributes_to_json(self)
+
+    def _create_file_config(self):
+        json_data = {"API_HASH": "e0n7bf4d",
+                     "API_ID": 1585711,
+                     "CHAT_ID": "https://t.me/+Fz1aDRT"}
+        with open(self.path, "wt") as fb:
+            yaml.dump(json_data, fb, sort_keys=False)
+    def _load_file_config(self):
+        if not os.path.exists(self.path):
+            self._create_file_config()
+            print("Para continuar es necesario rellenar los datos de config.yaml")
+            exit()
+
+        with open(self.path, "rt") as fb:
+            config = yaml.load(fb, Loader=yaml.UnsafeLoader)
+
+        if config == None:
+            raise Warning("El archivo config está vacio.")
+
+        config_to_lower = {}
+        for key, value in config.items():
+            config_to_lower[key.lower()] = value
+        return config_to_lower
+
+    def _save_file_config(self):
+        json_data = self.to_json()
+
+        config_to_upper = {}
+        for key, value in json_data.items():
+            config_to_upper[key.upper()] = value
+
+        with open(self.path, "wt") as fb:
+            yaml.dump(config_to_upper, fb, sort_keys=False)
+
+
+class Telegram(Config):
+    def __init__(self):
+        super().__init__()
+
+    def _get_client(self):
+        if self.session_string == None:
+            print(string)
+            os.system("pause")
+            print("Cargando...")
+
+            client = Client("my_account", api_id=self.api_id,
+                            api_hash=self.api_hash, in_memory=True)
+            try:
+                client.start()
+                self.session_string = client.export_session_string()
+                self._save_file_config()
+                print(f"La session se guardo en {os.path.basename(self.path)}")
+                return client
+            except PhoneNumberInvalid:
+                print("\n*Advertencia*\nEl número introducido es invalido")
+                exit()
+
+        client = Client("my_account", session_string=self.session_string)
         client.start()
+        print("Cargando...")
         return client
 
     @property
     def client(self) -> Client:
-        if not self.is_client_initialized:
-            self._client = self._start()
-            self.is_client_initialized = True
+        if getattr(self, "_client", False) == False:
+            self._client = self._get_client()
         return self._client
 
     def update(self, path: str, caption: str, filename: str) -> Message:
@@ -132,45 +189,49 @@ class Telegram:
         message = self.client.get_messages(chat_id, iD)
         return MessagePlus.from_message(message)
 
-    # def get_user_information(self):
-    #     return self.client.get_users("me")
-    
-    
     def test_session(self):
-        user= self.client.get_users("me")
-        if type(user)==User:
-            print("El username del usuario logeado es", user.username)
-        print("El usuario no está logeado.")
-    
-    def test_group(self, chat_id):
-        pass
-        
-    
-    def _join_group(self,invite_link):
+        """
+        Comprueba si el usuario está logeado en Telegram.
+        """
+        user = self.client.get_users("me")
+        print(f"{user.username or user.first_name}", "¡está logeado!\n")
+
+    def _join_group(self, invite_link):
         """
         Intenta entrar a un grupo
         """
         try:
             self.client.join_chat(invite_link)
         except UserAlreadyParticipant:
-            return   
-    def get_id_from_chat(self, chat_id: Union[int, str]):
+            return
+
+    def get_id_from_chat(self):
         """
         Parametro:
             chat_id (``int`` | ``str``):
                 Identificador único (int) o nombre de usuario (str) del chat de destino.
                 Identificador único para el chat de destino en forma de enlace *t.me/joinchat/*, identificador (int) 
                 o username del canal/supergrupo de destino (en el formato @username).
-        """        
-        match = INVITE_LINK_RE.match(chat_id)
+        """
+        match = INVITE_LINK_RE.match(self.chat_id)
         if match:
-            self._join_group(chat_id)            
-        chat= self.client.get_chat(chat_id)
-        return chat.id
-        
-            
-            
-        
+            self._join_group(self.chat_id)
 
-# config = Config("config.yaml")
-# telegram = Telegram(config)
+        chat = self.client.get_chat(self.chat_id)
+        return chat.id
+
+    def test_chat_id(self):
+        time.sleep(2)
+        match = INVITE_LINK_RE.match(self.chat_id)
+        if match:
+            self._join_group(self.chat_id)
+        chat_id = self.get_id_from_chat()
+        chatMember = self.client.get_chat(chat_id)
+        if not chatMember.permissions.can_send_media_messages:
+            print(f"No tienes permisos para subir archivos en {self.chat_id}")
+            exit()
+
+
+telegram = Telegram()
+telegram.test_session()
+telegram.test_chat_id()

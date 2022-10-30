@@ -9,9 +9,7 @@ __pycache__
 /exiftool_.py
 /main.py
 /me.session
-/README.md
 /test.py
-config.yaml
 *.txt
 
 !toTelgram/
