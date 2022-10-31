@@ -27,6 +27,7 @@ class Split:
             chunk = f.read(chunk_size) 
             while chunk:
                 filename_chunk= f"{filename}_{file_number}-{total_parts}"
+                print("\t", filename_chunk)
                 path_chunk= os.path.join(folder, filename_chunk)
                 with open(path_chunk ,"wb") as chunk_file:
                     chunk_file.write(chunk)

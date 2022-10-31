@@ -7,7 +7,7 @@ import lzma
 from typing import List
 
 from ..constants import EXT_TAR, PATH_BACKUPS, EXT_JSON_XZ, MINIMUM_SIZE_TO_BACKUP
-from ..functions import attributes_to_json, get_all_files_in_directory, get_size_of_files, TemplateSnapshot
+from ..functions import attributes_to_json, get_all_files_from_directory, get_size_of_files, TemplateSnapshot
 from ..file import SubFile, File
 from .singlefile import SingleFile
 from .piecesfile import PiecesFile
@@ -49,7 +49,7 @@ class Backup:
 
 class FolderFile:
     @classmethod
-    def from_path(self, folder_path, snapshot_path):
+    def from_path(self, folder_path, snapshot_path=None):
         """ 
         Devuelve una instancia de FolderFile.
         
@@ -59,6 +59,7 @@ class FolderFile:
 
             snapshot_path (``str``):
                 path de la ubicación del snapshot de la carpeta que se le desea hacer backup.
+                Por defecto busca el archivo en el mismo lugar de la carpeta.
 
         Aserciones:
         - Un backup no subido (is_in_telegram==False) debe ser instaciado pasandole un manager instaciado via from_file. Para ello se debe encontrar en el pc el archivo backup generado, por defecto ubicado en "/.TEMP/toTelegram/backups/inodo_name/filename" donde inodo_name es el inodo del folder_path y filename es el valor de manager.file.filename
@@ -125,7 +126,7 @@ class FolderFile:
         return False
 
     def get_files_without_backup(self):
-        res = get_all_files_in_directory(self.path)
+        res = get_all_files_from_directory(self.path)
 
         files = [SubFile.from_path(path) for path in res]
         files_to_backup = []

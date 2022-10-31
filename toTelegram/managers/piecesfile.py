@@ -10,7 +10,7 @@ from ..telegram import MessagePlus, telegram
 from ..file import File
 from ..functions import attributes_to_json, check_file_name_length, get_part_filepart, TemplateSnapshot
 from ..split import Split
-from ..constants import (EXT_JSON_XZ, FILESIZE_LIMIT,
+from ..constants import (EXT_JSON_XZ, FILESIZE_LIMIT, PATH_BACKUPS,
                         VERSION, PATH_CHUNK, WORKTABLE)
 
 
@@ -21,23 +21,20 @@ class Piece:
         return Piece(**json_data)
 
     @classmethod
-    def from_path(cls, path):
-        """
-        path: es un segmento ubicado en el disco. 
-        """
-        path = path
+    def from_path(cls, path, message=None):
         filename = os.path.basename(path)
         size = os.path.getsize(path)
-        message = None
-        return Piece(path=path, filename=filename, size=size, message=message)
+        return Piece(filename=filename, size=size, message=message)
 
-    def __init__(self, path, filename, size, message=None, parent=None):
-        self.kind = "#piece"
-        self.path = path
+    def __init__(self, filename, size, message=None, kind=None):
+        self.kind = kind or "#piece"
         self.filename = filename
         self.size = size
         self.message = message
-
+    
+    @property
+    def path(self):
+        return os.path.join(PATH_CHUNK, self.filename)
     @property
     def filename_for_telegram(self):
         if check_file_name_length(self.filename):
@@ -104,18 +101,28 @@ class PiecesFile:
         return attributes_to_json(self)
 
     def update(self):
+        """
+        Sube a Telegram y elimina la pieza del PC
+        """
         if not self.is_split_finalized:
             self.pieces = self.split()
             self.save()
 
+        print("[UPDATE]")
         for piece in self.pieces:
             if piece.message == None:
                 caption = piece.filename
-                filename = piece.filename_for_telegram
+                filename = piece.filename
+                                
+                if not check_file_name_length(filename):
+                    filename= self.file.md5sum + os.path.splitext(filename)[1]                
+
                 piece.message = telegram.update(
                     piece.path, caption=caption, filename=filename)
                 os.remove(piece.path)
                 self.save()
+                continue
+            print("\t", piece.filename, "DONE.")
 
     def save(self):
         path = os.path.join(WORKTABLE, self.file.md5sum)
@@ -129,7 +136,7 @@ class PiecesFile:
         """
         Divide el archivo en partes al limite de Telegram
         """
-        print("[Split]...\n")
+        print("[SPLIT]")
         split = Split(self.file.path)
         output = os.path.join(PATH_CHUNK, self.file.filename)
         fileparts = split(chunk_size=FILESIZE_LIMIT, output=output)
@@ -148,4 +155,4 @@ class PiecesFile:
         path= os.path.join(dirname, filename+ EXT_JSON_XZ)
                     
         with lzma.open(path, "wt") as f:
-            f.write(template.to_json())
+            json.dump(template.to_json(), f)

@@ -39,26 +39,33 @@ def get_size_of_folder(path):
     """
     Consigue el tamaño en bytes de un directorio.
     """
-    folders= get_all_folders_in_a_directory(path)
+    folders= get_all_folders_from_directory(path)
     size=0
     for folder in folders:
         with os.scandir(folder) as itr:
             for entry in itr :
                 size+=entry.stat().st_size
-    # print(humanize.naturalsize(size))
     return size
 
-def get_all_folders_in_a_directory(path):
+def get_all_folders_from_directory(path):
+    """
+    Devuelve todas las carpetas que están dentro de la carpeta path
+    """
+    if not os.path.isdir(path):
+        raise Exception("No es una carpeta", path)
+    
     res = []
     for (dir_path, dir_names, file_names) in os.walk(path):
         pahts= [os.path.join(dir_path, dir) for dir in dir_names]
         res.extend(pahts)
-    return res
+    return res    
 
-def get_all_files_in_directory(path):
+def get_all_files_from_directory(path):
     """
-    Devuelve todas los archivos de un directorio con su ruta completa.
+    Devuelve todos los archivos de un directorio con su ruta completa.
     """
+    if not os.path.isdir(path):
+        raise Exception("No es una carpeta", path)
     res = []
     for (dir_path, dir_names, file_names) in os.walk(path):
         res.extend([os.path.join(dir_path, filename)
@@ -170,8 +177,8 @@ def get_or_create_md5sum(path):
     return md5sum
 
 
-def progress(current, total):
-    print(f"\t\t{current * 100 / total:.1f}%", end="\r")
+def progress(current, total, filename):    
+    print("\t", filename,f"{current * 100 / total:.1f}%", end="\r")
 
 
 def get_filepart_of_string(string):
@@ -242,7 +249,7 @@ def check_of_input(path: str, cut):
 def check_file_name_length(path) -> Union[str, bool]:
     """
     True si el nombre del archivo no pasa el limite de caracteres de telegram para el filename\n
-    Se incluye la extensión del archivo.
+    Tiene en cuenta la extensión del archivo.
     """
     filename = os.path.basename(path)
     if len(filename) <= FILE_NAME_LENGTH_LIMIT:

@@ -1,17 +1,18 @@
 
 from __future__ import annotations
 from typing import Optional
-import yaml
+
 import os
 
 from pyrogram import Client
 from pyrogram.types.messages_and_media.message import Message
 from pyrogram.types.messages_and_media.document import Document
 from pyrogram.types.messages_and_media.message import Message
-from pyrogram.errors import UserAlreadyParticipant, PhoneNumberInvalid, FloodWait
+from pyrogram.errors import UserAlreadyParticipant, PhoneNumberInvalid, FloodWait, ChatIdInvalid
 
+from .config import Config
 from .functions import (progress,
-                        attributes_to_json, progress)
+                        attributes_to_json)
 
 
 INVITE_LINK_RE = Client.__dict__["INVITE_LINK_RE"]
@@ -85,58 +86,6 @@ class MessagePlus:
                 self.chat_id, self.message_id)
         return self._message
 
-
-class Config:
-    def __init__(self):
-        self._path = "config.yaml"
-        config = self._load_file_config()
-
-        self.api_hash = config["api_hash"]
-        self.api_id = config["api_id"]
-        self.chat_id = config["chat_id"]
-        self.session_string = config.get("session_string", None)
-
-    @property
-    def path(self):
-        return self._path
-
-    def to_json(self):
-        return attributes_to_json(self)
-
-    def _create_file_config(self):
-        json_data = {"API_HASH": "e0n7bf4d",
-                     "API_ID": 1585711,
-                     "CHAT_ID": "https://t.me/+Fz1aDRT"}
-        with open(self.path, "wt") as fb:
-            yaml.dump(json_data, fb, sort_keys=False)
-    def _load_file_config(self):
-        if not os.path.exists(self.path):
-            self._create_file_config()
-            print("Para continuar es necesario rellenar los datos de config.yaml")
-            exit()
-
-        with open(self.path, "rt") as fb:
-            config = yaml.load(fb, Loader=yaml.UnsafeLoader)
-
-        if config == None:
-            raise Warning("El archivo config está vacio.")
-
-        config_to_lower = {}
-        for key, value in config.items():
-            config_to_lower[key.lower()] = value
-        return config_to_lower
-
-    def _save_file_config(self):
-        json_data = self.to_json()
-
-        config_to_upper = {}
-        for key, value in json_data.items():
-            config_to_upper[key.upper()] = value
-
-        with open(self.path, "wt") as fb:
-            yaml.dump(config_to_upper, fb, sort_keys=False)
-
-
 class Telegram(Config):
     def __init__(self):
         super().__init__()
@@ -170,15 +119,15 @@ class Telegram(Config):
             self._client = self._get_client()
         return self._client
 
-    def update(self, path: str, caption: str, filename: str) -> Message:
-        if caption == filename:
-            caption = ""
+    def update(self, path: str, caption: str, filename: str) -> Message:           
         message = self.client.send_document(
             chat_id=self.chat_id,
             document=path,
             file_name=filename,
-            caption=caption,
-            progress=progress)
+            caption= "" if caption == filename else caption,
+            progress=progress,
+            progress_args=(caption,)
+            )
         return MessagePlus.from_message(message)
 
     def get_message(self, link: str) -> MessagePlus:
@@ -225,23 +174,32 @@ class Telegram(Config):
         """
         Prueba si hace parte del grupo y prueba si tiene permisos para subir archivos.
         - Entra al grupo si chat_id es una invitación valida
-        """  
-        if  type(self.chat_id)==str:
-            match = INVITE_LINK_RE.match(self.chat_id) 
-            if match:           
-                chatMember=self._join_group(self.chat_id)            
-                self.chat_id= chatMember.id
+        """
+        if type(self.chat_id) == str:
+            match = INVITE_LINK_RE.match(self.chat_id)
+            if match:
+                chatMember = self._join_group(self.chat_id)
+                self.chat_id = chatMember.id
                 self._save_file_config()
-            raise Exception(f"Chat id desconocido",self.chat_id)
-        else:
+
+            # Podría ser un el valor @username
             chatMember = self.client.get_chat(self.chat_id)
-            
-        if getattr(chatMember, "id", False)==False:
+        else:
+            try:
+                chatMember = self.client.get_chat(self.chat_id)
+            except ChatIdInvalid:
+                chat_id = int("-100" + str(self.chat_id).replace("-", ""))
+                chatMember = self.client.get_chat(chat_id)
+                self.chat_id = chat_id
+
+        if getattr(chatMember, "id", False) == False:
             print(f"El usuario no hace parte de chat_id {self.chat_id}")
-            exit()             
-        if not chatMember.permissions.can_send_media_messages:
-            print(f"No tienes permisos para subir archivos en chat_id {self.chat_id}")
             exit()
+        if not chatMember.permissions.can_send_media_messages:
+            print(
+                f"No tienes permisos para subir archivos en chat_id {self.chat_id}")
+            exit()
+        print(f"CHAT_ID:", chatMember.title)
 
 
 telegram = Telegram()
