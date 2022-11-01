@@ -2,18 +2,22 @@
 import argparse
 from toTelegram import update
 
-parser = argparse.ArgumentParser()
-subparsers = parser.add_subparsers(dest='command')
+parser = argparse.ArgumentParser(prog='main.py', description='Script para subir archivos a telegram sin importar el tamaño.')
+subparse = parser.add_subparsers(dest='command', required=True)
 
-parser_update = subparsers.add_parser('update')
-parser_update.add_argument(
+# COMANDO : UPDATE
+update_parse = subparse.add_parser('update')
+update_parse.add_argument(
     'path', help="La ubicación del archivo o carpeta para subir")
 
-parser_a = subparsers.add_parser('backup')
-parser_a.add_argument(
-    'path', help="La ubicación del archivo o carpeta para subir")
-parser_a.add_argument(
-    '--snapshot', help="La ubicación del archivo o carpeta para subir")
+# Argumentos opcionales de exclusión.
+update_parse.add_argument(
+    '--exclude-words', nargs="+", default=[])
+update_parse.add_argument(
+    '--exclude-ext', nargs="+", default=[])
+update_parse.add_argument('--min-size', default=False)
+update_parse.add_argument('--max-size',default=False)
+
 
 if __name__ == "__main__":
     args = parser.parse_args()

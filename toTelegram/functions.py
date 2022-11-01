@@ -9,6 +9,7 @@ from datetime import datetime
 import exiftool
 import filetype
 import ffmpeg
+from humanfriendly import parse_size
 
 from .constants import (FILE_NAME_LENGTH_LIMIT, PATH_METADATA,VERSION,
                         REGEX_FILEPART_OF_STRING,
@@ -16,6 +17,26 @@ from .constants import (FILE_NAME_LENGTH_LIMIT, PATH_METADATA,VERSION,
 
 EXCLUDE_FOLLOWING_KEY = ["SourceFile", "File:FileName", "File:Directory", "File:FileModifyDate",
                          "File:FileAccessDate", "File:FilePermissions", "File:FileSize", "File:ZoneIdentifier"]
+
+
+def any_to_list(string):
+    if string==None:
+        return []
+    if type(string)==list:
+        return string
+    if not type(string):
+        raise ValueError    
+    return [i.strip() for i in string.split(',')]
+
+def any_to_bytes(size): 
+    if size==None:
+        return False
+    if type(size)==int:
+        return size
+    if type(size)==float:
+        return int(size)
+    return parse_size(size)
+
 
 class TemplateSnapshot:
     def __init__(self,manager):

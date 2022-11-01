@@ -23,6 +23,7 @@ PATH_MD5SUM= os.path.join(WORKTABLE, "md5sums")
 PATH_CHUNK= os.path.join(WORKTABLE, "chunks")
 PATH_METADATA= os.path.join(WORKTABLE, "metadata")
 PATH_BACKUPS= os.path.join(WORKTABLE, "backups")
+PATH_CONFIG= "config.yaml"
 
 if not os.path.exists(WORKTABLE): os.makedirs(WORKTABLE)
     

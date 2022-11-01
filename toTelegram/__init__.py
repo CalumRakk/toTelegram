@@ -5,25 +5,26 @@ from .file import File
 from .managers import (PiecesFile, SingleFile, FolderFile)
 from .config import ExclusionManager
 
-
-
-def update(args):
-    if os.path.isdir(args.path):
-        paths = get_all_files_from_directory(args.path)
-        exclusion= ExclusionManager(args)        
-        for path in paths[:]:
-            if exclusion.is_skipped(path): 
-                paths.remove(path)            
-    elif os.path.isfile(args.path):
-        paths = [args.path]
+def check_point(args):
+    """
+    Devuelve una lista de paths filtrada.
+    """
+    path= args.path
+    if os.path.isdir(path):
+        paths = get_all_files_from_directory(path)
+        paths= ExclusionManager(args)(paths)             
+    elif os.path.isfile(path): # Si path es un archivo no se filtra nada.
+        return [path]
     else:
         raise FileNotFoundError
 
-    count_path= len(paths)
-    for index, path in enumerate(paths, 1):
-        if path.endswith(".json.xz"): continue # TODO: remove
-        
-        print(f"\n{index}/{count_path}", os.path.basename(path))
+
+def update(args):
+    paths= check_point(args)
+    count_path= len(paths) 
+       
+    for index, path in enumerate(paths, 1):                
+        print(f"\n{index}/{count_path}", os.path.basename(path))        
         file = File.from_path(path)
 
         if file.type == "pieces-file":

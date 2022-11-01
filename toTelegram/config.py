@@ -1,35 +1,16 @@
 
 import yaml
 import os
-from .functions import attributes_to_json
-from humanfriendly import parse_size
-
-def any_to_list(string):
-    if string==None:
-        return []
-    if type(string)==list:
-        return string
-    if not type(string):
-        raise ValueError    
-    return [i.strip() for i in string.split(',')]
-
-def any_to_bytes(size): 
-    if size==None:
-        return False
-    if type(size)==int:
-        return size
-    if type(size)==float:
-        return int(size)
-    return parse_size(size)
-    
+from .functions import attributes_to_json,any_to_list, any_to_bytes
+from .constants import PATH_CONFIG
 
 
 class OptionalArguments:
     def __init__(self,**kwargs):
         self.exclude_words = any_to_list(kwargs.get("exclude_words")) 
         self.exclude_ext = any_to_list(kwargs.get("exclude_ext"))        
-        self.min_size = any_to_bytes(kwargs.get("min_size"))  # Si un archivo pesa menos que min_size se excluye        
-        self.max_size = any_to_bytes(kwargs.get("max_size"))  # Si un archivo pesa más que max_size se excluye
+        self.min_size = any_to_bytes(kwargs.get("min_size"))   
+        self.max_size = any_to_bytes(kwargs.get("max_size"))
 
 
 class ExclusionManager:
@@ -37,7 +18,7 @@ class ExclusionManager:
         self.args= OptionalArguments(**args.__dict__)
         self.config= OptionalArguments(**Config._load_file_config())
 
-    def exclusion_by_words(self, path):
+    def _exclusion_by_words(self, path):
         ext = os.path.splitext(path)[1]
         name = os.path.basename(path).replace(ext, "")
                
@@ -49,17 +30,14 @@ class ExclusionManager:
                 return True         
         return False
 
-    def exclusion_by_ext(self, path):
+    def _exclusion_by_ext(self, path):
         ext = os.path.splitext(path)[1]       
         
         if ext in self.args.exclude_ext or ext in self.config.exclude_ext: 
             return True
         return False
 
-    def exclusion_by_min_size(self, path):
-        """
-        True si el archivo de path pesa menos que size
-        """        
+    def _exclusion_by_min_size(self, path):     
         if type(self.args.min_size)==int:
             filesize = os.path.getsize(path)
             if filesize < self.args.min_size:
@@ -70,10 +48,7 @@ class ExclusionManager:
                 return True
         return False
 
-    def exclusion_by_max_size(self, path):
-        """
-        True si el archivo de path pesa más que size
-        """
+    def _exclusion_by_max_size(self, path):
         if type(self.args.max_size)==int:
             filesize = os.path.getsize(path)
             if filesize > self.args.max_size:
@@ -86,20 +61,31 @@ class ExclusionManager:
         return False
 
     def is_skipped(self, path):        
-        if self.exclusion_by_ext(path):
+        if self._exclusion_by_ext(path):
             return True
-        elif  self.exclusion_by_words(path):
+        elif  self._exclusion_by_words(path):
             return True
-        elif self.exclusion_by_min_size(path):
+        elif self._exclusion_by_min_size(path):
             return True
-        elif self.exclusion_by_max_size(path):
+        elif self._exclusion_by_max_size(path):
             return True
         return False
-
-
+    
+    def __call__(self, paths:list):
+        """
+        Devuelve una lista de path sin los archivos que cumplan alguno de los argumentos de exclusión.
+        Parametros:
+            paths (list of strings):
+                Una lista de rutas de los archivos a filtrar
+        """        
+        for path in paths[:]:
+            if self.is_skipped(path): 
+                paths.remove(path)
+        return paths
+        
 
 class Config(OptionalArguments):    
-    path = "config.yaml"
+    path = PATH_CONFIG
     
     def __init__(self):
         config = Config._load_file_config()

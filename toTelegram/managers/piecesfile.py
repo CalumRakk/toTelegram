@@ -108,7 +108,7 @@ class PiecesFile:
             self.pieces = self.split()
             self.save()
 
-        print("[UPDATE]")
+        print("\t[UPDATE]")
         for piece in self.pieces:
             if piece.message == None:
                 caption = piece.filename
@@ -136,7 +136,7 @@ class PiecesFile:
         """
         Divide el archivo en partes al limite de Telegram
         """
-        print("[SPLIT]")
+        print("\t[SPLIT]")
         split = Split(self.file.path)
         output = os.path.join(PATH_CHUNK, self.file.filename)
         fileparts = split(chunk_size=FILESIZE_LIMIT, output=output)

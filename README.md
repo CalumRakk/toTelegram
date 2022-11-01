@@ -65,7 +65,7 @@ Al pasarle la ruta de una carpeta al comando update, cada uno de los archivos de
 
      python main.py update "myfolder"
 
-## Argumentos de exclusión
+### Argumentos de exclusión
 Quizas quiera omitir X o Y archivo a la hora de subir los archivos de una carpeta. Para eso existen los argumentos de exclusión. Por ejemplo, el siguiente comando sube todos los archivos de la carpeta `myfolder` exceptos los que pesan menos de 100 MB
 
      python main.py update "myfolder" --min-size 100MB
