@@ -6,19 +6,20 @@ import lzma
 from typing import List
 
 
-from ..telegram import MessagePlus, telegram
+from ..telegram import MessagePlus
 from ..file import File
 from ..functions import attributes_to_json, check_file_name_length, get_part_filepart, TemplateSnapshot
 from ..split import Split
-from ..constants import (EXT_JSON_XZ, FILESIZE_LIMIT, PATH_BACKUPS,
-                        VERSION, PATH_CHUNK, WORKTABLE)
-
+from ..constants import (EXT_JSON_XZ, FILESIZE_LIMIT,
+                        VERSION)
+from ..config import Config
+from ..telegram import Telegram
 
 class Piece:
-    @classmethod
-    def from_json(cls, json_data):
-        json_data["message"] = MessagePlus.from_json(json_data["message"])
-        return Piece(**json_data)
+    # @classmethod
+    # def from_json(cls, json_data):
+    #     json_data["message"] = MessagePlus(**json_data["message"])
+    #     return Piece(**json_data)
 
     @classmethod
     def from_path(cls, path, message=None):
@@ -34,7 +35,7 @@ class Piece:
     
     @property
     def path(self):
-        return os.path.join(PATH_CHUNK, self.filename)
+        return os.path.join(Config.path_chunk, self.filename)
     @property
     def filename_for_telegram(self):
         if check_file_name_length(self.filename):
@@ -51,31 +52,17 @@ class Piece:
 
 
 class PiecesFile:
-    @classmethod
-    def from_file(cls, file: File):
-        """
-        Devuelve una instancia de PiecesFile que conserva el valor de .path
-        """
-        cache_pieces = os.path.join(WORKTABLE, file.md5sum)
-        if os.path.exists(cache_pieces):
-            with open(cache_pieces, 'r') as f:
-                json_data = json.load(f)
-            pieces = []
-            for doc in json_data["pieces"]:
-                pieces.append(Piece.from_json(doc))
-            return PiecesFile(file=file, pieces=pieces)
-
-        return PiecesFile(file=file, pieces=None)
-    
-    def __init__(self, file: File = None, pieces=None):
-        self.kind = "pieces-file"
+    config= Config()
+    telegram= Telegram()    
+    def __init__(self, kind=None, file: File = None, pieces=None):
+        self.kind = kind or "pieces-file"
         self.file = file
         self.pieces = pieces
-
+    
     @property
     def is_split_finalized(self):
         """
-        True si el archivo ha sido dividido en piezas y sus piezas existen en el cache.
+        True si el archivo ha sido dividido en piezas y si sus piezas existen localmente para poder ser usadas. 
         """
         if bool(self.pieces) == False:
             return False
@@ -102,7 +89,7 @@ class PiecesFile:
 
     def update(self):
         """
-        Sube a Telegram y elimina la pieza del PC
+        Sube el archivo a Telegram
         """
         if not self.is_split_finalized:
             self.pieces = self.split()
@@ -117,7 +104,7 @@ class PiecesFile:
                 if not check_file_name_length(filename):
                     filename= self.file.md5sum + os.path.splitext(filename)[1]                
 
-                piece.message = telegram.update(
+                piece.message = self.telegram.update(
                     piece.path, caption=caption, filename=filename)
                 os.remove(piece.path)
                 self.save()
@@ -125,7 +112,7 @@ class PiecesFile:
             print("\t", piece.filename, "DONE.")
 
     def save(self):
-        path = os.path.join(WORKTABLE, self.file.md5sum)
+        path = os.path.join(self.config.worktable, self.file.md5sum)
         json_data = self.to_json()
         json_data["verion"] = VERSION
 
@@ -138,7 +125,7 @@ class PiecesFile:
         """
         print("\t[SPLIT]")
         split = Split(self.file.path)
-        output = os.path.join(PATH_CHUNK, self.file.filename)
+        output = os.path.join(Config.path_chunk, self.file.filename)
         fileparts = split(chunk_size=FILESIZE_LIMIT, output=output)
 
         pieces = []
@@ -156,3 +143,21 @@ class PiecesFile:
                     
         with lzma.open(path, "wt") as f:
             json.dump(template.to_json(), f)
+    
+    @classmethod
+    def from_file(cls, file: File):
+        """
+        Devuelve una instancia de PiecesFile que conserva el valor de .path
+        """
+        cache_pieces = os.path.join(cls.config.worktable, file.md5sum)
+        
+        if os.path.exists(cache_pieces):
+            with open(cache_pieces, 'r') as f:
+                json_data = json.load(f)
+            pieces = []
+            for doc in json_data["pieces"]:
+                doc["message"]= MessagePlus() if doc["message"] else None
+                pieces.append(Piece(**doc))
+            return PiecesFile(file=file, pieces=pieces)
+
+        return PiecesFile(file=file, pieces=None)

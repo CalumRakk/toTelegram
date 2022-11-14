@@ -15,8 +15,8 @@ update_parse.add_argument(
     '--exclude-words', nargs="+", default=[])
 update_parse.add_argument(
     '--exclude-ext', nargs="+", default=[])
-update_parse.add_argument('--min-size', default=False)
-update_parse.add_argument('--max-size',default=False)
+update_parse.add_argument('--min-size', default=None)
+update_parse.add_argument('--max-size',default=None)
 
 
 if __name__ == "__main__":

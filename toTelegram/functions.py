@@ -11,13 +11,13 @@ import filetype
 import ffmpeg
 from humanfriendly import parse_size
 
-from .constants import (FILE_NAME_LENGTH_LIMIT, PATH_METADATA,VERSION,
+from .config import Config
+from .constants import (FILE_NAME_LENGTH_LIMIT,VERSION,
                         REGEX_FILEPART_OF_STRING,
-                        REGEX_PART_OF_FILEPART, PYTHON_DATA_TYPES, PATH_MD5SUM)
+                        REGEX_PART_OF_FILEPART, PYTHON_DATA_TYPES)
 
 EXCLUDE_FOLLOWING_KEY = ["SourceFile", "File:FileName", "File:Directory", "File:FileModifyDate",
                          "File:FileAccessDate", "File:FilePermissions", "File:FileSize", "File:ZoneIdentifier"]
-
 
 def any_to_list(string):
     if string==None:
@@ -30,13 +30,14 @@ def any_to_list(string):
 
 def any_to_bytes(size): 
     if size==None:
-        return False
+        return None
     if type(size)==int:
         return size
     if type(size)==float:
         return int(size)
-    return parse_size(size)
-
+    if type(size)==str:
+        return parse_size(size)
+    raise ValueError
 
 class TemplateSnapshot:
     def __init__(self,manager):
@@ -133,15 +134,15 @@ def get_or_create_metadata(path, mimetype=None, md5sum=None):
     if md5sum==None:
         md5sum= get_or_create_md5sum(path)
         
-    cache_path= os.path.join(PATH_METADATA, md5sum)
+    cache_path= os.path.join(Config.path_metadata, md5sum)
     
     if os.path.exists(cache_path):
         with open(cache_path, 'r') as f:
             json_data= json.load(f)
         if json_data.get("file") and json_data.get["file"].get("metadata"):
             return json_data["file"]["metadata"]   
-    
-    if "image" in mimetype:
+    # TODO: PARECE QUE SIEMPRE SE VUELVE A GENERAR LOS METADATOS EN VEZ DE TOMARLOS DEL CACHE.
+    if "image" in mimetype: 
         metadata= create_metadata_by_exiftool(path)
     elif "video" in mimetype:
         metadata= ffmpeg.probe(path)
@@ -186,7 +187,7 @@ def get_or_create_md5sum(path):
     """
     stat_result = os.stat(path)
     inodo_name = str(stat_result.st_dev) + "-" + str(stat_result.st_ino)
-    cache_path = os.path.join(PATH_MD5SUM, inodo_name)
+    cache_path = os.path.join(Config.path_md5sum, inodo_name)
 
     if os.path.exists(cache_path):
         with open(cache_path, 'r', encoding="UTF-8") as file:
@@ -224,7 +225,7 @@ def get_part_filepart(filepart):
 
 def create_md5sum_by_hashlib(path, mute=True):
     if mute:
-        print("GENERANDO MD5SUM")
+        print("\tGENERANDO MD5SUM")
     hash_md5 = hashlib.md5()
     with open(path, "rb") as f:
         for chunk in iter(lambda: f.read(4096), b""):

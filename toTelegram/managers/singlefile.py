@@ -4,11 +4,12 @@ import lzma
 
 from ..constants import EXT_JSON_XZ
 from ..functions import check_file_name_length, attributes_to_json,TemplateSnapshot
-from ..telegram import telegram
+from ..telegram import Telegram
 from ..file import File
 
 
 class SingleFile:
+    telegram= Telegram()
     def __init__(self,
                  file: File,
                  message= None
@@ -25,7 +26,7 @@ class SingleFile:
         caption = self.filename
         filename = self.filename_for_telegram
         path= self.path
-        self.message = telegram.update(path, caption=caption, filename=filename)
+        self.message = self.telegram.update(path, caption=caption, filename=filename)
         if remove:
             os.remove(self.path)     
 
@@ -54,4 +55,4 @@ class SingleFile:
     def filename_for_telegram(self):
         if check_file_name_length(self.file.path):
             return self.file.filename
-        return self.file.md5sum + self.file.suffix
+        return self.file.md5sum + os.path.splitext(self.file.filename)[1]

@@ -11,10 +11,12 @@ __pycache__
 /me.session
 /test.py
 *.txt
-
+/mkdocs.yml
 !toTelgram/
 /.toTelegram_old
 /.ELIMINAR
 /tests
 !/split
 !/requirements.txt
+site/
+/docs
