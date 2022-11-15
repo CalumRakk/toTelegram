@@ -3,9 +3,9 @@ import os
 import lzma
 
 from ..constants import EXT_JSON_XZ
-from ..functions import check_file_name_length, attributes_to_json,TemplateSnapshot
+from ..functions import is_filename_too_long, attributes_to_json,TemplateSnapshot
 from ..telegram import Telegram
-from ..file import File
+from ..types.file import File
 
 
 class SingleFile:
@@ -25,6 +25,8 @@ class SingleFile:
         """       
         caption = self.filename
         filename = self.filename_for_telegram
+        if is_filename_too_long(filename):
+            filename= self.file.md5sum + os.path.splitext(filename)[1] 
         path= self.path
         self.message = self.telegram.update(path, caption=caption, filename=filename)
         if remove:
@@ -53,6 +55,6 @@ class SingleFile:
         return self.file.path
     @property
     def filename_for_telegram(self):
-        if check_file_name_length(self.file.path):
+        if is_filename_too_long(self.file.path):
             return self.file.filename
         return self.file.md5sum + os.path.splitext(self.file.filename)[1]

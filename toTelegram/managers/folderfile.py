@@ -8,7 +8,7 @@ from typing import List
 
 from ..constants import EXT_TAR, PATH_BACKUPS, EXT_JSON_XZ, MINIMUM_SIZE_TO_BACKUP
 from ..functions import attributes_to_json, get_all_files_from_directory, get_size_of_files, TemplateSnapshot
-from ..file import SubFile, File
+from ..types.file import SubFile, File
 from .singlefile import SingleFile
 from .piecesfile import PiecesFile
 from ..telegram import telegram

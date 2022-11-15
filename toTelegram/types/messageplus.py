@@ -1,22 +1,23 @@
 
-from typing import Optional
+from typing import Optional, Union
 from pyrogram.types.messages_and_media.document import Document
 from ..functions import attributes_to_json
 from pyrogram.types.messages_and_media.message import Message
 
 class MessagePlus:
     def __init__(self,
-                 file_name: Optional[int] = None,
-                 message_id: Optional[int] = None,
-                 size: Optional[int] = None,
-                 chat_id: Optional[int] = None,
-                 link: Optional[int] = None,
+                 file_name: str,
+                 message_id: int,
+                 size: int,
+                 chat_id: int,
+                 link: str,
                  ) -> None:
         self.file_name = file_name
         self.message_id = message_id
         self.size = size
         self.chat_id = chat_id
         self.link = link
+        
     def to_json(self) -> dict:
         return attributes_to_json(self)
 
@@ -63,4 +64,5 @@ class MessagePlus:
         size = json_data["size"]
         chat_id = json_data["chat_id"]
         link = json_data["link"]
-        return MessagePlus(file_name=file_name, message_id=message_id, size=size, chat_id=chat_id, link=link)
+        parent= json_data["parent"]
+        return MessagePlus(file_name=file_name, message_id=message_id, size=size, chat_id=chat_id, link=link,parent=parent)

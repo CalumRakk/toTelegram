@@ -9,7 +9,7 @@ from datetime import datetime
 import exiftool
 import filetype
 import ffmpeg
-from humanfriendly import parse_size
+
 
 from .config import Config
 from .constants import (FILE_NAME_LENGTH_LIMIT,VERSION,
@@ -18,26 +18,6 @@ from .constants import (FILE_NAME_LENGTH_LIMIT,VERSION,
 
 EXCLUDE_FOLLOWING_KEY = ["SourceFile", "File:FileName", "File:Directory", "File:FileModifyDate",
                          "File:FileAccessDate", "File:FilePermissions", "File:FileSize", "File:ZoneIdentifier"]
-
-def any_to_list(string):
-    if string==None:
-        return []
-    if type(string)==list:
-        return string
-    if not type(string):
-        raise ValueError    
-    return [i.strip() for i in string.split(',')]
-
-def any_to_bytes(size): 
-    if size==None:
-        return None
-    if type(size)==int:
-        return size
-    if type(size)==float:
-        return int(size)
-    if type(size)==str:
-        return parse_size(size)
-    raise ValueError
 
 class TemplateSnapshot:
     def __init__(self,manager):
@@ -233,48 +213,14 @@ def create_md5sum_by_hashlib(path, mute=True):
     return hash_md5.hexdigest()
 
 
-def check_of_input(path: str, cut):
+
+def is_filename_too_long(path) -> Union[str, bool]:
     """
-    Valia la longitud del nombre de los archivos.
-    Devuelve una lista de path
-    """
-    path = path.replace('"', "").replace("'", "")
-    path = fr"{path}"
-    if os.path.exists(path):
-        if os.path.isfile(path):
-            if not check_file_name_length(path):
-                if cut:
-                    return [cut_filename(path)]
-                raise ArgumentTypeError(
-                    f"El nombre del archivo es muy grande - Maximo de caracteres es {FILE_NAME_LENGTH_LIMIT}")
-            return [path]
-
-        paths = [os.path.join(path, file) for file in os.listdir(path)]
-        for path in paths[:]:
-            if not os.path.isfile(path):
-                paths.remove(path)
-                continue
-
-            if path.endswith(".txt") or path.endswith(".yaml") or path.endswith(".yml"):
-                paths.remove(path)
-                continue
-
-            if not check_file_name_length(path):
-                if cut:
-                    paths.append(cut_filename(path))
-                paths.remove(path)
-        return paths
-
-    raise ArgumentTypeError(f"No existe la ruta: {path}")
-
-
-def check_file_name_length(path) -> Union[str, bool]:
-    """
-    True si el nombre del archivo no pasa el limite de caracteres de telegram para el filename\n
+    True si el nombre del archivo pasa el limite de caracteres de telegram para el filename\n
     Tiene en cuenta la extensión del archivo.
     """
     filename = os.path.basename(path)
-    if len(filename) <= FILE_NAME_LENGTH_LIMIT:
+    if len(filename) > FILE_NAME_LENGTH_LIMIT:
         return True
     return False
 

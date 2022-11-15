@@ -7,53 +7,16 @@ from typing import List
 
 
 from ..telegram import MessagePlus
-from ..file import File
-from ..functions import attributes_to_json, check_file_name_length, get_part_filepart, TemplateSnapshot
+from ..types.file import File
+from ..functions import attributes_to_json, is_filename_too_long, get_part_filepart, TemplateSnapshot
 from ..split import Split
-from ..constants import (EXT_JSON_XZ, FILESIZE_LIMIT,
-                        VERSION)
+from .. import constants
 from ..config import Config
 from ..telegram import Telegram
+from ..types.piece import Piece
 
-class Piece:
-    # @classmethod
-    # def from_json(cls, json_data):
-    #     json_data["message"] = MessagePlus(**json_data["message"])
-    #     return Piece(**json_data)
-
-    @classmethod
-    def from_path(cls, path, message=None):
-        filename = os.path.basename(path)
-        size = os.path.getsize(path)
-        return Piece(filename=filename, size=size, message=message)
-
-    def __init__(self, filename, size, message=None, kind=None):
-        self.kind = kind or "#piece"
-        self.filename = filename
-        self.size = size
-        self.message = message
-    
-    @property
-    def path(self):
-        return os.path.join(Config.path_chunk, self.filename)
-    @property
-    def filename_for_telegram(self):
-        if check_file_name_length(self.filename):
-            return self.filename
-        suffix = os.path.splitext(self.filename)[1]
-        return self.md5sum + suffix
-
-    @property
-    def part(self) -> str:
-        return get_part_filepart(self.path)
-
-    def to_json(self):
-        return attributes_to_json(self)
-
-
-class PiecesFile:
-    config= Config()
-    telegram= Telegram()    
+class PiecesFile(Config ): 
+    telegram= Telegram()
     def __init__(self, kind=None, file: File = None, pieces=None):
         self.kind = kind or "pieces-file"
         self.file = file
@@ -101,7 +64,7 @@ class PiecesFile:
                 caption = piece.filename
                 filename = piece.filename
                                 
-                if not check_file_name_length(filename):
+                if is_filename_too_long(filename):
                     filename= self.file.md5sum + os.path.splitext(filename)[1]                
 
                 piece.message = self.telegram.update(
@@ -112,9 +75,9 @@ class PiecesFile:
             print("\t", piece.filename, "DONE.")
 
     def save(self):
-        path = os.path.join(self.config.worktable, self.file.md5sum)
+        path = os.path.join(self.worktable, self.file.md5sum)
         json_data = self.to_json()
-        json_data["verion"] = VERSION
+        json_data["verion"] =constants.VERSION
 
         with open(path, "w") as file:
             json.dump(json_data, file)
@@ -125,8 +88,8 @@ class PiecesFile:
         """
         print("\t[SPLIT]")
         split = Split(self.file.path)
-        output = os.path.join(Config.path_chunk, self.file.filename)
-        fileparts = split(chunk_size=FILESIZE_LIMIT, output=output)
+        output = os.path.join(self.path_chunk, self.file.filename)
+        fileparts = split(chunk_size=constants.FILESIZE_LIMIT, output=output)
 
         pieces = []
         for path in fileparts:
@@ -139,7 +102,7 @@ class PiecesFile:
                            
         dirname= os.path.dirname(self.file.path)
         filename= os.path.basename(self.file.path)
-        path= os.path.join(dirname, filename+ EXT_JSON_XZ)
+        path= os.path.join(dirname, filename+ constants.EXT_JSON_XZ)
                     
         with lzma.open(path, "wt") as f:
             json.dump(template.to_json(), f)
@@ -149,14 +112,14 @@ class PiecesFile:
         """
         Devuelve una instancia de PiecesFile que conserva el valor de .path
         """
-        cache_pieces = os.path.join(cls.config.worktable, file.md5sum)
+        cache_pieces = os.path.join(cls.worktable, file.md5sum)
         
         if os.path.exists(cache_pieces):
             with open(cache_pieces, 'r') as f:
                 json_data = json.load(f)
             pieces = []
             for doc in json_data["pieces"]:
-                doc["message"]= MessagePlus() if doc["message"] else None
+                doc["message"]= MessagePlus(**doc["message"]) if doc["message"] else None
                 pieces.append(Piece(**doc))
             return PiecesFile(file=file, pieces=pieces)
 

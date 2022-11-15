@@ -1,5 +1,5 @@
 
-import os.path
+import os
 import re
 
 MINIMUM_SIZE_TO_BACKUP= 524288000
@@ -19,5 +19,5 @@ REGEX_PART_OF_FILEPART = re.compile(r'(?<=_)\d+-\d+')
 REGEX_FILEPART_OF_STRING = re.compile("(?<=').*?(?=')")
 PYTHON_DATA_TYPES= [int,float,str, bool, set, list, tuple,dict,type(None)]
 
-PATH_CONFIG= r"config.yaml"
+PATH_CONFIG= "leo.yaml" if os.path.exists("debug.txt") else "config.yaml"
 WORKTABLE= os.path.join("D:\.TEMP","toTelegram")  

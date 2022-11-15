@@ -1,8 +1,8 @@
 
 import os
 import json
-from .functions import get_or_create_md5sum, attributes_to_json, create_mimeType, get_or_create_metadata
-from .constants import FILESIZE_LIMIT, WORKTABLE
+from ..functions import get_or_create_md5sum, attributes_to_json, create_mimeType, get_or_create_metadata
+from .. import constants
 from pathlib import Path
 
 
@@ -54,7 +54,7 @@ class File:
         """
         Devuelve el tipo de manager que se debe usar con este archivo.
         """
-        return "pieces-file" if self.size > FILESIZE_LIMIT else "single-file"
+        return "pieces-file" if self.size > constants.FILESIZE_LIMIT else "single-file"
     @classmethod
     def from_json(cls, Json: dict):
         # TODO: POR CONVENCIÓN TODO MÉTODO from_json tiene que validar los tipos.
@@ -92,40 +92,3 @@ class File:
                     )
         file._path = path
         return file
-
-
-
-
-class SubFile(File):
-    @classmethod
-    def from_json(cls, json_data):
-        # TODO: POR CONVENCIÓN TODO MÉTODO from_json tiene que validar los tipos.
-        return SubFile(**json_data)
-    @classmethod
-    def from_path(cls, path):        
-        path = str(path)
-        folder= list(Path(path).parent.parts[1:])
-        filename = os.path.basename(path)
-        fileExtension = os.path.splitext(path)[1]
-        mimeType = create_mimeType(path)
-        md5sum = get_or_create_md5sum(path)
-        size = os.path.getsize(path)
-        metadata = get_or_create_metadata(path, mimeType, md5sum)
-
-        file = SubFile(folder=folder,
-                    filename=filename,
-                    fileExtension=fileExtension,
-                    mimeType=mimeType,
-                    md5sum=md5sum,
-                    size=size,
-                    metadata=metadata
-                    )
-        file._path = path
-        return file
-    
-        
-    def __init__(self, folder, filename=None, fileExtension=None, mimeType=None, md5sum=None, size=None, metadata=None):
-        self.folder = folder
-        super().__init__(filename=filename, fileExtension=fileExtension, mimeType=mimeType,
-                          md5sum=md5sum, size=size, metadata=metadata)
-    
