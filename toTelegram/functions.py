@@ -16,8 +16,7 @@ from .constants import (FILE_NAME_LENGTH_LIMIT,VERSION,
                         REGEX_FILEPART_OF_STRING,
                         REGEX_PART_OF_FILEPART, PYTHON_DATA_TYPES)
 
-EXCLUDE_FOLLOWING_KEY = ["SourceFile", "File:FileName", "File:Directory", "File:FileModifyDate",
-                         "File:FileAccessDate", "File:FilePermissions", "File:FileSize", "File:ZoneIdentifier"]
+METADATA_KEY_TO_BE_EXCLUDED = ["format.filename"]
 
 class TemplateSnapshot:
     def __init__(self,manager):
@@ -118,19 +117,21 @@ def get_or_create_metadata(path, mimetype=None, md5sum=None):
     
     if os.path.exists(cache_path):
         with open(cache_path, 'r') as f:
-            json_data= json.load(f)
-        if json_data.get("file") and json_data.get["file"].get("metadata"):
-            return json_data["file"]["metadata"]   
-    # TODO: PARECE QUE SIEMPRE SE VUELVE A GENERAR LOS METADATOS EN VEZ DE TOMARLOS DEL CACHE.
+            return json.load(f)
+
     if "image" in mimetype: 
         metadata= create_metadata_by_exiftool(path)
+        metadata.pop("SourceFile")
+        metadata.pop("File:Directory")
     elif "video" in mimetype:
         metadata= ffmpeg.probe(path)
-    
+        metadata["format"].pop("filename")
+
     with open(cache_path, 'w') as f:
         json.dump(metadata,f)
     return metadata
 
+    
 
 def create_mimeType(path):
     """

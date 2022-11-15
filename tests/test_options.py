@@ -15,13 +15,21 @@ class Namespace:
         return None
     
 class TestOptions(unittest.TestCase):
-    def test_update_by_singlefile(self):
+    def test_update_by_piecesfile(self):
         """
-        Prueba de subida de un archivo singlefile
+        Comprueba la opción update para un archivo tipo piecesfile
         """
         toTelegram.constants.FILESIZE_LIMIT= 1000000
         args = Namespace(path=r"tests\video.mp4", b='c')
 
+        self.assertEqual(update(args), True)
+    
+    def test_update_by_singlefile(self):
+        """
+        Comprueba la opción update para un archivo tipo singlefile
+        """
+        toTelegram.constants.FILESIZE_LIMIT= FILESIZE_LIMIT
+        args = Namespace(path=r"tests\video.mp4", b='c')
         self.assertEqual(update(args), True)
     
 

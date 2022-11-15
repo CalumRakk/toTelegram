@@ -5,6 +5,7 @@ from .functions import get_all_files_from_directory
 from typing import List, Union
 from humanfriendly import parse_size
 import re
+from .constants import EXT_JSON_XZ
 
 REGEX_STRING_TO_LIST = re.compile('["\'].*?["\']|.*? ')
 
@@ -33,12 +34,6 @@ def string_to_int(string: Union[int, str]):
 
 
 class ExclusionManager:
-    """
-    Args:
-        Config (_type_): _description_
-        OptionalExclusionArguments (_type_): _description_
-    """
-
     def __init__(self, exclude_words=None, exclude_ext=None, min_size=None, max_size=None):
         self.exclude_words = exclude_words or string_to_list(
             Config.exclude_words)
@@ -51,7 +46,13 @@ class ExclusionManager:
         print("\n[Argumentos de exclusión encontrados:")
         for key, value in self.__dict__.items():
             print(key, value)
-
+    def exclusion_by_exists(self, path):
+        """True si existe en un archivo .json.xz en la misma ubicacíon del archivo        
+        """
+        if os.path.exists( path + EXT_JSON_XZ):
+            return True
+        return False
+        
     def exclusion_by_words(self, path) -> bool:
         """True si alguna de las palabras self.exclude_ext está dentro del nombre del archivo.
         Args:
@@ -120,11 +121,11 @@ class ExclusionManager:
 
         
         methods = (self.exclusion_by_ext, self.exclusion_by_words,
-                   self.exclusion_by_min_size, self.exclusion_by_max_size)
+                   self.exclusion_by_min_size, self.exclusion_by_max_size,self.exclusion_by_exists)
 
         for path in paths[:]:
             for method in methods:
                 if method(path):
-                    os.remove(path)
+                    paths.remove(path)
                     break
         return paths
