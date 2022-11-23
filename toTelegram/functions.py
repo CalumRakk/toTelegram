@@ -61,7 +61,7 @@ def get_all_folders_from_directory(path):
         res.extend(pahts)
     return res    
 
-def get_all_files_from_directory(path):
+def get_all_files_from_directory(path,ext=None):
     """
     Devuelve todos los archivos de un directorio con su ruta completa.
     """
@@ -69,8 +69,11 @@ def get_all_files_from_directory(path):
         raise Exception("No es una carpeta", path)
     res = []
     for (dir_path, dir_names, file_names) in os.walk(path):
-        res.extend([os.path.join(dir_path, filename)
-                    for filename in file_names])
+        p_list=[]
+        for filename in file_names:
+            if os.path.splitext(filename)[1]==ext or ext==None:
+                p_list.append(os.path.join(dir_path, filename))
+        res.extend(p_list)        
     return res
 def attributes_to_json(self):
     """

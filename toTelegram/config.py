@@ -55,7 +55,7 @@ class Config(OptionalExclusionArguments):
 
     # VARIABLES NO REPETIRSE
     worktable = yaml_data.get("worktable") or WORKTABLE
-    registry = yaml_data.get("registry")
+    path_snapshot_files = yaml_data.get("path_snapshot_files")
 
     exclude_words = yaml_data.get("exclude_words")
     exclude_ext = yaml_data.get("exclude_ext")

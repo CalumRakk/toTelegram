@@ -1,11 +1,13 @@
 
 import os
 from .config import Config, OptionalExclusionArguments
-from .functions import get_all_files_from_directory
+from .functions import get_all_folders_from_directory, get_all_files_from_directory
 from typing import List, Union
 from humanfriendly import parse_size
 import re
 from .constants import EXT_JSON_XZ
+import lzma
+import json
 
 REGEX_STRING_TO_LIST = re.compile('["\'].*?["\']|.*? ')
 
@@ -40,15 +42,22 @@ class ExclusionManager:
         self.exclude_ext = exclude_ext or string_to_list(Config.exclude_ext)
         self.min_size = min_size or string_to_int(Config.min_size)
         self.max_size = max_size or string_to_int(Config.max_size)
+        self.path_snapshot_files= string_to_int(Config.path_snapshot_files)
         self.print()
 
     def print(self):
         print("\n[Argumentos de exclusión encontrados:")
         for key, value in self.__dict__.items():
             print(key, value)
+    
     def exclusion_by_exists(self, path):
         """True si existe en un archivo .json.xz en la misma ubicacíon del archivo        
         """
+        # if getattr("_md5sum_list",False):
+        #     folders= [get_all_folders_from_directory(path) for path in self.path_snapshot_files]
+        #     folders.extend(self.path_snapshot_files)
+                       
+                
         if os.path.exists( path + EXT_JSON_XZ):
             return True
         return False
@@ -66,16 +75,23 @@ class ExclusionManager:
                     return True
         return False
 
-    def exclusion_by_ext(self, path) -> bool:
+    def exclusion_by_ext(self, path:str) -> bool:
         """True si la extensión de path está dentro de la lista self.exclude_ext
         Args:
             path: ruta absoluta del archivo. 
-        """
+        """        
         if isinstance(self.exclude_ext, list):
             ext = os.path.splitext(path)[1]
             if ext in self.exclude_ext:
                 return True
-        return False
+        if path.endswith(EXT_JSON_XZ):
+            return True
+        return False       
+        # if isinstance(self.exclude_ext, list):
+        #     ext = os.path.splitext(path)[1]
+        #     if ext in self.exclude_ext:
+        #         return True
+        # return False
 
     def exclusion_by_min_size(self, path) -> bool:
         """True si path pesa menos que self.min_size
@@ -122,10 +138,12 @@ class ExclusionManager:
         
         methods = (self.exclusion_by_ext, self.exclusion_by_words,
                    self.exclusion_by_min_size, self.exclusion_by_max_size,self.exclusion_by_exists)
-
+        filterCount=0
         for path in paths[:]:
             for method in methods:
                 if method(path):
                     paths.remove(path)
+                    filterCount+=1
                     break
+        print(f"Archivos filtrados: {filterCount}")
         return paths

@@ -38,7 +38,7 @@ class Client:
         if getattr(self, "session_string", False)==False:
             print(string)
             os.system("pause")
-            print("Cargando...")
+            print("Cargando...",end="\r")
 
             client = ClientPyrogram("my_account", api_id=self.api_id,
                             api_hash=self.api_hash, in_memory=True)
@@ -54,7 +54,6 @@ class Client:
 
         client = ClientPyrogram("my_account", session_string=self.session_string)
         client.start()
-        print("Cargando...")
         return client
 
 
