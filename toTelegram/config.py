@@ -1,19 +1,20 @@
 
+from typing import Union
 import os
 import yaml
-# from .functions import attributes_to_json,any_to_list, any_to_bytes
+
 from .constants import WORKTABLE, PATH_CONFIG
-from typing import Union
+
 
 
 def load_config():
     """
     Devuelve las variables del archivo config. Cada key se devuelve en miniscula.
     """
-    with open(PATH_CONFIG, "rt") as fb:
+    with open(PATH_CONFIG, "rt", encoding="utf-8") as fb:
         config = yaml.load(fb, Loader=yaml.UnsafeLoader)
 
-    if config == None:
+    if config is None:
         raise Warning("El archivo config está vacio.")
 
     config_to_lower = {}
@@ -30,7 +31,11 @@ def check_file_config():
 
 
 class OptionalExclusionArguments:
-    def __init__(self, exclude_words: list, exclude_ext: list, min_size: Union[None, int], max_size: Union[None, int]):
+    def __init__(self,
+                 exclude_words: list,
+                 exclude_ext: list,
+                 min_size: Union[None, int],
+                 max_size: Union[None, int]):
         self.exclude_words = exclude_words
         self.exclude_ext = exclude_ext
         self.min_size = min_size
@@ -91,5 +96,5 @@ class Config(OptionalExclusionArguments):
         for key, value in config.items():
             config_to_upper[key.upper()] = value
 
-        with open(PATH_CONFIG, "wt") as fb:
+        with open(PATH_CONFIG, "wt", encoding="utf-8") as fb:
             yaml.dump(config_to_upper, fb, sort_keys=sort_keys)

@@ -1,29 +1,32 @@
 
 import os
-import json
-from ..functions import get_or_create_md5sum, attributes_to_json, create_mimeType, get_or_create_metadata
+
+from ..functions import get_or_create_md5sum, attributes_to_json, create_mimeType, get_or_create_metadata # pylint: disable=C0301
 from .. import constants
-from pathlib import Path
 
 
 class File:
     """File representa un archivo del sistema.
-    
     Parameters:
-        filename (str): 
+        filename (str):
             Nombre del archivo incluido su extensión.
-        fileExtension (str): 
+        fileExtension (str):
             Extensión del archivo completa, incluso si tiene doble extensión.
-        mimeType (str): 
+        mimeType (str):
             MimeType del archivo, ejemplo, `text/plain`
-        md5sum (str): 
+        md5sum (str):
             Suma de comprobación md5 del archivo.
-        size (int): 
+        size (int):
             Tamaño en bytes del archivo
-        metadata (dict): 
-            Diccionario con los metadatos arbitrarios del archivo. 
+        metadata (dict):
+            Diccionario con los metadatos arbitrarios del archivo.
     """
-    def __init__(self, filename:str, fileExtension:str, mimeType:str, md5sum:str, size:int, metadata:dict):
+    def __init__(self, filename:str,
+                 fileExtension:str,
+                 mimeType:str,
+                 md5sum:str,
+                 size:int,
+                 metadata:dict):
         self.kind = "file"
         self.filename = filename
         self.fileExtension = fileExtension
@@ -43,7 +46,7 @@ class File:
 
     @property
     def path(self):
-        """Devuelve la ruta absoluta del archivo.\n 
+        """Devuelve la ruta absoluta del archivo.\n
         **advertencia** Solo está disponible si el archivo fue instanciado via .from_path()
 
         """
@@ -57,18 +60,14 @@ class File:
         return "pieces-file" if self.size > constants.FILESIZE_LIMIT else "single-file"
     @classmethod
     def from_json(cls, Json: dict):
-        # TODO: POR CONVENCIÓN TODO MÉTODO from_json tiene que validar los tipos.
-        """Instancia esta clase a partir de un diccionario con los argumentos requeridos por el constructor.
-        """
         return File(**Json)
 
     @classmethod
     def from_path(cls, path:str):
-        """Crea una instancia de la clase a partir de un archivo del sistema. 
-        
+        """
+        Crea una instancia de la clase a partir de un archivo del sistema.
         No se requiere pasar más argumentos que el path del archivo. Este método
         hace uso del cache para ahorrarse tener que generar el md5sum nuevamente.
-
         Args:
             path : ubicación de un archivo existente en el sistema.
 
@@ -90,5 +89,5 @@ class File:
                     size=size,
                     metadata=metadata
                     )
-        file._path = path
+        setattr(file,"_path", path)
         return file

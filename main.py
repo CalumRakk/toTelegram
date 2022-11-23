@@ -2,7 +2,7 @@
 import argparse
 from toTelegram import update
 
-parser = argparse.ArgumentParser(prog='main.py', description='Script para subir archivos a telegram sin importar el tamaño.')
+parser = argparse.ArgumentParser(prog='main.py', description='Script para subir archivos a telegram sin importar el tamaño.') # pylint: disable=C0301
 subparse = parser.add_subparsers(dest='command', required=True)
 
 # COMANDO : UPDATE
@@ -23,3 +23,4 @@ if __name__ == "__main__":
     args = parser.parse_args()
     if args.command == 'update':
         update(args)
+        

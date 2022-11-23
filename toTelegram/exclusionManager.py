@@ -1,13 +1,14 @@
 
 import os
-from .config import Config, OptionalExclusionArguments
-from .functions import get_all_folders_from_directory, get_all_files_from_directory
-from typing import List, Union
-from humanfriendly import parse_size
 import re
+from typing import List, Union
+
+from humanfriendly import parse_size
+
+from .config import Config
+from .functions import get_all_files_from_directory
 from .constants import EXT_JSON_XZ
-import lzma
-import json
+
 
 REGEX_STRING_TO_LIST = re.compile('["\'].*?["\']|.*? ')
 
@@ -15,8 +16,8 @@ REGEX_STRING_TO_LIST = re.compile('["\'].*?["\']|.*? ')
 def string_to_list(string: Union[list, str]):
     """separa las palabras de un string en una lista
 
-    Añade en una lista las palabras que esten separadas por espacio o 
-    entre comillas  
+    Añade en una lista las palabras que esten separadas por espacio o
+    entre comillas
     """
     #     default: en valor que se devolverá si string no es uno de los tipos validos
     if isinstance(string, list):
@@ -42,30 +43,25 @@ class ExclusionManager:
         self.exclude_ext = exclude_ext or string_to_list(Config.exclude_ext)
         self.min_size = min_size or string_to_int(Config.min_size)
         self.max_size = max_size or string_to_int(Config.max_size)
-        self.path_snapshot_files= string_to_int(Config.path_snapshot_files)
+        self.path_snapshot_files = string_to_int(Config.path_snapshot_files)
         self.print()
 
     def print(self):
         print("\n[Argumentos de exclusión encontrados:")
         for key, value in self.__dict__.items():
             print(key, value)
-    
+
     def exclusion_by_exists(self, path):
-        """True si existe en un archivo .json.xz en la misma ubicacíon del archivo        
+        """True si el archivo a subir ha generado un archivo `json.xz`
         """
-        # if getattr("_md5sum_list",False):
-        #     folders= [get_all_folders_from_directory(path) for path in self.path_snapshot_files]
-        #     folders.extend(self.path_snapshot_files)
-                       
-                
-        if os.path.exists( path + EXT_JSON_XZ):
+        if os.path.exists(path + EXT_JSON_XZ):
             return True
         return False
-        
+
     def exclusion_by_words(self, path) -> bool:
         """True si alguna de las palabras self.exclude_ext está dentro del nombre del archivo.
         Args:
-            path: ruta absoluta del archivo. 
+            path: ruta absoluta del archivo.
         """
         if isinstance(self.exclude_words, list):
             ext = os.path.splitext(path)[1]
@@ -75,28 +71,23 @@ class ExclusionManager:
                     return True
         return False
 
-    def exclusion_by_ext(self, path:str) -> bool:
+    def exclusion_by_ext(self, path: str) -> bool:
         """True si la extensión de path está dentro de la lista self.exclude_ext
         Args:
-            path: ruta absoluta del archivo. 
-        """        
+            path: ruta absoluta del archivo.
+        """
         if isinstance(self.exclude_ext, list):
             ext = os.path.splitext(path)[1]
             if ext in self.exclude_ext:
                 return True
         if path.endswith(EXT_JSON_XZ):
             return True
-        return False       
-        # if isinstance(self.exclude_ext, list):
-        #     ext = os.path.splitext(path)[1]
-        #     if ext in self.exclude_ext:
-        #         return True
-        # return False
+        return False
 
     def exclusion_by_min_size(self, path) -> bool:
         """True si path pesa menos que self.min_size
         Args:
-            path: ruta absoluta del archivo. 
+            path: ruta absoluta del archivo.
         """
         if isinstance(self.min_size, int):
             filesize = os.path.getsize(path)
@@ -107,9 +98,8 @@ class ExclusionManager:
     def exclusion_by_max_size(self, path: str) -> bool:
         """True si path pesa más que self.max_size
         Args:
-            path: ruta absoluta del archivo. 
+            path: ruta absoluta del archivo.
         """
-        # No es necesario comprobar si el archivo existe, porque el path ha sido extraido directamente de un directorio o de un archivo existente.
         if isinstance(self.max_size, int):
             filesize = os.path.getsize(path)
             if filesize > self.max_size:
@@ -134,16 +124,14 @@ class ExclusionManager:
             paths = [path]
         else:
             raise FileNotFoundError(path)
-
-        
         methods = (self.exclusion_by_ext, self.exclusion_by_words,
-                   self.exclusion_by_min_size, self.exclusion_by_max_size,self.exclusion_by_exists)
-        filterCount=0
+                   self.exclusion_by_min_size, self.exclusion_by_max_size, self.exclusion_by_exists)
+        filterCount = 0
         for path in paths[:]:
             for method in methods:
                 if method(path):
                     paths.remove(path)
-                    filterCount+=1
+                    filterCount += 1
                     break
         print(f"Archivos filtrados: {filterCount}")
         return paths

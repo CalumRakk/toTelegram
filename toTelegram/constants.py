@@ -20,4 +20,5 @@ REGEX_FILEPART_OF_STRING = re.compile("(?<=').*?(?=')")
 PYTHON_DATA_TYPES= [int,float,str, bool, set, list, tuple,dict,type(None)]
 
 PATH_CONFIG= input("Nombre del archivo config a usar>>>").strip().replace(".yaml","")+".yaml" if os.path.exists("debug.txt") else "config.yaml"
-WORKTABLE= os.path.join("D:\.TEMP","toTelegram")  
+WORKTABLE= os.path.join(r"D:\.TEMP","toTelegram")
+  
