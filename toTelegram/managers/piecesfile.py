@@ -7,7 +7,7 @@ from typing import List
 
 from ..telegram import MessagePlus, Telegram
 from ..types.file import File
-from ..functions import attributes_to_json, is_filename_too_long, TemplateSnapshot
+from ..functions import attributes_to_json, is_filename_too_long, TemplateSnapshot, sort_parts
 from ..split import Split
 from .. import constants
 from ..config import Config
@@ -74,6 +74,30 @@ class PiecesFile:
                 self.save()
                 continue
             print("\t", piece.filename, "DONE.")
+        os.remove(os.path.join(Config.worktable, self.file.md5sum))
+
+    def download(self, args):
+        paths = []
+        for piece in self.pieces:
+            paths.append(Telegram.download(piece.message))
+
+        folder = os.path.dirname(
+            args.path) if args.output is None else os.path.dirname(args.output)
+        if not os.path.exists(folder):
+            os.makedirs(folder)
+
+        path = os.path.join(folder, self.file.filename)
+        CHUNK_SIZE = 30000000
+        with open(path, "wb") as fb:
+            for part in sort_parts(paths):
+                with open(part, "rb") as fb2:
+                    chunk = fb2.read(CHUNK_SIZE)
+                    while chunk:
+                        fb.write(chunk)
+                        chunk = fb2.read(CHUNK_SIZE)
+        for i in paths:
+            os.remove(i)
+        print(path)
 
     def save(self):
         path = os.path.join(Config.worktable, self.file.md5sum)
@@ -113,6 +137,7 @@ class PiecesFile:
         """
         Devuelve una instancia de PiecesFile que conserva el valor de .path
         """
+
         cache_pieces = os.path.join(Config.worktable, file.md5sum)
 
         if os.path.exists(cache_pieces):
@@ -126,3 +151,26 @@ class PiecesFile:
             return PiecesFile(file=file, pieces=pieces)
 
         return PiecesFile(file=file, pieces=None)
+
+    @classmethod
+    def from_json(cls, json_data):
+
+        if isinstance(json_data["file"], dict):
+            json_data["file"] = File(**json_data["file"])
+        elif isinstance(json_data["file"], File):
+            pass
+        else:
+            raise KeyError("")
+
+        pieces = []
+        for piece in json_data["pieces"]:
+            if isinstance(piece, dict):
+                pieces.append(Piece.from_json(piece))
+            elif isinstance(piece, Piece):
+                pieces.append(piece)
+            else:
+                raise KeyError("")
+
+        json_data["pieces"] = pieces
+
+        return PiecesFile(**json_data)

@@ -18,6 +18,24 @@ from .constants import (FILE_NAME_LENGTH_LIMIT,VERSION,
 
 METADATA_KEY_TO_BE_EXCLUDED = ["format.filename"]
 
+def sort_parts(parts:Union[list,str]):
+    if isinstance(parts, list):
+        anchor= parts[0]
+    else:
+        anchor= parts
+
+    string_parts = anchor.split("_")
+    total_parts= int(string_parts[-1].split("-")[1])
+    name= string_parts[0]
+
+    index=1
+    paths=[]
+    while index<=total_parts:
+        new_name= name + f"_{index}-{total_parts}"
+        index+=1
+        paths.append(os.path.join(Config.worktable,new_name))
+    return paths
+
 class TemplateSnapshot:
     def __init__(self,manager):
         self.kind= manager.kind

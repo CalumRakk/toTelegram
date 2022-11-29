@@ -1,7 +1,9 @@
 
 import os
+import json
+import lzma
 
-from ..functions import get_or_create_md5sum, attributes_to_json, create_mimeType, get_or_create_metadata # pylint: disable=C0301
+from ..functions import get_or_create_md5sum, attributes_to_json, create_mimeType, get_or_create_metadata  # pylint: disable=C0301
 from .. import constants
 
 
@@ -21,13 +23,17 @@ class File:
         metadata (dict):
             Diccionario con los metadatos arbitrarios del archivo.
     """
-    def __init__(self, filename:str,
-                 fileExtension:str,
-                 mimeType:str,
-                 md5sum:str,
-                 size:int,
-                 metadata:dict):
-        self.kind = "file"
+
+    def __init__(self,
+                 filename: str,
+                 fileExtension: str,
+                 mimeType: str,
+                 md5sum: str,
+                 size: int,
+                 metadata: dict,
+                 kind=None
+                 ):
+        self.kind = kind or "file"
         self.filename = filename
         self.fileExtension = fileExtension
         self.mimeType = mimeType
@@ -58,12 +64,13 @@ class File:
         Devuelve el tipo de manager que se debe usar con este archivo.
         """
         return "pieces-file" if self.size > constants.FILESIZE_LIMIT else "single-file"
-    @classmethod
-    def from_json(cls, Json: dict):
-        return File(**Json)
+
+    # @classmethod
+    # def from_json(cls, Json: dict):
+    #     return File(**Json)
 
     @classmethod
-    def from_path(cls, path:str):
+    def from_path(cls, path: str):
         """
         Crea una instancia de la clase a partir de un archivo del sistema.
         No se requiere pasar más argumentos que el path del archivo. Este método
@@ -89,5 +96,11 @@ class File:
                     size=size,
                     metadata=metadata
                     )
-        setattr(file,"_path", path)
+        setattr(file, "_path", path)
         return file
+
+    @classmethod
+    def from_snapshot(cls, path):
+        with lzma.open(path) as f:
+            file_content = json.load(f)
+        return cls.from_json(file_content["manager"]["file"])

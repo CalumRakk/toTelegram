@@ -1,5 +1,7 @@
 
 import os
+import lzma
+import json
 from .types.file import File
 from .managers import (PiecesFile, SingleFile)
 from .exclusionManager import ExclusionManager
@@ -30,3 +32,22 @@ def update(args):
         manager.update()
         manager.create_snapshot()
     return True
+
+
+def download(args):
+    Telegram.check_session()
+    Telegram.check_chat_id()
+    path = args.path
+    
+    if os.path.exists(path):
+        with lzma.open(path) as f:
+            json_data = json.load(f)
+
+        file = File(**json_data["manager"]["file"])
+        json_data["manager"]["file"] = file
+        if file.type == "pieces-file":            
+            manager = PiecesFile.from_json(json_data["manager"])
+        else:
+            manager = SingleFile.from_json(json_data["manager"])
+        
+        manager.download(args)

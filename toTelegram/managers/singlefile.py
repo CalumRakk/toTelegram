@@ -6,6 +6,7 @@ from ..constants import EXT_JSON_XZ
 from ..functions import is_filename_too_long, attributes_to_json, TemplateSnapshot
 from ..telegram import Telegram
 from ..types.file import File
+from ..types.messageplus import MessagePlus
 
 
 class SingleFile:
@@ -13,9 +14,10 @@ class SingleFile:
 
     def __init__(self,
                  file: File,
-                 message=None
+                 message=None,
+                 kind=None
                  ):
-        self.kind = "single-file"
+        self.kind = kind or "single-file"
         self.file = file
         self.message = message
 
@@ -33,6 +35,19 @@ class SingleFile:
             path, caption=caption, filename=filename)
         if remove:
             os.remove(self.path)
+
+    def download(self, args):
+
+        folder = os.path.dirname(
+            args.path) if args.output is None else os.path.dirname(args.output)
+
+        if not os.path.exists(folder):
+            os.makedirs(folder)
+
+        path = os.path.join(folder, self.file.filename)
+
+        Telegram.download(self.message, path=path)
+        print(path)
 
     def to_json(self):
         return attributes_to_json(self)
@@ -64,3 +79,22 @@ class SingleFile:
         if is_filename_too_long(self.file.path):
             return self.file.filename
         return self.file.md5sum + os.path.splitext(self.file.filename)[1]
+
+    @classmethod
+    def from_json(cls, json_data):
+
+        if isinstance(json_data["file"], dict):
+            json_data["file"] = File(**json_data["file"])
+        elif isinstance(json_data["file"], File):
+            pass
+        else:
+            raise KeyError("")
+
+        if isinstance(json_data["message"], dict):
+            json_data["message"] = MessagePlus(**json_data["message"])
+        elif isinstance(json_data["message"], MessagePlus):
+            pass
+        else:
+            raise KeyError("")
+
+        return SingleFile(**json_data)

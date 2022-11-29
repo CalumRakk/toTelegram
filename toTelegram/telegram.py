@@ -30,7 +30,7 @@ class Client:
 
     def __get__(self, obj, other):
         if getattr(self, "_client", False) is False:
-            setattr(self,"_client", self._get_client())
+            setattr(self, "_client", self._get_client())
         return getattr(self, "_client")
 
     def _get_client(self):
@@ -77,11 +77,34 @@ class Telegram:
         )
         return MessagePlus.from_message(message)
 
-    # def get_message(self, link: str) -> MessagePlus:
-    #     chat_id = "-100" + link.split("/")[-2]
-    #     iD = int(link.split("/")[-1])
-    #     message = self.client.get_messages(chat_id, iD)
-    #     return MessagePlus.from_message(message)
+    @classmethod
+    def download(cls, message_plus: MessagePlus, path=None)->str:
+        """descarga un archivo de Telegram
+
+        Args:
+            message_plus: objeto de la clase MessagePlus
+            path: Una ruta personalizada para guardar el archivo. Si no está presente el archivo se descarga en la carpeta de trabajo.
+
+        Returns:
+            str: ruta completa de donde se descargo el archivo.
+        """
+        chat_id = message_plus.chat_id
+        message_id = message_plus.message_id
+
+        output = path or os.path.join(Config.worktable, message_plus.file_name)
+        if not os.path.exists(output):
+            message = cls.client.get_messages(chat_id, message_id)
+            cls.client.download_media(message,
+                                      file_name=output,
+                                      progress=progress,
+                                      progress_args=(message_plus.file_name,)
+                                      )
+        return output
+
+    @classmethod
+    def get_message(cls, messageplus: MessagePlus) -> MessagePlus:
+
+        return cls.client.get_messages(int(str(cls.chat_id).replace("-", "-100")), messageplus.message_id)
 
     @classmethod
     def join_group(cls, invite_link):
@@ -103,14 +126,17 @@ class Telegram:
         - Entra al grupo si chat_id es una invitación valida
         """
         if isinstance(cls.chat_id, str):
+            if cls.chat_id.isdigit():
+                if not cls.chat_id.startswith("-100"):
+                    cls.chat_id.replace("-", "-100")
             match = INVITE_LINK_RE.match(cls.chat_id)
             if match:
                 chatMember = cls.join_group(cls.chat_id)
                 cls.chat_id = chatMember.id
                 Config.insert_or_update_field({"chat_id": cls.chat_id})
 
-            # Podría ser un el valor @username
             chatMember = cls.client.get_chat(cls.chat_id)
+
         else:
             try:
                 chatMember = cls.client.get_chat(cls.chat_id)
