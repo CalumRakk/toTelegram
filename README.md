@@ -25,7 +25,7 @@ Los dos primeros campos (`API_HASH` y `API_ID`) son las credenciales de una apli
 
 En caso de no tenerla, puedes crear tu propia aplicación siguiendo los siguientes pasos en: https://core.telegram.org/api/obtaining_api_id
 
-El último campo (`CHAT_ID`) es el `ID` o un `enlace de invitación` (como se ve arriba) del canal, grupo o chat de Telegram donde desea subir los archivos.
+El campo `CHAT_ID` es el `ID` en [formato de pyrogram](https://docs.pyrogram.org/topics/advanced-usage#chat-ids) o un `enlace de invitación` o `username` del canal, grupo o chat de Telegram donde desea subir los archivos.
 
 
 # Comandos

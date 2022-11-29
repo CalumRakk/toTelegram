@@ -125,34 +125,35 @@ class Telegram:
         Prueba si hace parte del grupo y prueba si tiene permisos para subir archivos.
         - Entra al grupo si chat_id es una invitación valida
         """
+        
         if isinstance(cls.chat_id, str):
-            if cls.chat_id.isdigit():
-                if not cls.chat_id.startswith("-100"):
-                    cls.chat_id.replace("-", "-100")
             match = INVITE_LINK_RE.match(cls.chat_id)
+            
             if match:
-                chatMember = cls.join_group(cls.chat_id)
-                cls.chat_id = chatMember.id
-                Config.insert_or_update_field({"chat_id": cls.chat_id})
-
-            chatMember = cls.client.get_chat(cls.chat_id)
-
-        else:
+                match= match.group()
+            else:
+                match= cls.chat_id                
+                
             try:
-                chatMember = cls.client.get_chat(cls.chat_id)
+                chatinfo = cls.client.get_chat(cls.chat_id) 
+                cls.chat_id= chatinfo.id # parece get_chat devuelve el id en el formato de pyrogram
+                Config.insert_or_update_field({"chat_id": cls.chat_id})
             except ChatIdInvalid:
-                chat_id = int("-100" + str(cls.chat_id).replace("-", ""))
-                chatMember = cls.client.get_chat(chat_id)
-                cls.chat_id = chat_id
-
-        if getattr(chatMember, "id", False) is False:
+                print("No se pudo obtener la info del chat_id. Asegurate que el chat_id este en el formato de pyrogram o que sea un enlace de invitación de Telegram")
+                exit()                 
+            
+        else:
+            chatinfo = cls.client.get_chat(cls.chat_id)
+            
+            
+        if getattr(chatinfo, "id", False) is False:
             print(f"El usuario no hace parte de chat_id {cls.chat_id}")
             exit()
-        if not chatMember.permissions.can_send_media_messages:
+        if not chatinfo.permissions.can_send_media_messages:
             print(
                 f"No tienes permisos para subir archivos en chat_id {cls.chat_id}")
             exit()
-        print("CHAT_ID:", chatMember.title)
+        print("CHAT_ID:", chatinfo.title)
 
     @classmethod
     def check_session(cls):
