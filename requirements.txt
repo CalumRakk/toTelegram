@@ -1,9 +1,8 @@
 
-
-ffmpeg-python>=0.2.0
 filetype>=1.1.
 PyExifTool>=0.5.4
 Pyrogram>=2.0.59
 PyYAML>=6.0
 TgCrypto>=1.2.4
 humanfriendly
+ffmpeg-python>=0.2.0

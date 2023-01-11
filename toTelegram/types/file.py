@@ -65,9 +65,6 @@ class File:
         """
         return "pieces-file" if self.size > constants.FILESIZE_LIMIT else "single-file"
 
-    # @classmethod
-    # def from_json(cls, Json: dict):
-    #     return File(**Json)
 
     @classmethod
     def from_path(cls, path: str):
@@ -98,9 +95,3 @@ class File:
                     )
         setattr(file, "_path", path)
         return file
-
-    @classmethod
-    def from_snapshot(cls, path):
-        with lzma.open(path) as f:
-            file_content = json.load(f)
-        return cls.from_json(file_content["manager"]["file"])

@@ -5,6 +5,7 @@ import json
 from argparse import ArgumentTypeError
 from typing import Union
 from datetime import datetime
+from pathlib import Path
 
 import exiftool
 import filetype

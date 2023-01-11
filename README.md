@@ -70,8 +70,16 @@ Todos estos argumentos pueden ir combinados si desea una mayor precisión.
 # download
 Para descargar un archivo en Telegram se le pasa como argumento al comando `download` la ubicación del archivo snapshot: 
 
-          python main.py download "myvideo.mp4.json.xz"
+     python main.py download "myvideo.mp4.json.xz"
 
 Como se menciono anteriomente, cuando se sube un archivo a telegram se genera un pequeño archivo snapshot con la extension `json.xz` que contiene los identificadores necesarios para encontrar, descargar y concatenar nuevamente el archivo en uno solo.
 
 ...
+
+# Errores
+
+## FileNotFoundError
+Es necesario añadir la ubicación del binario ffmpeg en las variables del sistema. 
+
+[Tutorial para windows](https://phoenixnap.com/kb/ffmpeg-windows)
+
