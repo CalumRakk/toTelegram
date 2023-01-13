@@ -2,17 +2,33 @@
 import json
 import os
 import lzma
-from typing import List
-
+from typing import List, Union
 
 from ..telegram import MessagePlus, Telegram
 from ..types.file import File
-from ..functions import attributes_to_json, is_filename_too_long, TemplateSnapshot, sort_parts
+from ..utils import attributes_to_json, is_filename_too_long, TemplateSnapshot
 from ..split import Split
 from .. import constants
 from ..config import Config
 from ..types.piece import Piece
 
+def sort_parts(parts:Union[list,str]):
+    if isinstance(parts, list):
+        anchor= parts[0]
+    else:
+        anchor= parts
+
+    string_parts = anchor.split("_")
+    total_parts= int(string_parts[-1].split("-")[1])
+    name= string_parts[0]
+
+    index=1
+    paths=[]
+    while index<=total_parts:
+        new_name= name + f"_{index}-{total_parts}"
+        index+=1
+        paths.append(os.path.join(Config.worktable,new_name))
+    return paths
 
 class PiecesFile:
     telegram = Telegram()

@@ -2,8 +2,9 @@
 import os
 from pathlib import Path
 
-from .file import File
-from ..functions import get_or_create_md5sum, create_mimeType, get_or_create_metadata
+from .file import File, get_or_create_md5sum,get_or_create_metadata
+# TODO: las funciones importadas de file deberian estar en un mejor lugar.
+from ..utils import create_mimeType
 
 
 

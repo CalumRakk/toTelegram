@@ -1,7 +1,7 @@
 
 import os
 
-from ..functions import get_part_filepart, attributes_to_json
+from ..utils import get_part_filepart, attributes_to_json
 from ..config import Config
 from .messageplus import MessagePlus
 

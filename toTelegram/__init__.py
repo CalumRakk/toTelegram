@@ -9,8 +9,9 @@ from .telegram import Telegram
 
 
 def update(args):
-    Telegram.check_session()
-    Telegram.check_chat_id()
+    telegram = Telegram()
+    telegram.check_session()
+    telegram.check_chat_id()
 
     exclusionManager = ExclusionManager(exclude_words=args.exclude_words,
                                         exclude_ext=args.exclude_ext,
@@ -35,19 +36,20 @@ def update(args):
 
 
 def download(args):
-    Telegram.check_session()
-    Telegram.check_chat_id()
+    telegram = Telegram()
+    telegram.check_session()
+    telegram.check_chat_id()
     path = args.path
-    
+
     if os.path.exists(path):
         with lzma.open(path) as f:
             json_data = json.load(f)
 
         file = File(**json_data["manager"]["file"])
         json_data["manager"]["file"] = file
-        if file.type == "pieces-file":            
+        if file.type == "pieces-file":
             manager = PiecesFile.from_json(json_data["manager"])
         else:
             manager = SingleFile.from_json(json_data["manager"])
-        
+
         manager.download(args)

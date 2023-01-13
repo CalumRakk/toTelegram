@@ -3,7 +3,7 @@ import os
 import lzma
 
 from ..constants import EXT_JSON_XZ
-from ..functions import is_filename_too_long, attributes_to_json, TemplateSnapshot
+from ..utils import is_filename_too_long, attributes_to_json, TemplateSnapshot
 from ..telegram import Telegram
 from ..types.file import File
 from ..types.messageplus import MessagePlus

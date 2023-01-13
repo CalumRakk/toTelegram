@@ -1,4 +1,4 @@
-
+# pylint: disable=C0301
 from __future__ import annotations
 import os
 
@@ -8,7 +8,7 @@ from pyrogram.errors import UserAlreadyParticipant, PhoneNumberInvalid, FloodWai
 
 from .types import MessagePlus
 from .config import Config
-from .functions import progress
+from .utils import progress
 
 
 INVITE_LINK_RE = ClientPyrogram.__dict__["INVITE_LINK_RE"]
@@ -20,55 +20,51 @@ Pyrogram le pedirá su número telefonico. El número debe estar en formato inte
 por ejemplo, para españa debe incluir el +34
 """
 
+class SingletonMeta(type):
+    _instances = {}
 
-class Client:
+    def __call__(cls, *args, **kwargs):
+
+        if cls not in cls._instances:
+            instance = super().__call__(*args, **kwargs)
+            cls._instances[cls] = instance
+        return cls._instances[cls]
+
+
+class Telegram(metaclass=SingletonMeta):
     def __init__(self):
-        self.api_hash = Config.api_hash
-        self.api_id = Config.api_id
-        self.chat_id = Config.chat_id
-        self.session_string = Config.session_string
+        self.config = Config()
 
-    def __get__(self, obj, other):
-        if getattr(self, "_client", False) is False:
-            setattr(self, "_client", self._get_client())
-        return getattr(self, "_client")
+    @property
+    def client(self):
+        if hasattr(self, "_client") is False:
+            if self.config.session_string is None:
+                print(STRING)
+                os.system("pause")
+                print("Cargando...", end="\r")
+                api_id = self.config.api_id
+                api_hash = self.config.api_hash
+                client = ClientPyrogram("my_account", api_id=api_id,
+                                        api_hash=api_hash, in_memory=True)
+                try:
+                    client.start()
+                    session_string = client.export_session_string()
+                    self.config.data.update({"session_string": session_string})
+                    self.config.save()
+                    return client
+                except PhoneNumberInvalid:
+                    print("\n*Advertencia*\nEl número introducido es invalido")
+                    exit()
 
-    def _get_client(self):
-        if getattr(self, "session_string", False) is False:
-            print(STRING)
-            os.system("pause")
-            print("Cargando...", end="\r")
-
-            client = ClientPyrogram("my_account", api_id=self.api_id,
-                                    api_hash=self.api_hash, in_memory=True)
-            try:
-                client.start()
-                self.session_string = client.export_session_string()
-                Config.insert_or_update_field(
-                    {"session_string": self.session_string})
-                return client
-            except PhoneNumberInvalid:
-                print("\n*Advertencia*\nEl número introducido es invalido")
-                exit()
-
+        session_string = self.config.session_string
         client = ClientPyrogram(
-            "my_account", session_string=self.session_string)
+            "my_account", session_string=session_string)
         client.start()
         return client
 
-
-class Telegram:
-    api_hash = Config.api_hash
-    api_id = Config.api_id
-    chat_id = Config.chat_id
-    session_string = Config.session_string
-    chat_id = Config.chat_id
-    client: ClientPyrogram = Client()
-
-    @classmethod
-    def update(cls, path: str, caption: str, filename: str) -> Message:
-        message = cls.client.send_document(
-            chat_id=cls.chat_id,
+    def update(self, path: str, caption: str, filename: str) -> Message:
+        message = self.client.send_document(
+            chat_id=self.config.chat_id,
             document=path,
             file_name=filename,
             caption="" if caption == filename else caption,
@@ -77,8 +73,7 @@ class Telegram:
         )
         return MessagePlus.from_message(message)
 
-    @classmethod
-    def download(cls, message_plus: MessagePlus, path=None)->str:
+    def download(self, message_plus: MessagePlus, path=None) -> str:
         """descarga un archivo de Telegram
 
         Args:
@@ -93,72 +88,69 @@ class Telegram:
 
         output = path or os.path.join(Config.worktable, message_plus.file_name)
         if not os.path.exists(output):
-            message = cls.client.get_messages(chat_id, message_id)
-            cls.client.download_media(message,
-                                      file_name=output,
-                                      progress=progress,
-                                      progress_args=(message_plus.file_name,)
-                                      )
+            message = self.client.get_messages(chat_id, message_id)
+            self.client.download_media(message,
+                                       file_name=output,
+                                       progress=progress,
+                                       progress_args=(message_plus.file_name,)
+                                       )
         return output
 
-    @classmethod
-    def get_message(cls, messageplus: MessagePlus) -> MessagePlus:
+    def get_message(self, messageplus: MessagePlus) -> MessagePlus:
 
-        return cls.client.get_messages(int(str(cls.chat_id).replace("-", "-100")), messageplus.message_id)
+        return self.client.get_messages(int(str(self.config.chat_id).replace("-", "-100")), messageplus.message_id)
 
-    @classmethod
-    def join_group(cls, invite_link):
+    def join_group(self, invite_link):
         """
         Intenta entrar a un grupo
         """
         try:
-            return cls.client.join_chat(invite_link)
+            return self.client.join_chat(invite_link)
         except UserAlreadyParticipant:
-            return cls.client.get_chat(cls.chat_id)
+            return self.client.get_chat(self.config.chat_id)
         except FloodWait as e:
             print("Pyrogram ha generado una espera.", e.MESSAGE)
             exit()
 
-    @classmethod
-    def check_chat_id(cls):
+    def check_chat_id(self):
         """
         Prueba si hace parte del grupo y prueba si tiene permisos para subir archivos.
         - Entra al grupo si chat_id es una invitación valida
         """
-        
-        if isinstance(cls.chat_id, str):
-            match = INVITE_LINK_RE.match(cls.chat_id)
-            
+
+        if isinstance(self.config.chat_id, str):
+            match = INVITE_LINK_RE.match(self.config.chat_id)
+
             if match:
-                match= match.group()
+                match = match.group()
             else:
-                match= cls.chat_id                
-                
+                match = self.config.chat_id
+
             try:
-                chatinfo = cls.client.get_chat(cls.chat_id) 
-                cls.chat_id= chatinfo.id # parece get_chat devuelve el id en el formato de pyrogram
-                Config.insert_or_update_field({"chat_id": cls.chat_id})
+                chatinfo = self.client.get_chat(self.config.chat_id)
+                # parece get_chat devuelve el id en el formato de pyrogram
+                self.config.chat_id = chatinfo.id
+                self.config.data.update({"chat_id": self.config.chat_id})
+                self.config.save()
             except ChatIdInvalid:
                 print("No se pudo obtener la info del chat_id. Asegurate que el chat_id este en el formato de pyrogram o que sea un enlace de invitación de Telegram")
-                exit()                 
-            
+                exit()
+
         else:
-            chatinfo = cls.client.get_chat(cls.chat_id)
-            
-            
+            chatinfo = self.client.get_chat(self.config.chat_id)
+
         if getattr(chatinfo, "id", False) is False:
-            print(f"El usuario no hace parte de chat_id {cls.chat_id}")
+            print(f"El usuario no hace parte de chat_id {self.config.chat_id}")
             exit()
         if not chatinfo.permissions.can_send_media_messages:
             print(
-                f"No tienes permisos para subir archivos en chat_id {cls.chat_id}")
+                f"No tienes permisos para subir archivos en chat_id {self.config.chat_id}")
             exit()
         print("CHAT_ID:", chatinfo.title)
 
-    @classmethod
-    def check_session(cls):
+    def check_session(self):
         """
         Comprueba si el usuario está logeado en Telegram.
         """
-        user = cls.client.get_users("me")
+        user = self.client.get_users("me")
         print(f"{user.username or user.first_name}", "¡está logeado!\n")

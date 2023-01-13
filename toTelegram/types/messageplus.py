@@ -1,7 +1,7 @@
 
 
 from pyrogram.types.messages_and_media.document import Document
-from ..functions import attributes_to_json
+from ..utils import attributes_to_json
 
 class MessagePlus:
     def __init__(self,

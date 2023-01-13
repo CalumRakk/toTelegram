@@ -6,7 +6,7 @@ from typing import List, Union
 from humanfriendly import parse_size
 
 from .config import Config
-from .functions import get_all_files_from_directory
+from .utils import get_all_files_from_directory
 from .constants import EXT_JSON_XZ
 
 
@@ -20,9 +20,13 @@ def string_to_list(string: Union[list, str]):
     entre comillas
     """
     #     default: en valor que se devolverá si string no es uno de los tipos validos
+    # TODO: añadir pruebas de varios casos.
     if isinstance(string, list):
         return string
     elif isinstance(string, str):
+        space_count = len(string.split())
+        if space_count < 2:
+            return [string]
         result = REGEX_STRING_TO_LIST.findall(string)
         return [s.strip().replace('"', "") for s in result]
     return string
@@ -38,12 +42,13 @@ def string_to_int(string: Union[int, str]):
 
 class ExclusionManager:
     def __init__(self, exclude_words=None, exclude_ext=None, min_size=None, max_size=None):
+        config = Config()
         self.exclude_words = exclude_words or string_to_list(
-            Config.exclude_words)
-        self.exclude_ext = exclude_ext or string_to_list(Config.exclude_ext)
-        self.min_size = min_size or string_to_int(Config.min_size)
-        self.max_size = max_size or string_to_int(Config.max_size)
-        self.path_snapshot_files = string_to_int(Config.path_snapshot_files)
+            config.exclude_words)
+        self.exclude_ext = exclude_ext or string_to_list(config.exclude_ext)
+        self.min_size = min_size or string_to_int(config.min_size)
+        self.max_size = max_size or string_to_int(config.max_size)
+        # self.path_snapshot_files = string_to_int(config.path_snapshot_files)
         self.print()
 
     def print(self):
