@@ -5,7 +5,7 @@ from ..utils import get_part_filepart, attributes_to_json
 from ..config import Config
 from .messageplus import MessagePlus
 
-
+config=Config()
 class Piece:
     def __init__(self, filename, size, message=None, kind=None):
         self.kind = kind or "#piece"
@@ -15,7 +15,7 @@ class Piece:
 
     @property
     def path(self):
-        return os.path.join(Config.path_chunk, self.filename)
+        return os.path.join(config.path_chunk, self.filename)
 
     @property
     def part(self) -> str:
@@ -36,7 +36,7 @@ class Piece:
         while index<=total_parts:
             new_name= name + f"_{index}-{total_parts}"
             index+=1
-            paths.append(os.path.join(Config.worktable,new_name))
+            paths.append(os.path.join(config.worktable,new_name))
         return paths
     
     def to_json(self):

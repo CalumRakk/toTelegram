@@ -12,6 +12,8 @@ from .. import constants
 from ..config import Config
 from ..types.piece import Piece
 
+config= Config()
+telegram= Telegram()
 def sort_parts(parts:Union[list,str]):
     if isinstance(parts, list):
         anchor= parts[0]
@@ -27,12 +29,10 @@ def sort_parts(parts:Union[list,str]):
     while index<=total_parts:
         new_name= name + f"_{index}-{total_parts}"
         index+=1
-        paths.append(os.path.join(Config.worktable,new_name))
+        paths.append(os.path.join(config.worktable,new_name))
     return paths
 
 class PiecesFile:
-    telegram = Telegram()
-
     def __init__(self, kind=None, file: File = None, pieces=None):
         self.kind = kind or "pieces-file"
         self.file = file
@@ -84,18 +84,18 @@ class PiecesFile:
                 if is_filename_too_long(filename):
                     filename = self.file.md5sum + os.path.splitext(filename)[1]
 
-                piece.message = self.telegram.update(
+                piece.message = telegram.update(
                     piece.path, caption=caption, filename=filename)
                 os.remove(piece.path)
                 self.save()
                 continue
             print("\t", piece.filename, "DONE.")
-        os.remove(os.path.join(Config.worktable, self.file.md5sum))
+        os.remove(os.path.join(config.worktable, self.file.md5sum))
 
     def download(self, args):
         paths = []
         for piece in self.pieces:
-            paths.append(Telegram.download(piece.message))
+            paths.append(telegram.download(piece.message))
 
         folder = os.path.dirname(
             args.path) if args.output is None else os.path.dirname(args.output)
@@ -116,7 +116,7 @@ class PiecesFile:
         print(path)
 
     def save(self):
-        path = os.path.join(Config.worktable, self.file.md5sum)
+        path = os.path.join(config.worktable, self.file.md5sum)
         json_data = self.to_json()
         json_data["verion"] = constants.VERSION
 
@@ -129,7 +129,7 @@ class PiecesFile:
         """
         print("\t[SPLIT]")
         split = Split(self.file.path)
-        output = os.path.join(Config.path_chunk, self.file.filename)
+        output = os.path.join(config.path_chunk, self.file.filename)
         fileparts = split(chunk_size=constants.FILESIZE_LIMIT, output=output)
 
         pieces = []
@@ -154,7 +154,7 @@ class PiecesFile:
         Devuelve una instancia de PiecesFile que conserva el valor de .path
         """
 
-        cache_pieces = os.path.join(Config.worktable, file.md5sum)
+        cache_pieces = os.path.join(config.worktable, file.md5sum)
 
         if os.path.exists(cache_pieces):
             with open(cache_pieces, 'r', encoding="utf-8") as f:
