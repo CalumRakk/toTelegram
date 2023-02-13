@@ -86,7 +86,7 @@ class Telegram(metaclass=SingletonMeta):
         chat_id = message_plus.chat_id
         message_id = message_plus.message_id
 
-        output = path or os.path.join(Config.worktable, message_plus.file_name)
+        output = path or os.path.join(self.config.worktable, message_plus.file_name)
         if not os.path.exists(output):
             message = self.client.get_messages(chat_id, message_id)
             self.client.download_media(message,

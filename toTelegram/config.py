@@ -86,6 +86,15 @@ class Folder:
 
 
 class Config(Folder, metaclass=SingletonMeta):
+    """Representa al archivo de `config.yaml`
+
+    Args:
+        Folder: hereda de folder las propiedas que devuelven las rutas
+        metaclass (_type_, optional): _description_. Defaults to SingletonMeta.
+
+    Nota: Las key en `config.yaml` no distinguen entre mayusculas y minisculas.
+
+    """
     def __init__(self):
         self.api_hash = self.data["api_hash"]
         self.api_id = self.data["api_id"]
