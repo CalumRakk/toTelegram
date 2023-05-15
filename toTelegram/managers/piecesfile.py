@@ -93,14 +93,19 @@ class PiecesFile:
         os.remove(os.path.join(config.worktable, self.file.md5sum))
 
     def download(self, args):
-        paths = []
-        for piece in self.pieces:
-            paths.append(telegram.download(piece.message))
+        folder= os.path.dirname(args.path)
+        path = os.path.join(folder, self.file.filename)
+        
+        if os.path.exists(path):
+            return True
 
-        folder = os.path.dirname(
-            args.path) if args.output is None else os.path.dirname(args.output)
-        if not os.path.exists(folder):
-            os.makedirs(folder)
+        paths = []
+        path= args.path
+        for piece in self.pieces:
+            path_piece= os.path.join(config.worktable, piece.message.file_name)           
+            if not os.path.exists(path_piece):
+                path_piece= telegram.download(piece.message)            
+            paths.append(path_piece)
 
         path = os.path.join(folder, self.file.filename)
         CHUNK_SIZE = 30000000

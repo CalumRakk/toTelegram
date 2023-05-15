@@ -37,15 +37,10 @@ class SingleFile:
             os.remove(self.path)
 
     def download(self, args):
-
-        folder = os.path.dirname(
-            args.path) if args.output is None else os.path.dirname(args.output)
-
-        if not os.path.exists(folder):
-            os.makedirs(folder)
-
-        path = os.path.join(folder, self.file.filename)
-
+        path= os.path.dirname(args.path, self.file.filename)
+        if os.path.exists(path):
+            return True        
+        
         Telegram.download(self.message, path=path)
         print(path)
 
