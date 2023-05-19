@@ -23,3 +23,5 @@ site/
 !config.yaml
 *.json.xz
 !video.mp4
+/dist
+/toTelegram.egg-info
