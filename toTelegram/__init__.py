@@ -1,11 +1,11 @@
-
 import os
 import lzma
 import json
 from .types.file import File
-from .managers import (PiecesFile, SingleFile)
+from .managers import PiecesFile, SingleFile
 from .exclusionManager import ExclusionManager
 from .telegram import Telegram
+from pathlib import Path
 
 
 def update(args):
@@ -13,10 +13,12 @@ def update(args):
     telegram.check_session()
     telegram.check_chat_id()
 
-    exclusionManager = ExclusionManager(exclude_words=args.exclude_words,
-                                        exclude_ext=args.exclude_ext,
-                                        min_size=args.min_size,
-                                        max_size=args.max_size,)
+    exclusionManager = ExclusionManager(
+        exclude_words=args.exclude_words,
+        exclude_ext=args.exclude_ext,
+        min_size=args.min_size,
+        max_size=args.max_size,
+    )
 
     paths = exclusionManager.filder(args.path)
     count_path = len(paths)
@@ -35,7 +37,7 @@ def update(args):
     return True
 
 
-def download(args):
+def download(path):
     telegram = Telegram()
     telegram.check_session()
     telegram.check_chat_id()
