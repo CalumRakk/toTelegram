@@ -1,8 +1,8 @@
-
 import json
 import os
 import lzma
 from typing import List, Union
+from pathlib import Path
 
 from ..telegram import MessagePlus, Telegram
 from ..types.file import File
@@ -12,25 +12,28 @@ from .. import constants
 from ..config import Config
 from ..types.piece import Piece
 
-config= Config()
-telegram= Telegram()
-def sort_parts(parts:Union[list,str]):
+config = Config()
+telegram = Telegram()
+
+
+def sort_parts(parts: Union[list, str]):
     if isinstance(parts, list):
-        anchor= parts[0]
+        anchor = parts[0]
     else:
-        anchor= parts
+        anchor = parts
 
     string_parts = anchor.split("_")
-    total_parts= int(string_parts[-1].split("-")[1])
-    name= string_parts[0]
+    total_parts = int(string_parts[-1].split("-")[1])
+    name = string_parts[0]
 
-    index=1
-    paths=[]
-    while index<=total_parts:
-        new_name= name + f"_{index}-{total_parts}"
-        index+=1
-        paths.append(os.path.join(config.worktable,new_name))
+    index = 1
+    paths = []
+    while index <= total_parts:
+        new_name = name + f"_{index}-{total_parts}"
+        index += 1
+        paths.append(os.path.join(config.worktable, new_name))
     return paths
+
 
 class PiecesFile:
     def __init__(self, kind=None, file: File = None, pieces=None):
@@ -85,26 +88,26 @@ class PiecesFile:
                     filename = self.file.md5sum + os.path.splitext(filename)[1]
 
                 piece.message = telegram.update(
-                    piece.path, caption=caption, filename=filename)
+                    piece.path, caption=caption, filename=filename
+                )
                 os.remove(piece.path)
                 self.save()
                 continue
             print("\t", piece.filename, "DONE.")
         os.remove(os.path.join(config.worktable, self.file.md5sum))
 
-    def download(self, args):
-        folder= os.path.dirname(args.path)
-        path = os.path.join(folder, self.file.filename)
-        
-        if os.path.exists(path):
+    def download(self, path: Path):
+        folder = path.parent
+        path = folder / self.file.filename
+
+        if path.exists():
             return True
 
         paths = []
-        path= args.path
         for piece in self.pieces:
-            path_piece= os.path.join(config.worktable, piece.message.file_name)           
+            path_piece = os.path.join(config.worktable, piece.message.file_name)
             if not os.path.exists(path_piece):
-                path_piece= telegram.download(piece.message)            
+                path_piece = telegram.download(piece.message)
             paths.append(path_piece)
 
         path = os.path.join(folder, self.file.filename)
@@ -162,12 +165,13 @@ class PiecesFile:
         cache_pieces = os.path.join(config.worktable, file.md5sum)
 
         if os.path.exists(cache_pieces):
-            with open(cache_pieces, 'r', encoding="utf-8") as f:
+            with open(cache_pieces, "r", encoding="utf-8") as f:
                 json_data = json.load(f)
             pieces = []
             for doc in json_data["pieces"]:
-                doc["message"] = MessagePlus(
-                    **doc["message"]) if doc["message"] else None
+                doc["message"] = (
+                    MessagePlus(**doc["message"]) if doc["message"] else None
+                )
                 pieces.append(Piece(**doc))
             return PiecesFile(file=file, pieces=pieces)
 
@@ -175,7 +179,6 @@ class PiecesFile:
 
     @classmethod
     def from_json(cls, json_data):
-
         if isinstance(json_data["file"], dict):
             json_data["file"] = File(**json_data["file"])
         elif isinstance(json_data["file"], File):

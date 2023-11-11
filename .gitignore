@@ -25,3 +25,4 @@ site/
 !video.mp4
 /dist
 /toTelegram.egg-info
+build/

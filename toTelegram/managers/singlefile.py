@@ -1,6 +1,7 @@
 import json
 import os
 import lzma
+from pathlib import Path
 
 from ..constants import EXT_JSON_XZ
 from ..utils import is_filename_too_long, attributes_to_json, TemplateSnapshot
@@ -12,11 +13,7 @@ from ..types.messageplus import MessagePlus
 class SingleFile:
     telegram = Telegram()
 
-    def __init__(self,
-                 file: File,
-                 message=None,
-                 kind=None
-                 ):
+    def __init__(self, file: File, message=None, kind=None):
         self.kind = kind or "single-file"
         self.file = file
         self.message = message
@@ -31,16 +28,15 @@ class SingleFile:
         if is_filename_too_long(filename):
             filename = self.file.md5sum + os.path.splitext(filename)[1]
         path = self.path
-        self.message = self.telegram.update(
-            path, caption=caption, filename=filename)
+        self.message = self.telegram.update(path, caption=caption, filename=filename)
         if remove:
             os.remove(self.path)
 
-    def download(self, args):
-        path= os.path.dirname(args.path, self.file.filename)
+    def download(self, path: Path):
+        path = path / self.file.filename
         if os.path.exists(path):
-            return True        
-        
+            return True
+
         Telegram.download(self.message, path=path)
         print(path)
 
@@ -77,7 +73,6 @@ class SingleFile:
 
     @classmethod
     def from_json(cls, json_data):
-
         if isinstance(json_data["file"], dict):
             json_data["file"] = File(**json_data["file"])
         elif isinstance(json_data["file"], File):
