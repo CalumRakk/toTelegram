@@ -3,6 +3,8 @@ import os
 import lzma
 from pathlib import Path
 
+from tqdm import tqdm
+
 from ..constants import EXT_JSON_XZ
 from ..utils import is_filename_too_long, attributes_to_json, TemplateSnapshot
 from ..telegram import Telegram
@@ -28,7 +30,18 @@ class SingleFile:
         if is_filename_too_long(filename):
             filename = self.file.md5sum + os.path.splitext(filename)[1]
         path = self.path
-        self.message = self.telegram.update(path, caption=caption, filename=filename)
+
+        progress_bar = tqdm(
+            total=self.file.size,
+            desc="Subiendo archivos",
+            unit="B",
+            unit_divisor=1024,
+            unit_scale=True,
+            leave=True,
+        )
+        self.message = self.telegram.update(
+            path, caption=caption, filename=filename, progress_bar=progress_bar
+        )
         if remove:
             os.remove(self.path)
 

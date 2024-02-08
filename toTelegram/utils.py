@@ -8,9 +8,13 @@ from datetime import datetime
 import exiftool
 import filetype
 
-from .constants import (FILE_NAME_LENGTH_LIMIT, VERSION,
-                        REGEX_FILEPART_OF_STRING,
-                        REGEX_PART_OF_FILEPART, PYTHON_DATA_TYPES)
+from .constants import (
+    FILE_NAME_LENGTH_LIMIT,
+    VERSION,
+    REGEX_FILEPART_OF_STRING,
+    REGEX_PART_OF_FILEPART,
+    PYTHON_DATA_TYPES,
+)
 
 METADATA_KEY_TO_BE_EXCLUDED = ["format.filename"]
 
@@ -57,7 +61,7 @@ def get_all_folders_from_directory(path):
         raise Exception("No es una carpeta", path)
 
     res = []
-    for (dir_path, dir_names, file_names) in os.walk(path):
+    for dir_path, dir_names, file_names in os.walk(path):
         pahts = [os.path.join(dir_path, dir) for dir in dir_names]
         res.extend(pahts)
     return res
@@ -70,7 +74,7 @@ def get_all_files_from_directory(path, ext=None):
     if not os.path.isdir(path):
         raise Exception("No es una carpeta", path)
     res = []
-    for (dir_path, dir_names, file_names) in os.walk(path):
+    for dir_path, dir_names, file_names in os.walk(path):
         p_list = []
         for filename in file_names:
             if os.path.splitext(filename)[1] == ext or ext is None:
@@ -93,7 +97,7 @@ def attributes_to_json(self):
         if key == "pieces":
             document[key] = [i.to_json() for i in document[key]]
             continue
-        if isinstance(value,datetime):
+        if isinstance(value, datetime):
             document[key] = str(value)
             continue
         if type(value) not in PYTHON_DATA_TYPES:
@@ -109,7 +113,7 @@ def create_mimeType(path):
     """
     kind = filetype.guess(path)
     if kind is None:
-        print('Cannot guess file type!')
+        print("Cannot guess file type!")
         return "idk"
     return kind.mime
 
@@ -130,8 +134,11 @@ def create_metadata_by_exiftool(path: Union[str, list]):
     return metadata
 
 
-def progress(current, total, filename):
-    print("\t", filename, f"{current * 100 / total:.1f}%", end="\r")
+def progress(current, total, filename, progress_bar):
+    if progress_bar:
+        progress_bar.update(current - progress_bar.n)
+    else:
+        print("\t", filename, f"{current * 100 / total:.1f}%", end="\r")
 
 
 def get_filepart_of_string(string):
@@ -195,7 +202,7 @@ def cut_filename(path):
     filename: str = os.path.basename(path)
     ext = os.path.splitext(filename)[1]
 
-    new_name = filename.replace(ext, "")[:FILE_NAME_LENGTH_LIMIT]+ext
+    new_name = filename.replace(ext, "")[:FILE_NAME_LENGTH_LIMIT] + ext
     new_path = os.path.join(folder, new_name)
     try:
         os.rename(path, new_path)
