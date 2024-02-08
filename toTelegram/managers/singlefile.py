@@ -37,7 +37,7 @@ class SingleFile:
         if os.path.exists(path):
             return True
 
-        Telegram.download(self.message, path=path)
+        SingleFile.telegram.download(self.message, path=path)
         print(path)
 
     def to_json(self):

@@ -54,6 +54,7 @@ def download(path: Path):
         if file.type == "pieces-file":
             manager = PiecesFile.from_json(json_data["manager"])
         else:
+            path = path.parent
             manager = SingleFile.from_json(json_data["manager"])
 
         manager.download(path)
