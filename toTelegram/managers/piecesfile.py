@@ -91,7 +91,7 @@ class PiecesFile:
 
                 progress_bar = tqdm(
                     total=piece.size,
-                    desc="Subiendo archivos",
+                    desc=filename,
                     unit="B",
                     unit_divisor=1024,
                     unit_scale=True,

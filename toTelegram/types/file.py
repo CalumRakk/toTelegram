@@ -1,6 +1,6 @@
 import os
 import json
-import ffmpeg
+from ffmpeg._probe import probe
 
 from ..utils import (
     attributes_to_json,
@@ -63,7 +63,7 @@ def get_or_create_metadata(path, mimetype=None, md5sum=None):
         metadata.pop("SourceFile")
         metadata.pop("File:Directory")
     elif "video" in mimetype:
-        metadata = ffmpeg.probe(path)
+        metadata = probe(path)
         metadata["format"].pop("filename")
 
     with open(cache_path, "w") as f:

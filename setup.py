@@ -15,7 +15,7 @@ setup(
         "pyrogram",
         "PyYAML>=6.0",
         "humanfriendly",
-        "ffmpeg",
+        "ffmpeg-python",
         "tqdm",
     ],
     packages=find_packages(),

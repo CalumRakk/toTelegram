@@ -33,7 +33,7 @@ class SingleFile:
 
         progress_bar = tqdm(
             total=self.file.size,
-            desc="Subiendo archivos",
+            desc=filename,
             unit="B",
             unit_divisor=1024,
             unit_scale=True,
