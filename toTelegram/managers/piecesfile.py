@@ -4,8 +4,6 @@ import lzma
 from typing import List, Union
 from pathlib import Path
 
-from tqdm import tqdm
-
 from ..telegram import MessagePlus, Telegram
 from ..types.file import File
 from ..utils import attributes_to_json, is_filename_too_long, TemplateSnapshot
@@ -89,19 +87,8 @@ class PiecesFile:
                 if is_filename_too_long(filename):
                     filename = self.file.md5sum + os.path.splitext(filename)[1]
 
-                progress_bar = tqdm(
-                    total=piece.size,
-                    desc=filename,
-                    unit="B",
-                    unit_divisor=1024,
-                    unit_scale=True,
-                    leave=True,
-                )
                 piece.message = telegram.update(
-                    piece.path,
-                    caption=caption,
-                    filename=filename,
-                    progress_bar=progress_bar,
+                    piece.path, caption=caption, filename=filename
                 )
                 os.remove(piece.path)
                 self.save()
