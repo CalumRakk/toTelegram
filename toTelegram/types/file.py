@@ -1,9 +1,13 @@
-
 import os
 import json
 import ffmpeg
 
-from ..utils import attributes_to_json, create_mimeType, create_metadata_by_exiftool, create_md5sum_by_hashlib  # pylint: disable=C0301
+from ..utils import (
+    attributes_to_json,
+    create_mimeType,
+    create_metadata_by_exiftool,
+    create_md5sum_by_hashlib,
+)  # pylint: disable=C0301
 from .. import constants
 from ..config import Config
 
@@ -19,11 +23,11 @@ def get_or_create_md5sum(path):
     cache_path = os.path.join(config.path_md5sum, inodo_name)
 
     if os.path.exists(cache_path):
-        with open(cache_path, 'r', encoding="UTF-8") as file:
+        with open(cache_path, "r", encoding="UTF-8") as file:
             return file.read()
     # Guarda y devuelve el md5sum
     md5sum = create_md5sum_by_hashlib(path)
-    with open(cache_path, 'w') as file:
+    with open(cache_path, "w") as file:
         file.write(md5sum)
     return md5sum
 
@@ -33,16 +37,16 @@ def get_or_create_metadata(path, mimetype=None, md5sum=None):
     Genera metadatos de un archivo o devuelve los metadatos que esten en cache.
     Parameters:
         path (``str``):
-            ruta completa del archivo. 
+            ruta completa del archivo.
         mimetype (``str``, *optional*):
             mimeType del archivo. Si no se pasa se intenta obtener
         md5sum (``str``, *optional*):
-            md5sum del archivo. Si no se pasa se intenta obtener    
+            md5sum del archivo. Si no se pasa se intenta obtener
     """
     config = Config()
     if mimetype == None:
         mimetype = create_mimeType(path)
-    if mimetype.split('/')[0] not in ["image", "video"]:
+    if mimetype.split("/")[0] not in ["image", "video"]:
         return {}
 
     if md5sum == None:
@@ -51,7 +55,7 @@ def get_or_create_metadata(path, mimetype=None, md5sum=None):
     cache_path = os.path.join(config.path_metadata, md5sum)
 
     if os.path.exists(cache_path):
-        with open(cache_path, 'r') as f:
+        with open(cache_path, "r") as f:
             return json.load(f)
 
     if "image" in mimetype:
@@ -62,7 +66,7 @@ def get_or_create_metadata(path, mimetype=None, md5sum=None):
         metadata = ffmpeg.probe(path)
         metadata["format"].pop("filename")
 
-    with open(cache_path, 'w') as f:
+    with open(cache_path, "w") as f:
         json.dump(metadata, f)
     return metadata
 
@@ -84,15 +88,16 @@ class File:
             Diccionario con los metadatos arbitrarios del archivo.
     """
 
-    def __init__(self,
-                 filename: str,
-                 fileExtension: str,
-                 mimeType: str,
-                 md5sum: str,
-                 size: int,
-                 metadata: dict,
-                 kind=None
-                 ):
+    def __init__(
+        self,
+        filename: str,
+        fileExtension: str,
+        mimeType: str,
+        md5sum: str,
+        size: int,
+        metadata: dict,
+        kind=None,
+    ):
         self.kind = kind or "file"
         self.filename = filename
         self.fileExtension = fileExtension
@@ -137,14 +142,15 @@ class File:
         mimeType = create_mimeType(path)
         md5sum = get_or_create_md5sum(path)
         size = os.path.getsize(path)
-        metadata = get_or_create_metadata(path, mimeType, md5sum)
+        metadata = {}  # get_or_create_metadata(path, mimeType, md5sum)
 
-        file = File(filename=filename,
-                    fileExtension=fileExtension,
-                    mimeType=mimeType,
-                    md5sum=md5sum,
-                    size=size,
-                    metadata=metadata
-                    )
+        file = File(
+            filename=filename,
+            fileExtension=fileExtension,
+            mimeType=mimeType,
+            md5sum=md5sum,
+            size=size,
+            metadata=metadata,
+        )
         setattr(file, "_path", path)
         return file

@@ -27,3 +27,4 @@ site/
 /toTelegram.egg-info
 build/
 *.yaml
+/tests

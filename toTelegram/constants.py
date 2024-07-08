@@ -1,6 +1,8 @@
-
 import os
 import re
+from pathlib import Path
+from platform import system
+from os import getenv
 
 MINIMUM_SIZE_TO_BACKUP: int = 524288000
 """El tamaño minimo en bytes que debe tener un backup para ser subido."""
@@ -19,10 +21,14 @@ EXT_TAR = ".tar"
 EXT_JZMA = ".xz"
 EXT_JSON_XZ = EXT_JSON + EXT_JZMA
 
-REGEX_PART_OF_FILEPART = re.compile(r'(?<=_)\d+-\d+')
+REGEX_PART_OF_FILEPART = re.compile(r"(?<=_)\d+-\d+")
 REGEX_FILEPART_OF_STRING = re.compile("(?<=').*?(?=')")
 PYTHON_DATA_TYPES = [int, float, str, bool, set, list, tuple, dict, type(None)]
 
-PATH_CONFIG = input("Nombre del archivo config a usar>>>").strip().replace(
-    ".yaml", "")+".yaml" if os.path.exists("debug.txt") else "config.yaml"
-WORKTABLE = os.path.join(r"D:\.TEMP", "toTelegram")
+PATH_CONFIG = "config.yaml"
+
+PROJECT_NAME = "toTelegram"
+HOME = Path.home() / ".local/share" if system() == "Linux" else Path(getenv("APPDATA"))
+WORKTABLE = HOME / PROJECT_NAME
+
+WORKTABLE.mkdir(parents=True, exist_ok=True)
