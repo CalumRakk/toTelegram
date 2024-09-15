@@ -7,10 +7,10 @@ from pathlib import Path
 from ..telegram import MessagePlus, Telegram
 from ..types.file import File
 from ..utils import attributes_to_json, is_filename_too_long, TemplateSnapshot
-from ..split import Split
 from .. import constants
 from ..config import Config
 from ..types.piece import Piece
+from ..filechunker import FileChunker
 
 config = Config()
 telegram = Telegram()
@@ -110,15 +110,12 @@ class PiecesFile:
                 path_piece = telegram.download(piece.message)
             paths.append(path_piece)
 
-        path = os.path.join(folder, self.file.filename)
-        CHUNK_SIZE = 30000000
-        with open(path, "wb") as fb:
-            for part in sort_parts(paths):
-                with open(part, "rb") as fb2:
-                    chunk = fb2.read(CHUNK_SIZE)
-                    while chunk:
-                        fb.write(chunk)
-                        chunk = fb2.read(CHUNK_SIZE)
+        
+        filechunker= FileChunker()
+        files= [Path(file) for file in paths]
+        output_file= folder / self.file.filename
+        path= filechunker.concatenate_files(files=files, output=output_file)              
+                                     
         for i in paths:
             os.remove(i)
         print(path)
@@ -135,10 +132,18 @@ class PiecesFile:
         """
         Divide el archivo en partes al limite de Telegram
         """
+        from ..filechunker import FileChunker
+
         print("\t[SPLIT]")
-        split = Split(self.file.path)
-        output = os.path.join(config.path_chunk, self.file.filename)
-        fileparts = split(chunk_size=constants.FILESIZE_LIMIT, output=output)
+        # split = Split(self.file.path)
+        # output = os.path.join(config.path_chunk, self.file.filename)
+        # fileparts = split(chunk_size=constants.FILESIZE_LIMIT, output=output)
+
+        fileparts = FileChunker().split_file(
+            path=self.file.path,
+            output=config.path_chunk,
+            chunk_size=constants.FILESIZE_LIMIT,
+        )
 
         pieces = []
         for path in fileparts:
