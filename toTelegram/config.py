@@ -1,33 +1,9 @@
-
-
 import os
 import yaml
+from pathlib import Path
 
-from .constants import WORKTABLE, PATH_CONFIG
+from .constants import WORKTABLE
 from .utils import SingletonMeta
-
-
-def load_config() -> dict:
-    """
-    Devuelve las variables del archivo config. Cada key se devuelve en miniscula.
-    """
-    with open(PATH_CONFIG, "rt", encoding="utf-8") as fb:
-        config = yaml.load(fb, Loader=yaml.UnsafeLoader)
-
-    if config is None:
-        raise Warning("El archivo config está vacio.")
-
-    config_to_lower = {}
-    for key, value in config.items():
-        config_to_lower[key.lower().replace("-", "_")] = value
-    return config_to_lower
-
-
-def check_file_config():
-    if not os.path.exists(PATH_CONFIG):
-        # create_file_config(PATH_CONFIG)
-        print("Para continuar es necesario rellenar los datos de config.yaml")
-        exit()
 
 
 class Folder:
@@ -50,8 +26,7 @@ class Folder:
     @property
     def path_md5sum(self):
         if hasattr(self, "_path_md5sum") is False:
-            path_md5sum = os.path.join(
-                self._worktable, self._md5sum_folder_name)
+            path_md5sum = os.path.join(self._worktable, self._md5sum_folder_name)
             if not os.path.exists(path_md5sum):
                 os.makedirs(path_md5sum)
             setattr(self, "_path_md5sum", path_md5sum)
@@ -95,18 +70,34 @@ class Config(Folder, metaclass=SingletonMeta):
     Nota: Las key en `config.yaml` no distinguen entre mayusculas y minisculas.
 
     """
-    def __init__(self):
+
+    def __init__(self, path: Path):
+        self.path = path if isinstance(path, Path) else Path(path)
         self.api_hash = self.data["api_hash"]
         self.api_id = self.data["api_id"]
         self.chat_id = self.data["chat_id"]
         super().__init__(worktable=self.data.get("worktable") or WORKTABLE)
 
+    def _load_config(self) -> dict:
+        """
+        Devuelve las variables del archivo config. Cada key se devuelve en miniscula.
+        """
+        with open(self.path, "rt", encoding="utf-8") as fb:
+            config = yaml.load(fb, Loader=yaml.UnsafeLoader)
+
+        if config is None:
+            raise Warning("El archivo config está vacio.")
+
+        config_to_lower = {}
+        for key, value in config.items():
+            config_to_lower[key.lower().replace("-", "_")] = value
+        return config_to_lower
+
     @property
     def data(self) -> dict:
-        """atrajo para acceder al valor de '_'json_data'
-        """
+        """atrajo para acceder al valor de '_'json_data'"""
         if hasattr(self, "_json_data") is False:
-            json_data = load_config()
+            json_data = self._load_config()
             setattr(self, "_json_data", json_data)
         return getattr(self, "_json_data")
 
@@ -136,5 +127,5 @@ class Config(Folder, metaclass=SingletonMeta):
         for key, value in self.data.items():
             config_to_upper[key.upper()] = value
 
-        with open(PATH_CONFIG, "wt", encoding="utf-8") as fb:
+        with open(self.path, "wt", encoding="utf-8") as fb:
             yaml.dump(config_to_upper, fb, sort_keys=sort_keys)

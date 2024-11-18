@@ -12,34 +12,32 @@ from ..config import Config
 from ..types.piece import Piece
 from ..filechunker import FileChunker
 
-config = Config()
-telegram = Telegram()
 
+# def sort_parts(worktable, parts: Union[list, str]):
+#     if isinstance(parts, list):
+#         anchor = parts[0]
+#     else:
+#         anchor = parts
 
-def sort_parts(parts: Union[list, str]):
-    if isinstance(parts, list):
-        anchor = parts[0]
-    else:
-        anchor = parts
+#     string_parts = anchor.split("_")
+#     total_parts = int(string_parts[-1].split("-")[1])
+#     name = string_parts[0]
 
-    string_parts = anchor.split("_")
-    total_parts = int(string_parts[-1].split("-")[1])
-    name = string_parts[0]
-
-    index = 1
-    paths = []
-    while index <= total_parts:
-        new_name = name + f"_{index}-{total_parts}"
-        index += 1
-        paths.append(os.path.join(config.worktable, new_name))
-    return paths
+#     index = 1
+#     paths = []
+#     while index <= total_parts:
+#         new_name = name + f"_{index}-{total_parts}"
+#         index += 1
+#         paths.append(os.path.join(worktable, new_name))
+#     return paths
 
 
 class PiecesFile:
-    def __init__(self, kind=None, file: File = None, pieces=None):
+    def __init__(self, kind=None, file: File = None, pieces=None, telegram=Telegram):
         self.kind = kind or "pieces-file"
         self.file = file
         self.pieces = pieces
+        self.telegram = telegram
 
     @property
     def is_split_finalized(self):
@@ -87,14 +85,14 @@ class PiecesFile:
                 if is_filename_too_long(filename):
                     filename = self.file.md5sum + os.path.splitext(filename)[1]
 
-                piece.message = telegram.update(
+                piece.message = self.telegram.update(
                     piece.path, caption=caption, filename=filename
                 )
                 os.remove(piece.path)
                 self.save()
                 continue
             print("\t", piece.filename, "DONE.")
-        os.remove(os.path.join(config.worktable, self.file.md5sum))
+        os.remove(os.path.join(self.telegram.config.worktable, self.file.md5sum))
 
     def download(self, path: Path):
         folder = path.parent
@@ -105,23 +103,24 @@ class PiecesFile:
 
         paths = []
         for piece in self.pieces:
-            path_piece = os.path.join(config.worktable, piece.message.file_name)
+            path_piece = os.path.join(
+                self.telegram.config.worktable, piece.message.file_name
+            )
             if not os.path.exists(path_piece):
-                path_piece = telegram.download(piece.message)
+                path_piece = self.telegram.download(piece.message)
             paths.append(path_piece)
 
-        
-        filechunker= FileChunker()
-        files= [Path(file) for file in paths]
-        output_file= folder / self.file.filename
-        path= filechunker.concatenate_files(files=files, output=output_file)              
-                                     
+        filechunker = FileChunker()
+        files = [Path(file) for file in paths]
+        output_file = folder / self.file.filename
+        path = filechunker.concatenate_files(files=files, output=output_file)
+
         for i in paths:
             os.remove(i)
         print(path)
 
     def save(self):
-        path = os.path.join(config.worktable, self.file.md5sum)
+        path = os.path.join(self.telegram.config.worktable, self.file.md5sum)
         json_data = self.to_json()
         json_data["verion"] = constants.VERSION
 
@@ -141,7 +140,7 @@ class PiecesFile:
 
         fileparts = FileChunker().split_file(
             path=self.file.path,
-            output=config.path_chunk,
+            output=self.telegram.config.path_chunk,
             chunk_size=constants.FILESIZE_LIMIT,
         )
 
@@ -162,12 +161,12 @@ class PiecesFile:
             json.dump(template.to_json(), f)
 
     @classmethod
-    def from_file(cls, file: File):
+    def from_file(cls, file: File, telegram: Telegram = None):
         """
         Devuelve una instancia de PiecesFile que conserva el valor de .path
         """
 
-        cache_pieces = os.path.join(config.worktable, file.md5sum)
+        cache_pieces = os.path.join(telegram.config.worktable, file.md5sum)
 
         if os.path.exists(cache_pieces):
             with open(cache_pieces, "r", encoding="utf-8") as f:
@@ -177,10 +176,10 @@ class PiecesFile:
                 doc["message"] = (
                     MessagePlus(**doc["message"]) if doc["message"] else None
                 )
-                pieces.append(Piece(**doc))
-            return PiecesFile(file=file, pieces=pieces)
+                pieces.append(Piece(**doc, telegram=telegram))
+            return PiecesFile(file=file, pieces=pieces, telegram=telegram)
 
-        return PiecesFile(file=file, pieces=None)
+        return PiecesFile(file=file, pieces=None, telegram=telegram)
 
     @classmethod
     def from_json(cls, json_data):

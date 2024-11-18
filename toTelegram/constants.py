@@ -25,8 +25,6 @@ REGEX_PART_OF_FILEPART = re.compile(r"(?<=_)\d+-\d+")
 REGEX_FILEPART_OF_STRING = re.compile("(?<=').*?(?=')")
 PYTHON_DATA_TYPES = [int, float, str, bool, set, list, tuple, dict, type(None)]
 
-PATH_CONFIG = "config.yaml"
-
 PROJECT_NAME = "toTelegram"
 HOME = Path.home() / ".local/share" if system() == "Linux" else Path(getenv("APPDATA"))
 WORKTABLE = HOME / PROJECT_NAME

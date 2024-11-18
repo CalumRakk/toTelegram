@@ -1,10 +1,16 @@
 # pylint: disable=C0301
 from __future__ import annotations
 import os
-
+import logging
+import io
 from pyrogram import Client as ClientPyrogram
 from pyrogram.types.messages_and_media.message import Message
-from pyrogram.errors import UserAlreadyParticipant, PhoneNumberInvalid, FloodWait, ChatIdInvalid
+from pyrogram.errors import (
+    UserAlreadyParticipant,
+    PhoneNumberInvalid,
+    FloodWait,
+    ChatIdInvalid,
+)
 
 from .types import MessagePlus
 from .config import Config
@@ -20,23 +26,13 @@ Pyrogram le pedirá su número telefonico. El número debe estar en formato inte
 por ejemplo, para españa debe incluir el +34
 """
 
-class SingletonMeta(type):
-    _instances = {}
 
-    def __call__(cls, *args, **kwargs):
-
-        if cls not in cls._instances:
-            instance = super().__call__(*args, **kwargs)
-            cls._instances[cls] = instance
-        return cls._instances[cls]
-
-
-class Telegram(metaclass=SingletonMeta):
-    def __init__(self):
-        self.config = Config()
+class Telegram:
+    def __init__(self, config: Config):
+        self.config = config
 
     @property
-    def client(self):
+    def client(self) -> ClientPyrogram:
         if hasattr(self, "_client") is False:
             if self.config.session_string is None:
                 print(STRING)
@@ -44,8 +40,9 @@ class Telegram(metaclass=SingletonMeta):
                 print("Cargando...", end="\r")
                 api_id = self.config.api_id
                 api_hash = self.config.api_hash
-                client = ClientPyrogram("my_account", api_id=api_id,
-                                        api_hash=api_hash, in_memory=True)
+                client = ClientPyrogram(
+                    "my_account", api_id=api_id, api_hash=api_hash, in_memory=True
+                )
                 try:
                     client.start()
                     session_string = client.export_session_string()
@@ -57,19 +54,26 @@ class Telegram(metaclass=SingletonMeta):
                     exit()
 
         session_string = self.config.session_string
-        client = ClientPyrogram(
-            "my_account", session_string=session_string)
+        client = ClientPyrogram("my_account", session_string=session_string)
         client.start()
         return client
 
     def update(self, path: str, caption: str, filename: str) -> Message:
+        log_capture_string = io.StringIO()
+        # Crear un manejador que escriba en el StringIO
+        logging.basicConfig(
+            level=logging.WARNING,  # Establecer el nivel de logging
+            format="%(asctime)s - %(levelname)s - %(message)s",
+            handlers=[logging.StreamHandler(log_capture_string)],
+        )
+
         message = self.client.send_document(
             chat_id=self.config.chat_id,
             document=path,
             file_name=filename,
             caption="" if caption == filename else caption,
             progress=progress,
-            progress_args=(caption,)
+            progress_args=(caption, log_capture_string),
         )
         return MessagePlus.from_message(message)
 
@@ -89,16 +93,19 @@ class Telegram(metaclass=SingletonMeta):
         output = path or os.path.join(self.config.worktable, message_plus.file_name)
         if not os.path.exists(output):
             message = self.client.get_messages(chat_id, message_id)
-            self.client.download_media(message,
-                                       file_name=output,
-                                       progress=progress,
-                                       progress_args=(message_plus.file_name,)
-                                       )
+            self.client.download_media(
+                message,
+                file_name=output,
+                progress=progress,
+                progress_args=(message_plus.file_name,),
+            )
         return output
 
     def get_message(self, messageplus: MessagePlus) -> MessagePlus:
 
-        return self.client.get_messages(int(str(self.config.chat_id).replace("-", "-100")), messageplus.message_id)
+        return self.client.get_messages(
+            int(str(self.config.chat_id).replace("-", "-100")), messageplus.message_id
+        )
 
     def join_group(self, invite_link):
         """
@@ -133,7 +140,9 @@ class Telegram(metaclass=SingletonMeta):
                 self.config.data.update({"chat_id": self.config.chat_id})
                 self.config.save()
             except ChatIdInvalid:
-                print("No se pudo obtener la info del chat_id. Asegurate que el chat_id este en el formato de pyrogram o que sea un enlace de invitación de Telegram")
+                print(
+                    "No se pudo obtener la info del chat_id. Asegurate que el chat_id este en el formato de pyrogram o que sea un enlace de invitación de Telegram"
+                )
                 exit()
 
         else:
@@ -144,7 +153,8 @@ class Telegram(metaclass=SingletonMeta):
             exit()
         if not chatinfo.permissions.can_send_media_messages:
             print(
-                f"No tienes permisos para subir archivos en chat_id {self.config.chat_id}")
+                f"No tienes permisos para subir archivos en chat_id {self.config.chat_id}"
+            )
             exit()
         print("CHAT_ID:", chatinfo.title)
 

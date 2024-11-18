@@ -4,6 +4,9 @@ import os
 from argparse import ArgumentTypeError
 from typing import Union
 from datetime import datetime
+import sys
+import logging
+import re
 
 import exiftool
 import filetype
@@ -17,6 +20,9 @@ from .constants import (
 )
 
 METADATA_KEY_TO_BE_EXCLUDED = ["format.filename"]
+import time
+
+regex_capture_seg = re.compile(r"(\d+)\s+seconds")
 
 
 class TemplateSnapshot:
@@ -134,8 +140,25 @@ def create_metadata_by_exiftool(path: Union[str, list]):
     return metadata
 
 
-def progress(current, total, filename):
-    print("\t", filename, f"{current * 100 / total:.1f}%", end="\r")
+# send > print error > enter progress
+#
+def progress(current, total, filename, log_capture_string):
+    logs_capturados = log_capture_string.getvalue()
+    if logs_capturados != "":
+        log_message = logs_capturados.split("\n")[-2]
+        match = regex_capture_seg.search(log_message)
+
+        seconds = int(int(match.group(1)) / 2) + 2
+        print(" " * 80, end="\r")
+        for i in range(0, seconds):
+            print("\t waiting", seconds, "seconds", end="\r")
+            seconds -= 1
+            time.sleep(1)
+        log_capture_string.truncate(0)
+        log_capture_string.seek(0)
+        print(f"\t {filename} {current * 100 / total:.1f}%", end="\r")
+    else:
+        print(f"\t {filename} {current * 100 / total:.1f}%", end="\r")
 
 
 def get_filepart_of_string(string):

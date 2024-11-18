@@ -15,6 +15,8 @@ def run_script():
         "path", help="La ubicación del archivo o carpeta para subir"
     )
 
+    update_parse.add_argument("--config-path", default="config.yaml")
+
     # Argumentos opcionales de exclusión.
     update_parse.add_argument("--exclude-words", nargs="+", default=[])
     update_parse.add_argument("--exclude-ext", nargs="+", default=[])
@@ -25,6 +27,10 @@ def run_script():
     update_parse = subparse.add_parser("download")
     update_parse.add_argument("path", help="ruta del archivo json.xz")
     update_parse.add_argument("--output", help="ruta de salida")
+
+    update_parse.add_argument(
+        "--config-path", help="ruta de salida", default="config.yaml"
+    )
 
     args = parser.parse_args()
     if args.command == "update":

@@ -6,21 +6,30 @@ from .managers import PiecesFile, SingleFile
 from .exclusionManager import ExclusionManager
 from .telegram import Telegram
 from pathlib import Path
+from .config import Config
 
 
-def update(args):
-    telegram = Telegram()
+def update(
+    path,
+    config_path="config.yaml",
+    exclude_words=None,
+    exclude_ext=None,
+    min_size=None,
+    max_size=None,
+):
+    config = Config(config_path)
+    telegram = Telegram(config=config)
     telegram.check_session()
     telegram.check_chat_id()
 
     exclusionManager = ExclusionManager(
-        exclude_words=args.exclude_words,
-        exclude_ext=args.exclude_ext,
-        min_size=args.min_size,
-        max_size=args.max_size,
+        exclude_words=exclude_words,
+        exclude_ext=exclude_ext,
+        min_size=min_size,
+        max_size=max_size,
     )
 
-    paths = exclusionManager.filder(args.path)
+    paths = exclusionManager.filder(path)
     count_path = len(paths)
 
     for index, path in enumerate(paths, 1):
@@ -28,9 +37,9 @@ def update(args):
         file = File.from_path(path)
 
         if file.type == "pieces-file":
-            manager = PiecesFile.from_file(file)
+            manager = PiecesFile.from_file(file, telegram=telegram)
         else:
-            manager = SingleFile(file=file, message=None)
+            manager = SingleFile(file=file, message=None, telegram=telegram)
 
         manager.update()
         manager.create_snapshot()

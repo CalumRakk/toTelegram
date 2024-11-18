@@ -11,12 +11,11 @@ from ..types.messageplus import MessagePlus
 
 
 class SingleFile:
-    telegram = Telegram()
-
-    def __init__(self, file: File, message=None, kind=None):
+    def __init__(self, file: File, message=None, kind=None, telegram=Telegram):
         self.kind = kind or "single-file"
         self.file = file
         self.message = message
+        self.telegram = telegram
 
     def update(self, remove=False):
         """
@@ -37,7 +36,7 @@ class SingleFile:
         if os.path.exists(path):
             return True
 
-        SingleFile.telegram.download(self.message, path=path)
+        self.telegram.download(self.message, path=path)
         print(path)
 
     def to_json(self):
