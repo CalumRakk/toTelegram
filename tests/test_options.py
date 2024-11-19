@@ -1,22 +1,8 @@
-
 import unittest
-import sys
-
-from toTelegram import update
+from toTelegram.script import update
 import toTelegram.constants
 
-sys.path.append('../toTelegram')
-
-
 FILESIZE_LIMIT = toTelegram.constants.FILESIZE_LIMIT
-
-
-class Namespace:
-    def __init__(self, **kwargs):
-        self.__dict__.update(kwargs)
-
-    def __getattr__(self, value):
-        return None
 
 
 class TestOptions(unittest.TestCase):
@@ -25,18 +11,18 @@ class TestOptions(unittest.TestCase):
         Comprueba la opción update para un archivo tipo piecesfile
         """
         toTelegram.constants.FILESIZE_LIMIT = 1000000
-        args = Namespace(path=r"tests\video.mp4", b='c')
 
-        self.assertTrue(update(args))
+        r = update(path=r"tests\Otan Mian Anoixi (Live - Bonus Track)-(240p).mp4")
+        self.assertTrue(r)
 
     def test_update_by_singlefile(self):
         """
         Comprueba la opción update para un archivo tipo singlefile
         """
         toTelegram.constants.FILESIZE_LIMIT = FILESIZE_LIMIT
-        args = Namespace(path=r"tests\video.mp4", b='c')
-        self.assertTrue(update(args))
+        r = update(path=r"tests\video.mp4")
+        self.assertTrue(r)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

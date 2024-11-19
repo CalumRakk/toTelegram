@@ -1,7 +1,7 @@
-
 import os
 import re
 from typing import List, Union
+from pathlib import Path
 
 from humanfriendly import parse_size
 
@@ -10,7 +10,7 @@ from .utils import get_all_files_from_directory
 from .constants import EXT_JSON_XZ
 
 
-REGEX_STRING_TO_LIST = re.compile('["\'].*?["\']|.*? ')
+REGEX_STRING_TO_LIST = re.compile("[\"'].*?[\"']|.*? ")
 
 
 def string_to_list(string: Union[list, str]):
@@ -41,10 +41,11 @@ def string_to_int(string: Union[int, str]):
 
 
 class ExclusionManager:
-    def __init__(self, exclude_words=None, exclude_ext=None, min_size=None, max_size=None):
+    def __init__(
+        self, exclude_words=None, exclude_ext=None, min_size=None, max_size=None
+    ):
         config = Config()
-        self.exclude_words = exclude_words or string_to_list(
-            config.exclude_words)
+        self.exclude_words = exclude_words or string_to_list(config.exclude_words)
         self.exclude_ext = exclude_ext or string_to_list(config.exclude_ext)
         self.min_size = min_size or string_to_int(config.min_size)
         self.max_size = max_size or string_to_int(config.max_size)
@@ -56,10 +57,11 @@ class ExclusionManager:
         for key, value in self.__dict__.items():
             print(key, value)
 
-    def exclusion_by_exists(self, path):
-        """True si el archivo a subir ha generado un archivo `json.xz`
-        """
-        if os.path.exists(path + EXT_JSON_XZ):
+    def exclusion_by_exists(self, path: Path):
+        """True si el archivo a subir ha generado un archivo `json.xz`"""
+        # path + EXT_JSON_XZ
+
+        if path.with_suffix(path.suffix + EXT_JSON_XZ).exists():
             return True
         return False
 
@@ -76,7 +78,7 @@ class ExclusionManager:
                     return True
         return False
 
-    def exclusion_by_ext(self, path: str) -> bool:
+    def exclusion_by_ext(self, path: Path) -> bool:
         """True si la extensión de path está dentro de la lista self.exclude_ext
         Args:
             path: ruta absoluta del archivo.
@@ -85,7 +87,7 @@ class ExclusionManager:
             ext = os.path.splitext(path)[1]
             if ext in self.exclude_ext:
                 return True
-        if path.endswith(EXT_JSON_XZ):
+        if path.suffix == EXT_JSON_XZ:
             return True
         return False
 
@@ -129,8 +131,13 @@ class ExclusionManager:
             paths = [path]
         else:
             raise FileNotFoundError(path)
-        methods = (self.exclusion_by_ext, self.exclusion_by_words,
-                   self.exclusion_by_min_size, self.exclusion_by_max_size, self.exclusion_by_exists)
+        methods = (
+            self.exclusion_by_ext,
+            self.exclusion_by_words,
+            self.exclusion_by_min_size,
+            self.exclusion_by_max_size,
+            self.exclusion_by_exists,
+        )
         filterCount = 0
         for path in paths[:]:
             for method in methods:

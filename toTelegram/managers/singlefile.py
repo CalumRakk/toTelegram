@@ -11,7 +11,7 @@ from ..types.messageplus import MessagePlus
 
 
 class SingleFile:
-    def __init__(self, file: File, message=None, kind=None, telegram=Telegram):
+    def __init__(self, telegram: Telegram, file: File, message=None, kind=None):
         self.kind = kind or "single-file"
         self.file = file
         self.message = message

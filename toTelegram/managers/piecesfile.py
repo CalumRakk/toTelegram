@@ -33,7 +33,7 @@ from ..filechunker import FileChunker
 
 
 class PiecesFile:
-    def __init__(self, kind=None, file: File = None, pieces=None, telegram=Telegram):
+    def __init__(self, telegram: Telegram, kind=None, file: File = None, pieces=None):
         self.kind = kind or "pieces-file"
         self.file = file
         self.pieces = pieces

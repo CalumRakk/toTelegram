@@ -97,7 +97,7 @@ def attributes_to_json(self):
     """
     document = self.__dict__.copy()
     for key, value in list(document.items())[:]:
-        if key.startswith("_"):
+        if key.startswith("_") or key == "telegram":
             document.pop(key)
             continue
         if key == "pieces":

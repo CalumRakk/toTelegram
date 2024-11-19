@@ -7,7 +7,14 @@ from ..telegram import Telegram
 
 
 class Piece:
-    def __init__(self, filename, size, message=None, kind=None, telegram=Telegram):
+    def __init__(
+        self,
+        filename,
+        size,
+        telegram: Telegram,
+        message=None,
+        kind=None,
+    ):
         self.kind = kind or "#piece"
         self.filename = filename
         self.size = size
