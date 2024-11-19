@@ -47,8 +47,9 @@ def update(
 
             manager.update()
             manager.create_snapshot()
-            # execute callback
             if call_back:
+                call_back_args = call_back_args or []
+                call_back_kwargs = call_back_kwargs or {}
                 call_back(manager, *call_back_args, **call_back_kwargs)
         return True
     return False
