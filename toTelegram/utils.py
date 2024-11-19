@@ -7,6 +7,7 @@ from datetime import datetime
 import sys
 import logging
 import re
+from pathlib import Path
 
 import exiftool
 import filetype
@@ -77,14 +78,13 @@ def get_all_files_from_directory(path, ext=None):
     """
     Devuelve todos los archivos de un directorio con su ruta completa.
     """
-    if not os.path.isdir(path):
-        raise Exception("No es una carpeta", path)
     res = []
     for dir_path, dir_names, file_names in os.walk(path):
         p_list = []
         for filename in file_names:
             if os.path.splitext(filename)[1] == ext or ext is None:
-                p_list.append(os.path.join(dir_path, filename))
+                # os.path.join(dir_path, filename)
+                p_list.append(Path(dir_path) / filename)
         res.extend(p_list)
     return res
 

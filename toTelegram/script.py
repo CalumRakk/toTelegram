@@ -7,15 +7,19 @@ from .exclusionManager import ExclusionManager
 from .telegram import Telegram
 from pathlib import Path
 from .config import Config
+from typing import Union
 
 
 def update(
-    path,
+    path: Union[list[Path], Path],
     config_path="config.yaml",
     exclude_words=None,
     exclude_ext=None,
     min_size=None,
     max_size=None,
+    call_back=None,
+    call_back_args=None,
+    call_back_kwargs=None,
 ):
     config = Config(config_path)
     telegram = Telegram(config=config)
@@ -31,19 +35,23 @@ def update(
 
     paths = exclusionManager.filder(path)
     count_path = len(paths)
+    if count_path >= 1:
+        for index, path in enumerate(paths, 1):
+            print(f"\n{index}/{count_path}", os.path.basename(path))
+            file = File.from_path(path)
 
-    for index, path in enumerate(paths, 1):
-        print(f"\n{index}/{count_path}", os.path.basename(path))
-        file = File.from_path(path)
+            if file.type == "pieces-file":
+                manager = PiecesFile.from_file(file, telegram=telegram)
+            else:
+                manager = SingleFile(file=file, message=None, telegram=telegram)
 
-        if file.type == "pieces-file":
-            manager = PiecesFile.from_file(file, telegram=telegram)
-        else:
-            manager = SingleFile(file=file, message=None, telegram=telegram)
-
-        manager.update()
-        manager.create_snapshot()
-    return True
+            manager.update()
+            manager.create_snapshot()
+            # execute callback
+            if call_back:
+                call_back(manager, *call_back_args, **call_back_kwargs)
+        return True
+    return False
 
 
 def download(path: Path):

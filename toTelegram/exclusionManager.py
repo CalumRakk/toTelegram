@@ -65,14 +65,14 @@ class ExclusionManager:
             return True
         return False
 
-    def exclusion_by_words(self, path) -> bool:
+    def exclusion_by_words(self, path: Path) -> bool:
         """True si alguna de las palabras self.exclude_ext está dentro del nombre del archivo.
         Args:
             path: ruta absoluta del archivo.
         """
         if isinstance(self.exclude_words, list):
-            ext = os.path.splitext(path)[1]
-            name = os.path.basename(path).replace(ext, "")
+            ext = path.suffix
+            name = path.stem
             for word in self.exclude_words:
                 if word in name:
                     return True
@@ -84,36 +84,36 @@ class ExclusionManager:
             path: ruta absoluta del archivo.
         """
         if isinstance(self.exclude_ext, list):
-            ext = os.path.splitext(path)[1]
+            ext = path.suffix
             if ext in self.exclude_ext:
                 return True
-        if path.suffix == EXT_JSON_XZ:
+        if str(path).endswith(EXT_JSON_XZ):
             return True
         return False
 
-    def exclusion_by_min_size(self, path) -> bool:
+    def exclusion_by_min_size(self, path: Path) -> bool:
         """True si path pesa menos que self.min_size
         Args:
             path: ruta absoluta del archivo.
         """
         if isinstance(self.min_size, int):
-            filesize = os.path.getsize(path)
+            filesize = path.stat().st_size
             if filesize < self.min_size:
                 return True
         return False
 
-    def exclusion_by_max_size(self, path: str) -> bool:
+    def exclusion_by_max_size(self, path: Path) -> bool:
         """True si path pesa más que self.max_size
         Args:
             path: ruta absoluta del archivo.
         """
         if isinstance(self.max_size, int):
-            filesize = os.path.getsize(path)
+            filesize = path.stat().st_size
             if filesize > self.max_size:
                 return True
         return False
 
-    def filder(self, path: str) -> List[str]:
+    def filder(self, path: Path) -> List[str]:
         """Le aplica todos los métodos de exclusion a path y devuelve una lista de path filtrada
 
         Args:
@@ -125,9 +125,10 @@ class ExclusionManager:
         Returns:
             list: lista de path filtrada
         """
-        if os.path.isdir(path):
+
+        if path.is_dir():
             paths = get_all_files_from_directory(path)
-        elif os.path.isfile(path):
+        elif path.is_file():
             paths = [path]
         else:
             raise FileNotFoundError(path)
