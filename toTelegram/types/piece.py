@@ -51,10 +51,15 @@ class Piece:
         return attributes_to_json(self)
 
     @classmethod
-    def from_path(cls, path, message=None):
+    def from_path(
+        cls,
+        path,
+        telegram: Telegram,
+        message=None,
+    ):
         filename = os.path.basename(path)
         size = os.path.getsize(path)
-        return Piece(filename=filename, size=size, message=message)
+        return Piece(filename=filename, size=size, message=message, telegram=telegram)
 
     @classmethod
     def from_json(cls, json_data):

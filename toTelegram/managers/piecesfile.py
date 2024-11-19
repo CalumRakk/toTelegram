@@ -146,7 +146,7 @@ class PiecesFile:
 
         pieces = []
         for path in fileparts:
-            piece = Piece.from_path(path)
+            piece = Piece.from_path(path, telegram=self.telegram)
             pieces.append(piece)
         return pieces
 
