@@ -1,21 +1,26 @@
 # pylint: disable=C0301
 from __future__ import annotations
-import os
-import logging
+
+import asyncio
 import io
+import logging
+import os
+from typing import cast
+
 from pyrogram import Client as ClientPyrogram
-from pyrogram.types.messages_and_media.message import Message
 from pyrogram.errors import (
-    UserAlreadyParticipant,
-    PhoneNumberInvalid,
-    FloodWait,
     ChatIdInvalid,
+    FloodWait,
+    PhoneNumberInvalid,
+    UserAlreadyParticipant,
 )
+from pyrogram.errors.exceptions.bad_request_400 import UserAlreadyParticipant
+from pyrogram.types.messages_and_media.message import Message
+from pyrogram.types.user_and_chats.chat import Chat
 
-from .types import MessagePlus
 from .config import Config
+from .types import MessagePlus
 from .utils import progress
-
 
 INVITE_LINK_RE = ClientPyrogram.__dict__["INVITE_LINK_RE"]
 
@@ -34,29 +39,19 @@ class Telegram:
     @property
     def client(self) -> ClientPyrogram:
         if hasattr(self, "_client") is False:
-            if self.config.session_string is None:
-                print(STRING)
-                os.system("pause")
-                print("Cargando...", end="\r")
-                api_id = self.config.api_id
-                api_hash = self.config.api_hash
-                client = ClientPyrogram(
-                    "my_account", api_id=api_id, api_hash=api_hash, in_memory=True
-                )
-                try:
-                    client.start()
-                    session_string = client.export_session_string()
-                    self.config.data.update({"session_string": session_string})
-                    self.config.save()
-                    return client
-                except PhoneNumberInvalid:
-                    print("\n*Advertencia*\nEl número introducido es invalido")
-                    exit()
-
-        session_string = self.config.session_string
-        client = ClientPyrogram("my_account", session_string=session_string)
-        client.start()
-        return client
+            name = self.config.name
+            api_id = self.config.api_id
+            api_hash = self.config.api_hash
+            client = ClientPyrogram(
+                name,
+                api_id=api_id,
+                api_hash=api_hash,
+                workdir=str(self.config.worktable),
+            )
+            client.start()
+            setattr(self, "_client", client)
+            return client
+        return getattr(self, "_client")
 
     def update(self, path: str, caption: str, filename: str) -> Message:
         log_capture_string = io.StringIO()
@@ -125,38 +120,33 @@ class Telegram:
         - Entra al grupo si chat_id es una invitación valida
         """
 
-        if isinstance(self.config.chat_id, str):
-            match = INVITE_LINK_RE.match(self.config.chat_id)
+        def is_chat_id_invite_link(chat_id):
+            chat_id = str(chat_id) if isinstance(chat_id, int) else chat_id
+            match = INVITE_LINK_RE.match(chat_id)
+            return match is not None
 
-            if match:
-                match = match.group()
-            else:
-                match = self.config.chat_id
-
+        def join_and_get_chat(invite_link) -> Chat:
+            if not is_chat_id_invite_link(chat_id):
+                raise ChatIdInvalid("invite_link no es valido")
             try:
-                chatinfo = self.client.get_chat(self.config.chat_id)
-                # parece get_chat devuelve el id en el formato de pyrogram
-                self.config.chat_id = chatinfo.id
-                self.config.data.update({"chat_id": self.config.chat_id})
-                self.config.save()
-            except ChatIdInvalid:
-                print(
-                    "No se pudo obtener la info del chat_id. Asegurate que el chat_id este en el formato de pyrogram o que sea un enlace de invitación de Telegram"
-                )
-                exit()
+                invite_link = INVITE_LINK_RE.match(chat_id).group()
+                chatinfo = self.client.join_chat(invite_link)
+                return chatinfo
+            except UserAlreadyParticipant:
+                return self.client.get_chat(self.config.chat_id)
 
+        chat_id = self.config.chat_id
+        if is_chat_id_invite_link(chat_id):
+            chatinfo = join_and_get_chat(chat_id)
+            message = cast(Message, self.client.send_message(chatinfo.id, STRING))
+            message.delete()
+            self.client.loop.run_until_complete(self.client.storage.save())
+            chat_id = getattr(chatinfo, "id")
+            self.config.chat_id = chat_id
+            self.config.data.update({"chat_id": self.config.chat_id})
+            self.config.save()
         else:
             chatinfo = self.client.get_chat(self.config.chat_id)
-
-        if getattr(chatinfo, "id", False) is False:
-            print(f"El usuario no hace parte de chat_id {self.config.chat_id}")
-            exit()
-        if not chatinfo.permissions.can_send_media_messages:
-            print(
-                f"No tienes permisos para subir archivos en chat_id {self.config.chat_id}"
-            )
-            exit()
-        print("CHAT_ID:", chatinfo.title)
 
     def check_session(self):
         """
