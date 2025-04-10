@@ -1,6 +1,7 @@
 import os
-import yaml
 from pathlib import Path
+
+import yaml
 
 from .constants import WORKTABLE
 from .utils import SingletonMeta
@@ -76,6 +77,7 @@ class Config(Folder, metaclass=SingletonMeta):
         self.api_hash = self.data["api_hash"]
         self.api_id = self.data["api_id"]
         self.chat_id = self.data["chat_id"]
+        self.name = self.data["name"]
         super().__init__(worktable=self.data.get("worktable") or WORKTABLE)
 
     def _load_config(self) -> dict:
