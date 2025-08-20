@@ -5,7 +5,7 @@ from pathlib import Path
 from platform import system
 from typing import List, Optional, Union, cast
 
-from pydantic import Field, ValidationError
+from pydantic import Field, ValidationError, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -41,6 +41,13 @@ class Settings(BaseSettings):
     def is_excluded(self, path: Path) -> bool:
         """Devuelve True si el archivo coincide con algún patrón de exclusión."""
         return any(path.match(pattern) for pattern in self.exclude_files)
+
+    @field_validator("chat_id", mode="before")
+    def convert_to_int_if_possible(cls, v):
+        try:
+            return int(v)
+        except (ValueError, TypeError):
+            return str(v)
 
 
 def get_settings(env_path: Union[Path, str] = ".env") -> Settings:

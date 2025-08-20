@@ -1,12 +1,19 @@
+import io
 import locale
+import logging
 import os
+import re
+import time
 from pathlib import Path
+from typing import Union
 
 import peewee
 
-from totelegram.models import File, MessageTelegram, Piece, db
+from totelegram.models import File, Message, Piece, db
 from totelegram.setting import Settings, get_settings
 from totelegram.utils import create_md5sum_by_hashlib, get_mimetype
+
+logger = logging.getLogger(__name__)
 
 
 def _initialize_db(settings: Settings):
@@ -15,7 +22,7 @@ def _initialize_db(settings: Settings):
     db.initialize(database)
 
     database.connect()
-    database.create_tables([Piece, MessageTelegram, File], safe=True)
+    database.create_tables([Piece, Message, File], safe=True)
     database.close()
 
 
@@ -43,21 +50,90 @@ def _initialize_client_telegram(settings: Settings):
 def load_file(path: Path, settings):
     # TODO: cachar el md5 usando
     md5sum = create_md5sum_by_hashlib(path)
-    mimetype = get_mimetype(path)
+    file = File.get_or_none(md5sum=md5sum)
 
+    if file is not None:
+        if file.path_str != str(path):
+            file.path_str = str(path)
+            file.save()
+        return file
+
+    mimetype = get_mimetype(path)
     filesize = path.stat().st_size
 
+    data_file = {
+        "path_str": str(path),
+        "filename": path.name,
+        "size": path.stat().st_size,
+        "mimetype": mimetype,
+        "md5sum": md5sum,
+    }
+    # Determina la categoria del File
     if filesize <= settings.max_filesize_bytes:
-        file = File(
-            path=str(path),
-            filename=path.name,
-            size=path.stat().st_size,
-            mimetype=mimetype,
-            md5sum=md5sum,
-            category="single-file",
-        )
-    file.save()
+        data_file["category"] = "single-file"
+    else:
+        data_file["category"] = "pieces-file"
+
+    file = File.create(**data_file)
     return file
+
+
+def progress(current: int, total, filename, log_capture_string: io.StringIO):
+    regex_capture_seg = re.compile(r"(\d+)\s+seconds")
+    logs_capturados = log_capture_string.getvalue()
+    if logs_capturados != "":
+        log_message = logs_capturados.split("\n")[-2]
+        match = regex_capture_seg.search(log_message)
+        if match:
+            seconds = int(int(match.group(1)) / 2) + 2
+            for _ in range(0, seconds):
+                logger.info("\t waiting", seconds, "seconds")
+                seconds -= 1
+                time.sleep(1)
+            log_capture_string.truncate(0)
+            log_capture_string.seek(0)
+        logger.info(f"\t {filename} {current * 100 / total:.1f}%")
+    else:
+        logger.info(f"\t {filename} {current * 100 / total:.1f}%")
+
+
+def upload_file(client, settings: Settings, file: File):
+    log_capture_string = io.StringIO()
+
+    # Crear un manejador que escriba en el StringIO
+    logging.basicConfig(
+        level=logging.WARNING,
+        format="%(asctime)s - %(levelname)s - %(message)s",
+        handlers=[logging.StreamHandler(log_capture_string)],
+    )
+    # Enviar el archivo al chat
+    send_data = {
+        "chat_id": settings.chat_id,
+        "document": file.path,
+    }
+    if len(file.path.name) >= settings.max_filename_length:
+        # Si el nombre de archivo es grande. Se usa el md5sum como nombre para que Telegram no lo recorte y se agrega un caption para dejar el nombre del archivo. Telegram acepta más caracteres para el caption.
+        send_data["file_name"] = f"{file.md5sum}.{file.path.suffix}"
+        send_data["caption"] = file.path.name
+
+    messagetelegram = client.send_document(**send_data)
+
+    # Obtener la información del mensaje
+    try:
+        message_data = {
+            "message_id": messagetelegram.id,
+            "chat_id": messagetelegram.chat.id,
+            "json_data": str(messagetelegram),
+        }
+        if file.category == "single-file":
+            message_data["file"] = file
+        else:
+            message_data["piece"] = file
+        mesagge = Message.create(**message_data)
+        return mesagge
+    except Exception as e:
+        # TODO: hacer algo con el archivo enviado si ocurre algun error al crear este objeto en la base de datos.
+        raise
 
 
 if __name__ == "__main__":
@@ -67,7 +143,7 @@ if __name__ == "__main__":
     )
 
     _initialize_db(settings)
-    # client = _initialize_client_telegram(settings)
+    client = _initialize_client_telegram(settings)
 
     paths = target.rglob("*") if target.is_dir() else [target]
     files = []
@@ -78,27 +154,28 @@ if __name__ == "__main__":
         files.append(file)
 
     # # Managers
-    # for file in files:
-    #     if file.type == "pieces-file":
-    #         if file.status == "unfinished":
-    #             pieces = split_file(file, setting)
-    #             file.status = "splitted"
-    #             file.pieces = pieces
-    #             file.save()
+    for file in files:
+        if file.category == "pieces-file":
+            pass
+            # if file.status == "unfinished":
+            #     pieces = split_file(file, setting)
+            #     file.status = "splitted"
+            #     file.pieces = pieces
+            #     file.save()
 
-    #         for piece in file.pieces:
-    #             if piece.is_uploaded:
-    #                 continue
-    #             message = upload_piece(piece, telegram=telegram)
-    #             piece.message = message
-    #             piece.is_uploaded = True
-    #             piece.save()
-    #         file.status = "finished"
-    #         file.save()
-    #     else:
-    #         if file.status == "uploaded":
-    #             continue
-    #         message = upload_file(file, telegram=telegram)
-    #         file.message = message
-    #         file.status = "uploaded"
-    #         file.save()
+            # for piece in file.pieces:
+            #     if piece.is_uploaded:
+            #         continue
+            #     message = upload_piece(piece, telegram=telegram)
+            #     piece.message = message
+            #     piece.is_uploaded = True
+            #     piece.save()
+            # file.status = "finished"
+            # file.save()
+        else:
+            if file.status == "uploaded":
+                continue
+            message = upload_file(client, settings, file)
+            file.message = message
+            file.status = "uploaded"
+            file.save()
