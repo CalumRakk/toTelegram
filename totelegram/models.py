@@ -41,9 +41,3 @@ class MessageTelegram(BaseModel):
     json_data = JSONField()
     file = peewee.ForeignKeyField(File, backref="messages", null=True)
     piece = peewee.ForeignKeyField(Piece, backref="messages", null=True)
-
-
-# db = peewee.SqliteDatabase(settings.database_path)
-# db.connect()
-# db.create_tables([Community, Post, File, UserIdentified, Media], safe=True)
-# db.close()

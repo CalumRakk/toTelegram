@@ -3,9 +3,10 @@ import sys
 from os import getenv
 from pathlib import Path
 from platform import system
-from typing import List, Optional, cast
+from typing import List, Optional, Union, cast
 
-from pydantic_settings import BaseSettings
+from pydantic import Field, ValidationError
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 def get_user_config_dir(app_name: str) -> Path:
@@ -21,22 +22,40 @@ def get_user_config_dir(app_name: str) -> Path:
 
 
 class Settings(BaseSettings):
-    session_name: str
-    api_id: int
-    api_hash: str
-    chat_id: str
+    api_hash: str = Field(..., description="Telegram API hash")
+    api_id: int = Field(..., description="Telegram API ID")
+    session_name: str = "me"
+    chat_id: Union[str, int] = Field(
+        ..., description="ID del chat o enlace de invitación"
+    )
 
-    worktable: Path = Path(get_user_config_dir("toTelegram"))
+    app_name: str = "toTelegram"
+    worktable: Path = Path(get_user_config_dir(app_name)).resolve()
     exclude_files: List[str] = []
+    database_path: Path = worktable / f"{app_name}.sqlite"
 
     min_filesize_bytes: int = 524_288_000
     max_filesize_bytes: int = 2_097_152_000
     max_filename_length: int = 55
 
-    def __init__(self):
-        super().__init__()
-        self.worktable.mkdir(exist_ok=True, parents=True)
-
     def is_excluded(self, path: Path) -> bool:
         """Devuelve True si el archivo coincide con algún patrón de exclusión."""
         return any(path.match(pattern) for pattern in self.exclude_files)
+
+
+def get_settings(env_path: Union[Path, str] = ".env") -> Settings:
+    """
+    Carga configuración desde un archivo .env
+
+    La utilidad principal es ocultar el falso positivo de pylance al advertir que faltan argumentos que van a ser cargados desde el archivo .env
+    # https://github.com/pydantic/pydantic/issues/3753
+    """
+    env_path = Path(env_path) if isinstance(env_path, str) else env_path
+    try:
+        if env_path.exists():
+            settings = Settings(_env_file=env_path)  # type: ignore
+            return settings
+        raise FileNotFoundError(f"El archivo de configuración {env_path} no existe.")
+    except ValidationError as e:
+        print("❌ Error en configuración:", e)
+        raise
