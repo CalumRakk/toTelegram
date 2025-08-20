@@ -32,9 +32,9 @@ class Settings(BaseSettings):
     app_name: str = "toTelegram"
     worktable: Path = Path(get_user_config_dir(app_name)).resolve()
     exclude_files: List[str] = []
-    database_path: Path = worktable / f"{app_name}.sqlite"
+    database_name: str = f"{app_name}.sqlite"
+    database_path: Path = worktable / database_name
 
-    min_filesize_bytes: int = 524_288_000
     max_filesize_bytes: int = 2_097_152_000
     max_filename_length: int = 55
 

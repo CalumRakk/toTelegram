@@ -27,30 +27,42 @@ class File(BaseModel):
     path_str = cast(str, peewee.CharField())
 
     filename = peewee.CharField()
-    size = peewee.IntegerField()
+    size = cast(int, peewee.IntegerField())
     md5sum = peewee.CharField(unique=True)
     mimetype = peewee.CharField()
     category = peewee.CharField(
         choices=Category,
         constraints=[peewee.Check("category IN ('single-file', 'pieces-file')")],
     )
-    status = peewee.CharField(
-        default="new",
-        choices=Status,
-        constraints=[peewee.Check("status IN ('new', 'splitted', 'uploaded')")],
+    status = cast(
+        str,
+        peewee.CharField(
+            default="new",
+            choices=Status,
+            constraints=[peewee.Check("status IN ('new', 'splitted', 'uploaded')")],
+        ),
     )
 
     @property
     def path(self) -> Path:
         return Path(self.path_str)
 
+    @property
+    def pieces(self) -> list["Piece"]:
+        # sobreescribe la busqueda inverta de peewee, porque da genera advertencia con pylance
+        return Piece.select().where(Piece.file == self)
+
 
 class Piece(BaseModel):
+    path_str = cast(str, peewee.CharField())
     filename = peewee.CharField()
     size = peewee.IntegerField()
-    md5sum = peewee.CharField(unique=True)
-    status = peewee.CharField(default="new")
+    is_uploaded = cast(bool, peewee.BooleanField(default=False))
     file = peewee.ForeignKeyField(File, backref="pieces")
+
+    @property
+    def path(self) -> Path:
+        return Path(self.path_str)
 
 
 class Message(BaseModel):

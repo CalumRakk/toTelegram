@@ -5,10 +5,11 @@ import os
 import re
 import time
 from pathlib import Path
-from typing import Union
+from typing import List, Union
 
 import peewee
 
+from totelegram.filechunker import FileChunker
 from totelegram.models import File, Message, Piece, db
 from totelegram.setting import Settings, get_settings
 from totelegram.utils import create_md5sum_by_hashlib, get_mimetype
@@ -47,7 +48,7 @@ def _initialize_client_telegram(settings: Settings):
     return client
 
 
-def load_file(path: Path, settings):
+def load_file(path: Path, settings) -> File:
     # TODO: cachar el md5 usando
     md5sum = create_md5sum_by_hashlib(path)
     file = File.get_or_none(md5sum=md5sum)
@@ -124,11 +125,44 @@ def upload_file(client, settings: Settings, file: File):
             "message_id": messagetelegram.id,
             "chat_id": messagetelegram.chat.id,
             "json_data": str(messagetelegram),
+            "file": file,
         }
-        if file.category == "single-file":
-            message_data["file"] = file
-        else:
-            message_data["piece"] = file
+        mesagge = Message.create(**message_data)
+        return mesagge
+    except Exception as e:
+        # TODO: hacer algo con el archivo enviado si ocurre algun error al crear este objeto en la base de datos.
+        raise
+
+
+def upload_piece(client, settings: Settings, piece: Piece):
+    log_capture_string = io.StringIO()
+
+    # Crear un manejador que escriba en el StringIO
+    logging.basicConfig(
+        level=logging.WARNING,
+        format="%(asctime)s - %(levelname)s - %(message)s",
+        handlers=[logging.StreamHandler(log_capture_string)],
+    )
+    # Enviar el archivo al chat
+    send_data = {
+        "chat_id": settings.chat_id,
+        "document": piece.path,
+    }
+    if len(file.path.name) >= settings.max_filename_length:
+        # Si el nombre de archivo es grande. Se usa el md5sum como nombre para que Telegram no lo recorte y se agrega un caption para dejar el nombre del archivo. Telegram acepta más caracteres para el caption.
+        send_data["file_name"] = f"{piece.file.md5sum}.{file.path.suffix}"
+        send_data["caption"] = file.path.name
+
+    messagetelegram = client.send_document(**send_data)
+
+    # Obtener la información del mensaje
+    try:
+        message_data = {
+            "message_id": messagetelegram.id,
+            "chat_id": messagetelegram.chat.id,
+            "json_data": str(messagetelegram),
+            "piece": piece,
+        }
         mesagge = Message.create(**message_data)
         return mesagge
     except Exception as e:
@@ -137,7 +171,7 @@ def upload_file(client, settings: Settings, file: File):
 
 
 if __name__ == "__main__":
-    settings = get_settings()
+    settings = get_settings("env/test.env")
     target = Path(
         r"D:\github Leo\toTelegram\tests\Otan Mian Anoixi (Live - Bonus Track)-(240p).mp4"
     )
@@ -146,7 +180,7 @@ if __name__ == "__main__":
     client = _initialize_client_telegram(settings)
 
     paths = target.rglob("*") if target.is_dir() else [target]
-    files = []
+    files: List[File] = []
     for path in paths:
         if settings.is_excluded(path):
             continue
@@ -157,25 +191,35 @@ if __name__ == "__main__":
     for file in files:
         if file.category == "pieces-file":
             pass
-            # if file.status == "unfinished":
-            #     pieces = split_file(file, setting)
-            #     file.status = "splitted"
-            #     file.pieces = pieces
-            #     file.save()
+            if file.status == "new":
+                chunks = FileChunker.split_file(file, settings)
 
-            # for piece in file.pieces:
-            #     if piece.is_uploaded:
-            #         continue
-            #     message = upload_piece(piece, telegram=telegram)
-            #     piece.message = message
-            #     piece.is_uploaded = True
-            #     piece.save()
-            # file.status = "finished"
-            # file.save()
+                with db.atomic():
+                    pieces = []
+                    for path in chunks:
+                        data_piece = {
+                            "path_str": str(path),
+                            "filename": path.name,
+                            "size": path.stat().st_size,
+                            "file": file,
+                        }
+                        piece = Piece.create(**data_piece)
+                        pieces.append(piece)
+                file.status = "splitted"
+                file.save()
+
+            for piece in file.pieces:
+                if piece.is_uploaded:
+                    continue
+                message = upload_piece(client, settings, piece)
+                piece.is_uploaded = True
+                piece.save()
+            file.status = "uploaded"
+            file.save()
+
         else:
             if file.status == "uploaded":
                 continue
             message = upload_file(client, settings, file)
-            file.message = message
             file.status = "uploaded"
             file.save()
