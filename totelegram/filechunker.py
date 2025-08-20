@@ -8,6 +8,24 @@ from totelegram.setting import Settings
 
 
 class FileChunker:
+
+    @staticmethod
+    def _should_throw_error(file: File, settings: Settings) -> None:
+        chunk_size = settings.max_filesize_bytes
+        file_size = file.size
+        if not file.path.exists():
+            raise FileNotFoundError(f"El archivo {file.path} no existe.")
+        elif file.category == "single-file":
+            raise ValueError("El archivo es single-file, no se puede dividir.")
+        elif file.size > settings.max_filesize_bytes:
+            raise ValueError(
+                f"El archivo es mayor que el tamaño permitido ({settings.max_filesize_bytes} bytes)."
+            )
+        elif file_size < chunk_size:
+            raise ValueError(
+                f"El tamaño del archivo ({file_size} bytes) es menor que el tamaño de los trozos ({chunk_size} bytes)."
+            )
+
     @staticmethod
     def split_file(
         file: File,
@@ -15,31 +33,21 @@ class FileChunker:
     ) -> List[Path]:
         """Divide un archivo en trozos.
         - `file`: Instancia de File con el archivo a dividir.
-        - `folder`: Carpeta donde se guardan los trozos.
-        - `chunk_size`: Tamaño en bytes de cada trozo.
-        - `buffer_size`: Tamaño del buffer en memoria (por defecto es 100MB).
+        - `settings`: Instancia de Settings con la configuración.
 
         Devuelve una lista de rutas de los archivos divididos.
         """
-        chunk_size = settings.max_filesize_bytes  # 3871563
+        FileChunker._should_throw_error(file, settings)
 
-        if not file.path.exists():
-            raise FileNotFoundError
-        elif file.category == "single-file":
-            raise ValueError("El archivo es single-file, no se puede dividir.")
-
-        file_size = file.size  # 7743127
-        if file_size < chunk_size:
-            raise ValueError(
-                f"El tamaño del archivo ({file_size} bytes) es menor que el tamaño de los trozos ({chunk_size} bytes)."
-            )
-
+        # `chunk_size`: Tamaño en bytes de cada trozo.
+        chunk_size = settings.max_filesize_bytes
         total_parts, remainder = divmod(file.size, chunk_size)
         if remainder:
             total_parts += 1
         folder = settings.worktable / "chunks"
 
-        # block_size es el 10% del valor de chunk_size
+        # block_size: es el 10% del valor de chunk_size
+        # buffer_size: Tamaño del buffer en memoria (por defecto es 100MB).
         block_size = (chunk_size * 10) // 100
         buffer_size = 1024 * 1024 * 100
 

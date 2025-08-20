@@ -170,6 +170,33 @@ def upload_piece(client, settings: Settings, piece: Piece):
         raise
 
 
+def create_and_save_pieces(chunks: List[Path]):
+    with db.atomic():
+        pieces = []
+        for path in chunks:
+            data_piece = {
+                "path_str": str(path),
+                "filename": path.name,
+                "size": path.stat().st_size,
+                "file": file,
+            }
+            piece = Piece.create(**data_piece)
+            pieces.append(piece)
+    return pieces
+
+
+def procces_piecesfile_if_is_new(client, settings: Settings, file: File):
+    if file.status != "new":
+        return
+    pieces = FileChunker.split_file(file, settings)
+    pieces = create_and_save_pieces(pieces)
+    for piece in pieces:
+        upload_piece(client, settings, piece)
+    file.status = "uploaded"
+    file.save()
+    return
+
+
 if __name__ == "__main__":
     settings = get_settings("env/test.env")
     target = Path(
@@ -189,37 +216,21 @@ if __name__ == "__main__":
 
     # # Managers
     for file in files:
-        if file.category == "pieces-file":
-            pass
-            if file.status == "new":
-                chunks = FileChunker.split_file(file, settings)
+        if file.status == "uploaded":
+            continue
 
-                with db.atomic():
-                    pieces = []
-                    for path in chunks:
-                        data_piece = {
-                            "path_str": str(path),
-                            "filename": path.name,
-                            "size": path.stat().st_size,
-                            "file": file,
-                        }
-                        piece = Piece.create(**data_piece)
-                        pieces.append(piece)
-                file.status = "splitted"
-                file.save()
+        if file.category == "single-file":
+            message = upload_file(client, settings, file)
+            file.status = "uploaded"
+            file.save()
 
+        else:
+            procces_piecesfile_if_is_new(client, settings, file)
             for piece in file.pieces:
                 if piece.is_uploaded:
                     continue
                 message = upload_piece(client, settings, piece)
                 piece.is_uploaded = True
                 piece.save()
-            file.status = "uploaded"
-            file.save()
-
-        else:
-            if file.status == "uploaded":
-                continue
-            message = upload_file(client, settings, file)
             file.status = "uploaded"
             file.save()
