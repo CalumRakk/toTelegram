@@ -6,6 +6,7 @@ import peewee
 
 from totelegram.models import File, MessageTelegram, Piece, db
 from totelegram.setting import Settings, get_settings
+from totelegram.utils import create_md5sum_by_hashlib, get_mimetype
 
 
 def _initialize_db(settings: Settings):
@@ -39,20 +40,42 @@ def _initialize_client_telegram(settings: Settings):
     return client
 
 
+def load_file(path: Path, settings):
+    # TODO: cachar el md5 usando
+    md5sum = create_md5sum_by_hashlib(path)
+    mimetype = get_mimetype(path)
+
+    filesize = path.stat().st_size
+
+    if filesize <= settings.max_filesize_bytes:
+        file = File(
+            path=str(path),
+            filename=path.name,
+            size=path.stat().st_size,
+            mimetype=mimetype,
+            md5sum=md5sum,
+            category="single-file",
+        )
+    file.save()
+    return file
+
+
 if __name__ == "__main__":
     settings = get_settings()
-    target = Path(r"F:\ARCHIVOS A SUBIR")
+    target = Path(
+        r"D:\github Leo\toTelegram\tests\Otan Mian Anoixi (Live - Bonus Track)-(240p).mp4"
+    )
 
     _initialize_db(settings)
-    client = _initialize_client_telegram(settings)
+    # client = _initialize_client_telegram(settings)
 
-    # paths = target.rglob("*") if target.is_dir() else [target]
-    # files = []
-    # for path in paths:
-    #     if setting.is_excluded(path):
-    #         continue
-    #     file = File.from_path(path)
-    #     files.append(Path(target / file))
+    paths = target.rglob("*") if target.is_dir() else [target]
+    files = []
+    for path in paths:
+        if settings.is_excluded(path):
+            continue
+        file = load_file(path, settings)
+        files.append(file)
 
     # # Managers
     # for file in files:

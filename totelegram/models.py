@@ -19,6 +19,8 @@ class BaseModel(peewee.Model):
 
 
 class File(BaseModel):
+    path = peewee.CharField()
+
     filename = peewee.CharField()
     size = peewee.IntegerField()
     md5sum = peewee.CharField(unique=True)
