@@ -17,16 +17,20 @@ logger = logging.getLogger(__name__)
 
 
 def init_database(settings: Settings):
+    logger.info("Iniciando base de datos en %s", settings.database_path)
     # Inicializar el proxy con la DB real
     database = peewee.SqliteDatabase(str(settings.database_path))
     db.initialize(database)
 
     database.connect()
     database.create_tables([Piece, Message, File], safe=True)
+    logger.info("Base de datos inicializada correctamente")
     database.close()
 
 
 def init_telegram_client(settings: Settings):
+    logger.info("Iniciando cliente de Telegram")
+
     from pyrogram.client import Client
 
     lang, encoding = locale.getlocale()
@@ -42,22 +46,24 @@ def init_telegram_client(settings: Settings):
         lang_code=iso639,
     )
     client.start()  # type: ignore
+    logger.info("Cliente de Telegram inicializado correctamente")
     # telegram.check_session()
     # telegram.check_chat_id()
     return client
 
 
 def _get_or_create_file_record(path: Path, settings: Settings) -> File:
-    # TODO: cachar el md5 usando
+    logger.debug(f"Analizando archivo: {path.name}")
     md5sum = create_md5sum_by_hashlib(path)
     file = File.get_or_none(md5sum=md5sum)
 
     if file is not None:
+        logger.debug(f"El archivo {path.name} ya se encuentra en la base de datos")
         if file.path_str != str(path):
             file.path_str = str(path)
             file.save()
         return file
-
+    logger.debug(f"El archivo {path.name} no se encuentra en la base de datos")
     mimetype = get_mimetype(path)
     filesize = path.stat().st_size
 
@@ -71,10 +77,13 @@ def _get_or_create_file_record(path: Path, settings: Settings) -> File:
     # Determina la categoria del File
     if filesize <= settings.max_filesize_bytes:
         file_data["category"] = FileCategory.SINGLE.value
+        logger.debug(f"El archivo {path.name} es un archivo single-file")
     else:
         file_data["category"] = FileCategory.CHUNKED.value
+        logger.debug(f"El archivo {path.name} es un archivo pieces-file")
 
     file = File.create(**file_data)
+    logger.debug(f"El archivo {path.name} ha sido creado en la base de datos")
     return file
 
 
@@ -100,14 +109,16 @@ def _get_or_create_file_record(path: Path, settings: Settings) -> File:
 
 
 def upload_single_file(client, settings: Settings, file: File):
-    log_capture_string = io.StringIO()
+    logger.info(f"Subiendo {FileCategory.SINGLE.value} {file.path.name} a Telegram...")
 
-    # Crear un manejador que escriba en el StringIO
-    logging.basicConfig(
-        level=logging.WARNING,
-        format="%(asctime)s - %(levelname)s - %(message)s",
-        handlers=[logging.StreamHandler(log_capture_string)],
-    )
+    # # Crear un manejador que escriba en el StringIO
+    # log_capture_string = io.StringIO()
+    # logging.basicConfig(
+    #     level=logging.WARNING,
+    #     format="%(asctime)s - %(levelname)s - %(message)s",
+    #     handlers=[logging.StreamHandler(log_capture_string)],
+    # )
+
     # Enviar el archivo al chat
     send_data = {
         "chat_id": settings.chat_id,
@@ -119,6 +130,9 @@ def upload_single_file(client, settings: Settings, file: File):
         send_data["caption"] = file.path.name
 
     message_telegram = client.send_document(**send_data)
+    logger.info(
+        f"Subiendo {FileCategory.SINGLE.value} {file.path.name} a Telegram... OK"
+    )
 
     # Obtener la información del mensaje
     try:
@@ -136,18 +150,20 @@ def upload_single_file(client, settings: Settings, file: File):
 
 
 def upload_piece_to_telegram(client, settings: Settings, piece: Piece):
+    logger.info(f"Analizando Piece {piece.filename}...")
     if piece.is_uploaded:
         logger.info(f"Piece {piece.filename} ya fue subido a telegram.")
         return
+    logger.info(f"Subiendo Piece {piece.filename} a Telegram...")
 
-    log_capture_string = io.StringIO()
+    # # Crear un manejador que escriba en el StringIO
+    # log_capture_string = io.StringIO()
+    # logging.basicConfig(
+    #     level=logging.WARNING,
+    #     format="%(asctime)s - %(levelname)s - %(message)s",
+    #     handlers=[logging.StreamHandler(log_capture_string)],
+    # )
 
-    # Crear un manejador que escriba en el StringIO
-    logging.basicConfig(
-        level=logging.WARNING,
-        format="%(asctime)s - %(levelname)s - %(message)s",
-        handlers=[logging.StreamHandler(log_capture_string)],
-    )
     # Enviar el archivo al chat
     send_data = {
         "chat_id": settings.chat_id,
@@ -159,6 +175,7 @@ def upload_piece_to_telegram(client, settings: Settings, piece: Piece):
         send_data["caption"] = piece.file.path.name
 
     message_telegram = client.send_document(**send_data)
+    logger.info(f"Subiendo Piece {piece.filename} a Telegram... OK")
 
     # Obtener la información del mensaje
     try:
@@ -175,6 +192,7 @@ def upload_piece_to_telegram(client, settings: Settings, piece: Piece):
 
 
 def save_pieces(chunks: List[Path], file: File) -> List[Piece]:
+    logger.info(f"Guardando {len(chunks)} pieces...")
     with db.atomic():
         pieces = []
         for path in chunks:
@@ -185,6 +203,7 @@ def save_pieces(chunks: List[Path], file: File) -> List[Piece]:
                 file=file,
             )
             pieces.append(piece)
+    logger.info(f"Guardando {len(chunks)} pieces... OK")
     return pieces
 
 
@@ -195,7 +214,9 @@ def _get_or_chunked_file(file: File, settings: Settings) -> List[Piece]:
         )
 
     if file.get_status() == FileStatus.NEW:
+        logger.info(f"Dividiendo archivo: {file.path.name}...")
         chunks = FileChunker.split_file(file, settings)
+        logger.info(f"Dividiendo archivo: {file.path.name}... OK")
         pieces = save_pieces(chunks, file)
         file.status = FileStatus.SPLITTED.value
         file.save()
@@ -206,19 +227,23 @@ def _get_or_chunked_file(file: File, settings: Settings) -> List[Piece]:
 
 
 def handle_pieces_file(client, settings: Settings, file: File):
+    logger.info(f"Analizando archivo: {file.path.name} {file.type.value}")
+
     if file.get_status() == FileStatus.UPLOADED:
-        logger.info(f"File {file.path.name} ya fue subido a telegram.")
+        logger.info(f"Archivo {file.path.name} ya fue subido a telegram.")
         return
 
     pieces = _get_or_chunked_file(file, settings)
     for piece in pieces:
         upload_piece_to_telegram(client, settings, piece)
+
     file.status = FileStatus.UPLOADED.value
     file.save()
     return
 
 
 def get_or_create_file_records(paths: List[Path], settings: Settings) -> List[File]:
+    logger.info(f"Se encontraron {len(paths)} archivos para procesar")
     file_records = []
     for path in paths:
         if not path.exists():
