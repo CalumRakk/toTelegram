@@ -90,15 +90,8 @@ def handle_pieces_file(client, settings: Settings, file: File):
     return
 
 
-def main():
-    setup_logging(f"{__file__}.log", logging.DEBUG)
-
+def main(target:Path, settings:Settings):   
     logger.info("Iniciando proceso de subida de archivos")
-    settings = get_settings("env/test.env")
-    target = Path(
-        r"D:\\github Leo\\toTelegram\\tests\\Otan Mian Anoixi (Live - Bonus Track)-(240p).mp4"
-    )
-
     init_database(settings)
 
     paths = list(target.glob("*")) if target.is_dir() else [target]
