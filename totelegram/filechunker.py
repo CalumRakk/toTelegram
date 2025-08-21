@@ -17,13 +17,9 @@ class FileChunker:
             raise FileNotFoundError(f"El archivo {file.path} no existe.")
         elif file.category == "single-file":
             raise ValueError("El archivo es single-file, no se puede dividir.")
-        elif file.size > settings.max_filesize_bytes:
+        elif file_size <= chunk_size:
             raise ValueError(
-                f"El archivo es mayor que el tamaño permitido ({settings.max_filesize_bytes} bytes)."
-            )
-        elif file_size < chunk_size:
-            raise ValueError(
-                f"El tamaño del archivo ({file_size} bytes) es menor que el tamaño de los trozos ({chunk_size} bytes)."
+                f"El tamaño del archivo ({file_size} bytes) es menor/igual que el tamaño de los trozos ({chunk_size} bytes)."
             )
 
     @staticmethod

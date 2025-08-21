@@ -8,6 +8,7 @@ from typing import List
 import peewee
 
 from totelegram.filechunker import FileChunker
+from totelegram.logging_config import setup_logging
 from totelegram.models import File, FileCategory, FileStatus, Message, Piece, db
 from totelegram.setting import Settings, get_settings
 from totelegram.utils import create_md5sum_by_hashlib, get_mimetype
@@ -196,6 +197,8 @@ def _get_or_chunked_file(file: File, settings: Settings) -> List[Piece]:
     if file.get_status() == FileStatus.NEW:
         chunks = FileChunker.split_file(file, settings)
         pieces = save_pieces(chunks, file)
+        file.status = FileStatus.SPLITTED.value
+        file.save()
         return pieces
     elif file.get_status() == FileStatus.SPLITTED:
         return file.pieces
@@ -231,21 +234,26 @@ def get_or_create_file_records(paths: List[Path], settings: Settings) -> List[Fi
 
 
 def main():
+    setup_logging(f"{__file__}.log", logging.DEBUG)
+
     settings = get_settings("env/test.env")
     target = Path(
         r"D:\github Leo\toTelegram\tests\Otan Mian Anoixi (Live - Bonus Track)-(240p).mp4"
     )
 
     init_database(settings)
-    client = init_telegram_client(settings)
 
     paths = list(target.glob("*")) if target.is_dir() else [target]
     file_records = get_or_create_file_records(paths, settings)
 
     # # Managers
+    client = None
     for file in file_records:
         if file.get_status() == FileStatus.UPLOADED:
             continue
+
+        if client is None:
+            client = init_telegram_client(settings)
 
         if file.type == FileCategory.SINGLE:
             upload_single_file(client, settings, file)

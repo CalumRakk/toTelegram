@@ -30,3 +30,4 @@ build/
 /tests
 *.db
 env
+*.log

@@ -46,7 +46,7 @@ class File(BaseModel):
         str,
         peewee.CharField(
             default="NEW",
-            constraints=[peewee.Check("status IN ('NEW', 'splitted', 'uploaded')")],
+            constraints=[peewee.Check("status IN ('NEW', 'SPLITTED', 'UPLOADED')")],
         ),
     )
 
