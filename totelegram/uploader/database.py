@@ -2,6 +2,7 @@ import io
 import json
 import locale
 import logging
+from math import log
 from pathlib import Path
 from typing import List
 
@@ -28,18 +29,17 @@ def init_database(settings: Settings):
 
 
 def _get_or_create_file_record(path: Path, settings: Settings) -> File:
-    logger.debug(f"Analizando archivo: {path.name}")
     md5sum = create_md5sum_by_hashlib(path)
     file = File.get_or_none(md5sum=md5sum)
 
     if file is not None:
-        logger.debug(f"El archivo {path.name} ya está en la base de datos")
+        logger.debug(f"El path {path.name} ya está en la base de datos")
         if file.path_str != str(path):
             logger.debug(f"Actualizando ruta de {path.name} en base de datos")
             file.path_str = str(path)
             file.save()
         return file
-    logger.debug(f"El archivo {path.name} no está en la base de datos")
+    logger.debug(f"El path {path.name} no está en la base de datos")
     mimetype = get_mimetype(path)
     filesize = path.stat().st_size
 
@@ -52,13 +52,13 @@ def _get_or_create_file_record(path: Path, settings: Settings) -> File:
     }
     if filesize <= settings.max_filesize_bytes:
         file_data["category"] = FileCategory.SINGLE.value
-        logger.debug(f"El archivo {path.name} es de tipo SINGLE")
+        logger.debug(f"El path {path.name} es de tipo SINGLE")
     else:
         file_data["category"] = FileCategory.CHUNKED.value
-        logger.debug(f"El archivo {path.name} es de tipo CHUNKED")
+        logger.debug(f"El path {path.name} es de tipo CHUNKED")
 
     file = File.create(**file_data)
-    logger.debug(f"El archivo {path.name} fue creado en la base de datos")
+    logger.debug(f"El path {path.name} fue creado en la base de datos File={file.id}")
     return file
 
 
@@ -147,9 +147,17 @@ def save_pieces(chunks: List[Path], file: File) -> List[Piece]:
     return pieces
 
 def get_or_create_file_records(paths: List[Path], settings: Settings) -> List[File]:
-    logger.info(f"Procesando {len(paths)} archivos encontrados")
+    if len(paths) == 0:
+        logger.info("No se especificaron paths, se omite")
+        return []
+    elif len(paths) == 1:
+        logger.info(f"Obteniendo file_record del path especificado...")
+    else:
+        logger.info(f"Obteniendo file_records de los {len(paths)} paths especificados...")
+
     file_records = []
     for path in paths:
+        logger.debug(f"Procesando path: {path}")
         if not path.exists():
             logger.debug(f"El path {path} no existe, se omite")
             continue
@@ -162,5 +170,11 @@ def get_or_create_file_records(paths: List[Path], settings: Settings) -> List[Fi
 
         file = _get_or_create_file_record(path, settings)
         file_records.append(file)
-    logger.info(f"Se registraron {len(file_records)} archivos válidos para subir")
+
+    if len(file_records) == 0:
+        logger.info("No se obtuvinieron file_records") 
+    elif len(file_records) == 1:
+        logger.info(f"Se obtuvo {len(file_records)} file_record")
+    else:
+        logger.info(f"Se obtuvieron {len(file_records)} file_records")
     return file_records

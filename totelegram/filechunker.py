@@ -1,16 +1,12 @@
-import io
-import math
 from pathlib import Path
-from typing import List, Union
+from typing import Iterator, List, Union
 
 from totelegram.models import File
 from totelegram.setting import Settings
 
-
 class FileChunker:
-
-    @staticmethod
-    def _should_throw_error(file: File, settings: Settings) -> None:
+    @classmethod
+    def _should_throw_error(cls, file: File, settings: Settings) -> None:
         chunk_size = settings.max_filesize_bytes
         file_size = file.size
         if not file.path.exists():
@@ -21,9 +17,52 @@ class FileChunker:
             raise ValueError(
                 f"El tamaño del archivo ({file_size} bytes) es menor/igual que el tamaño de los trozos ({chunk_size} bytes)."
             )
+    @classmethod
+    def _chunk_ranges(cls, file_size: int, chunk_size: int):
+        """Devuelve [(start, end_exclusive), ...] con end_exclusive no incluido.
+        https://chatgpt.com/share/68a6ec82-8874-8012-9c27-af04127e28b0
+        """
+        return [(start, min(start + chunk_size, file_size))
+                for start in range(0, file_size, chunk_size)]
 
-    @staticmethod
+    @classmethod
+    def _split_file(cls, file_path: Union[str, Path], ranges: list[tuple[int, int]], folder:Path,
+                            block_size: int = 1024 * 1024)->List[Path]:
+        """
+        Genera trozos de archivo leyendo en bloques para no cargar en memoria chunks grandes.
+
+        :param file_path: ruta al archivo
+        :param ranges: lista de tuplas (inicio, fin)
+        :param block_size: tamaño de bloque de lectura (default 1MB)
+        :yield: (index_del_chunk, bloque_bytes)
+
+        https://chatgpt.com/share/68a6ec3b-988c-8012-b334-f0f2a3524f8c
+        """
+        file_path= Path(file_path) if isinstance(file_path, str) else file_path
+        folder.mkdir(exist_ok=True, parents=True)
+
+        chunks=[]
+        with open(file_path, "rb") as f:
+            for idx, (start, end) in enumerate(ranges, start=1):
+                f.seek(start)
+                remaining = end - start
+
+                chunk_filename = f"{file_path.name}_{idx}-{len(ranges)}"
+                chunk_path = folder / chunk_filename     
+                with open(chunk_path, "ab") as out:
+                    while remaining > 0:                    
+                        data = f.read(min(block_size, remaining))
+                        if not data:
+                            break
+                        out.write(data)
+                        remaining -= len(data)
+                chunks.append(chunk_path)
+        return chunks
+
+    
+    @classmethod
     def split_file(
+        cls,
         file: File,
         settings: Settings,
     ) -> List[Path]:
@@ -33,49 +72,9 @@ class FileChunker:
 
         Devuelve una lista de rutas de los archivos divididos.
         """
-        FileChunker._should_throw_error(file, settings)
-
-        # `chunk_size`: Tamaño en bytes de cada trozo.
-        chunk_size = settings.max_filesize_bytes
-        total_parts, remainder = divmod(file.size, chunk_size)
-        if remainder:
-            total_parts += 1
+        cls._should_throw_error(file, settings)        
+        max_filesize_bytes = settings.max_filesize_bytes
         folder = settings.worktable / "chunks"
-
-        # block_size: es el 10% del valor de chunk_size
-        # buffer_size: Tamaño del buffer en memoria (por defecto es 100MB).
-        block_size = (chunk_size * 10) // 100
-        buffer_size = 1024 * 1024 * 100
-
-        chunks_path = []
-        with open(file.path, "rb") as f:
-            for index, _ in enumerate(range(total_parts), 1):
-                chunk_filename = f"{file.path.name}_{index}-{total_parts}"
-                chunk_path = folder / chunk_filename
-                bytes_written = 0
-
-                with open(chunk_path, "wb") as writer:
-                    writer = io.BufferedWriter(writer, buffer_size=buffer_size)  # type: ignore
-                    while bytes_written < chunk_size:
-                        data = f.read(block_size)
-                        if not data:  # EOF
-                            break
-                        writer.write(data)
-                        bytes_written += len(data)
-                    writer.flush()
-                    writer.close()
-
-                if bytes_written > 0:  # solo agregar si realmente se escribió algo
-                    chunks_path.append(chunk_path)
-                else:
-                    chunk_path.unlink(missing_ok=True)  # elimina archivo vacío
-
-        return chunks_path
-
-
-if __name__ == "__main__":
-    from totelegram.setting import get_settings
-
-    settings = get_settings()
-    file = File.get_by_id(1)
-    chunks = FileChunker.split_file(file, settings)
+        ranges= cls._chunk_ranges(file.size, max_filesize_bytes)
+        chunks= FileChunker._split_file(file.path, ranges, folder)
+        return chunks

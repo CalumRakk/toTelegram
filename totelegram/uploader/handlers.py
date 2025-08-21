@@ -2,13 +2,34 @@
 import json
 import logging
 from pathlib import Path
-from typing import Optional, Tuple, Union
+from typing import List, Optional, Tuple, Union
 from venv import logger
+from totelegram.filechunker import FileChunker
 from totelegram.logging_config import setup_logging
 from totelegram.models import File, FileCategory, FileStatus, Message, Piece
 from totelegram.setting import Settings, get_settings
-from totelegram.uploader.database import get_or_create_file_records, init_database
-from totelegram.uploader.telegram import TelegramService, init_telegram_client
+from totelegram.uploader.database import get_or_create_file_records, init_database, save_pieces
+from totelegram.uploader.telegram import init_telegram_client
+
+def _get_or_chunked_file(file: File, settings: Settings) -> List[Piece]:
+    if file.type != FileCategory.CHUNKED:
+        raise Exception(
+            f"File category '{file.type.value}' no es '{FileCategory.CHUNKED.value}'"
+        )
+
+    if file.get_status() == FileStatus.NEW:
+        logger.info(f"Dividiendo archivo en piezas: {file.path.name}…")
+        chunks = FileChunker.split_file(file, settings)
+        logger.info(f"Archivo dividido correctamente en {len(chunks)} piezas")
+        pieces = save_pieces(chunks, file)
+        file.status = FileStatus.SPLITTED.value
+        file.save()
+        logger.debug(f"Estado de archivo actualizado a SPLITTED: {file.path.name}")
+        return pieces
+    elif file.get_status() == FileStatus.SPLITTED:
+        logger.debug(f"Obteniendo piezas ya registradas para {file.path.name}")
+        return file.pieces
+    raise Exception("File status no es 'new' o 'splitted'")
 
 
 
@@ -21,7 +42,7 @@ def _build_names(path:Path, md5sum:str, settings:Settings)->Tuple[Optional[str],
     return None, None 
 
 
-def upload_file(record: Union[File, Piece] , service: TelegramService, settings: Settings):
+def upload_file(client, record: Union[File, Piece], settings: Settings):
     logger.info(f"Subiendo archivo único: {record.path}…")
 
     if isinstance(record, File):
@@ -36,8 +57,13 @@ def upload_file(record: Union[File, Piece] , service: TelegramService, settings:
     field= {model_field: record}
 
     filename, caption = _build_names(record.path, md5sum, settings)
-    
-    tg_message = service.send_file(record.path, filename, caption)
+    send_data = {
+        "chat_id": settings.chat_id, 
+        "document": str(record.path),
+        "file_name": filename,
+        "caption": caption
+    }
+    tg_message = client.send_document(**send_data)
     
     message_data={
         "message_id": tg_message.id,
@@ -46,6 +72,22 @@ def upload_file(record: Union[File, Piece] , service: TelegramService, settings:
     }
     message_data.update(field)
     return Message.create(**message_data)
+
+def handle_pieces_file(client, settings: Settings, file: File):
+    logger.info(f"Procesando el archivo: {file.path.name}")
+
+    if file.get_status() == FileStatus.UPLOADED:
+        logger.info(f"El archivo {file.path.name} ya fue subido a Telegram")
+        return
+
+    pieces = _get_or_chunked_file(file, settings)
+    for piece in pieces:
+        upload_file(client, piece, settings)
+
+    file.status = FileStatus.UPLOADED.value
+    file.save()
+    logger.info(f"Archivo completo subido en piezas: {file.path.name}")
+    return
 
 
 def main():
@@ -62,7 +104,7 @@ def main():
     paths = list(target.glob("*")) if target.is_dir() else [target]
     file_records = get_or_create_file_records(paths, settings)
 
-    telegram = None
+    client = None
     for file in file_records:
         if file.get_status() == FileStatus.UPLOADED:
             logger.info(
@@ -70,17 +112,16 @@ def main():
             )
             continue
 
-        if telegram is None:
+        if client is None:
             client = init_telegram_client(settings)
-            telegram= TelegramService(client, settings)
 
         if file.type == FileCategory.SINGLE:
-            upload_file(file, telegram, settings)
+            upload_file(client, file, settings)
             file.status = FileStatus.UPLOADED.value
             file.save()
             logger.debug(f"Estado de archivo actualizado a UPLOADED: {file.path.name}")
-    #     else:
-    #         handle_pieces_file(client, settings, file)
+        else:
+            handle_pieces_file(client, settings, file)
 
-    # logger.info(f"Proceso completado. {len(file_records)} archivos procesados")
+    logger.info(f"Proceso completado. {len(file_records)} archivos procesados")
 
