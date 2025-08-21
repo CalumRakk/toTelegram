@@ -9,7 +9,7 @@ import filetype
 logger = logging.getLogger(__name__)
 
 
-def create_md5sum_by_hashlib(path):
+def create_md5sum_by_hashlib(path: Path):
     hash_md5 = hashlib.md5()
     with open(path, "rb") as f:
         for chunk in iter(lambda: f.read(50 * 1024 * 1024), b""):

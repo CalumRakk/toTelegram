@@ -1,3 +1,4 @@
+import enum
 from datetime import datetime
 from pathlib import Path
 from typing import Literal, cast, get_args
@@ -7,8 +8,16 @@ from playhouse.sqlite_ext import JSONField
 
 db = peewee.Proxy()
 
-Category = ["single-file", "pieces-file"]
-Status = ["new", "splitted", "uploaded"]
+
+class FileCategory(str, enum.Enum):
+    SINGLE = "single-file"
+    CHUNKED = "pieces-file"
+
+
+class FileStatus(str, enum.Enum):
+    NEW = "NEW"
+    SPLITTED = "SPLITTED"
+    UPLOADED = "UPLOADED"
 
 
 class BaseModel(peewee.Model):
@@ -31,17 +40,18 @@ class File(BaseModel):
     md5sum = peewee.CharField(unique=True)
     mimetype = peewee.CharField()
     category = peewee.CharField(
-        choices=Category,
         constraints=[peewee.Check("category IN ('single-file', 'pieces-file')")],
     )
     status = cast(
         str,
         peewee.CharField(
-            default="new",
-            choices=Status,
-            constraints=[peewee.Check("status IN ('new', 'splitted', 'uploaded')")],
+            default="NEW",
+            constraints=[peewee.Check("status IN ('NEW', 'splitted', 'uploaded')")],
         ),
     )
+
+    def get_status(self) -> FileStatus:
+        return FileStatus(self.status)
 
     @property
     def path(self) -> Path:
@@ -49,8 +59,12 @@ class File(BaseModel):
 
     @property
     def pieces(self) -> list["Piece"]:
-        # sobreescribe la busqueda inverta de peewee, porque da genera advertencia con pylance
+        # sobreescribe la busqueda inverta de peewee para evitar el falto positivo de pylance
         return Piece.select().where(Piece.file == self)
+
+    @property
+    def type(self) -> FileCategory:
+        return FileCategory(self.category)
 
 
 class Piece(BaseModel):
