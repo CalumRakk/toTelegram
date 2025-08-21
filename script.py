@@ -17,8 +17,7 @@ logger = logging.getLogger(__name__)
 
 
 def init_database(settings: Settings):
-    logger.info("Iniciando base de datos en %s", settings.database_path)
-    # Inicializar el proxy con la DB real
+    logger.info(f"Iniciando base de datos en {settings.database_path}")
     database = peewee.SqliteDatabase(str(settings.database_path))
     db.initialize(database)
 
@@ -47,8 +46,6 @@ def init_telegram_client(settings: Settings):
     )
     client.start()  # type: ignore
     logger.info("Cliente de Telegram inicializado correctamente")
-    # telegram.check_session()
-    # telegram.check_chat_id()
     return client
 
 
@@ -58,12 +55,13 @@ def _get_or_create_file_record(path: Path, settings: Settings) -> File:
     file = File.get_or_none(md5sum=md5sum)
 
     if file is not None:
-        logger.debug(f"El archivo {path.name} ya se encuentra en la base de datos")
+        logger.debug(f"El archivo {path.name} ya está en la base de datos")
         if file.path_str != str(path):
+            logger.debug(f"Actualizando ruta de {path.name} en base de datos")
             file.path_str = str(path)
             file.save()
         return file
-    logger.debug(f"El archivo {path.name} no se encuentra en la base de datos")
+    logger.debug(f"El archivo {path.name} no está en la base de datos")
     mimetype = get_mimetype(path)
     filesize = path.stat().st_size
 
@@ -74,67 +72,33 @@ def _get_or_create_file_record(path: Path, settings: Settings) -> File:
         "mimetype": mimetype,
         "md5sum": md5sum,
     }
-    # Determina la categoria del File
     if filesize <= settings.max_filesize_bytes:
         file_data["category"] = FileCategory.SINGLE.value
-        logger.debug(f"El archivo {path.name} es un archivo single-file")
+        logger.debug(f"El archivo {path.name} es de tipo SINGLE")
     else:
         file_data["category"] = FileCategory.CHUNKED.value
-        logger.debug(f"El archivo {path.name} es un archivo pieces-file")
+        logger.debug(f"El archivo {path.name} es de tipo CHUNKED")
 
     file = File.create(**file_data)
-    logger.debug(f"El archivo {path.name} ha sido creado en la base de datos")
+    logger.debug(f"El archivo {path.name} fue creado en la base de datos")
     return file
 
 
-# def _track_upload_progress(
-#     current: int, total, filename, log_capture_string: io.StringIO
-# ):
-#     seconds_regex = re.compile(r"(\d+)\s+seconds")
-#     captured_logs = log_capture_string.getvalue()
-#     if captured_logs != "":
-#         log_message = captured_logs.split("\n")[-2]
-#         match = seconds_regex.search(log_message)
-#         if match:
-#             seconds = int(int(match.group(1)) / 2) + 2
-#             for _ in range(0, seconds):
-#                 logger.info(f"waiting {seconds} seconds...")
-#                 seconds -= 1
-#                 time.sleep(1)
-#             log_capture_string.truncate(0)
-#             log_capture_string.seek(0)
-#         logger.info(f"\t {filename} {current * 100 / total:.1f}%")
-#     else:
-#         logger.info(f"\t {filename} {current * 100 / total:.1f}%")
-
-
 def upload_single_file(client, settings: Settings, file: File):
-    logger.info(f"Subiendo {FileCategory.SINGLE.value} {file.path.name} a Telegram...")
+    logger.info(f"Subiendo archivo único: {file.path.name}…")
 
-    # # Crear un manejador que escriba en el StringIO
-    # log_capture_string = io.StringIO()
-    # logging.basicConfig(
-    #     level=logging.WARNING,
-    #     format="%(asctime)s - %(levelname)s - %(message)s",
-    #     handlers=[logging.StreamHandler(log_capture_string)],
-    # )
-
-    # Enviar el archivo al chat
     send_data = {
         "chat_id": settings.chat_id,
         "document": file.path,
     }
     if len(file.path.name) >= settings.max_filename_length:
-        # Si el nombre de archivo es grande. Se usa el md5sum como nombre para que Telegram no lo recorte y se agrega un caption para dejar el nombre del archivo. Telegram acepta más caracteres para el caption.
+        logger.debug(f"El nombre de {file.path.name} excede el límite, se usará md5sum")
         send_data["file_name"] = f"{file.md5sum}.{file.path.suffix}"
         send_data["caption"] = file.path.name
 
     message_telegram = client.send_document(**send_data)
-    logger.info(
-        f"Subiendo {FileCategory.SINGLE.value} {file.path.name} a Telegram... OK"
-    )
+    logger.info(f"Archivo único subido correctamente: {file.path.name}")
 
-    # Obtener la información del mensaje
     try:
         message_data = {
             "message_id": message_telegram.id,
@@ -143,41 +107,35 @@ def upload_single_file(client, settings: Settings, file: File):
             "file": file,
         }
         message = Message.create(**message_data)
+        logger.debug(
+            f"Registro de mensaje creado en base de datos para {file.path.name}"
+        )
         return message
     except Exception as e:
-        # TODO: hacer algo con el archivo enviado si ocurre algun error al crear este objeto en la base de datos.
+        logger.error(f"Error al registrar mensaje de {file.path.name}: {e}")
         raise
 
 
 def upload_piece_to_telegram(client, settings: Settings, piece: Piece):
-    logger.info(f"Analizando Piece {piece.filename}...")
     if piece.is_uploaded:
-        logger.info(f"Piece {piece.filename} ya fue subido a telegram.")
+        logger.info(f"La pieza {piece.filename} ya fue subida a Telegram")
         return
-    logger.info(f"Subiendo Piece {piece.filename} a Telegram...")
 
-    # # Crear un manejador que escriba en el StringIO
-    # log_capture_string = io.StringIO()
-    # logging.basicConfig(
-    #     level=logging.WARNING,
-    #     format="%(asctime)s - %(levelname)s - %(message)s",
-    #     handlers=[logging.StreamHandler(log_capture_string)],
-    # )
-
-    # Enviar el archivo al chat
+    logger.info(f"Subiendo pieza: {piece.filename}…")
     send_data = {
         "chat_id": settings.chat_id,
         "document": piece.path,
     }
     if len(piece.file.path.name) >= settings.max_filename_length:
-        # Si el nombre de archivo es grande. Se usa el md5sum como nombre para que Telegram no lo recorte y se agrega un caption para dejar el nombre del archivo. Telegram acepta más caracteres para el caption.
+        logger.debug(
+            f"El nombre de {piece.file.path.name} excede el límite, se usará md5sum"
+        )
         send_data["file_name"] = f"{piece.file.md5sum}.{piece.file.path.suffix}"
         send_data["caption"] = piece.file.path.name
 
     message_telegram = client.send_document(**send_data)
-    logger.info(f"Subiendo Piece {piece.filename} a Telegram... OK")
+    logger.info(f"Pieza subida correctamente: {piece.filename}")
 
-    # Obtener la información del mensaje
     try:
         message = Message.create(
             message_id=message_telegram.id,
@@ -185,14 +143,17 @@ def upload_piece_to_telegram(client, settings: Settings, piece: Piece):
             json_data=json.loads(str(message_telegram)),
             piece=piece,
         )
+        logger.debug(
+            f"Registro de mensaje creado en base de datos para pieza {piece.filename}"
+        )
         return message
     except Exception as e:
-        # TODO: hacer algo con el archivo enviado si ocurre algun error al crear este objeto en la base de datos.
+        logger.error(f"Error al registrar mensaje de la pieza {piece.filename}: {e}")
         raise
 
 
 def save_pieces(chunks: List[Path], file: File) -> List[Piece]:
-    logger.info(f"Guardando {len(chunks)} pieces...")
+    logger.info(f"Guardando {len(chunks)} piezas en base de datos…")
     with db.atomic():
         pieces = []
         for path in chunks:
@@ -202,8 +163,9 @@ def save_pieces(chunks: List[Path], file: File) -> List[Piece]:
                 size=path.stat().st_size,
                 file=file,
             )
+            logger.debug(f"Pieza registrada en base de datos: {path.name}")
             pieces.append(piece)
-    logger.info(f"Guardando {len(chunks)} pieces... OK")
+    logger.info(f"Se guardaron {len(chunks)} piezas correctamente")
     return pieces
 
 
@@ -214,23 +176,25 @@ def _get_or_chunked_file(file: File, settings: Settings) -> List[Piece]:
         )
 
     if file.get_status() == FileStatus.NEW:
-        logger.info(f"Dividiendo archivo: {file.path.name}...")
+        logger.info(f"Dividiendo archivo en piezas: {file.path.name}…")
         chunks = FileChunker.split_file(file, settings)
-        logger.info(f"Dividiendo archivo: {file.path.name}... OK")
+        logger.info(f"Archivo dividido correctamente en {len(chunks)} piezas")
         pieces = save_pieces(chunks, file)
         file.status = FileStatus.SPLITTED.value
         file.save()
+        logger.debug(f"Estado de archivo actualizado a SPLITTED: {file.path.name}")
         return pieces
     elif file.get_status() == FileStatus.SPLITTED:
+        logger.debug(f"Obteniendo piezas ya registradas para {file.path.name}")
         return file.pieces
     raise Exception("File status no es 'new' o 'splitted'")
 
 
 def handle_pieces_file(client, settings: Settings, file: File):
-    logger.info(f"Analizando archivo: {file.path.name} {file.type.value}")
+    logger.info(f"Iniciando subida de archivo dividido: {file.path.name}")
 
     if file.get_status() == FileStatus.UPLOADED:
-        logger.info(f"Archivo {file.path.name} ya fue subido a telegram.")
+        logger.info(f"El archivo {file.path.name} ya fue subido a Telegram")
         return
 
     pieces = _get_or_chunked_file(file, settings)
@@ -239,31 +203,37 @@ def handle_pieces_file(client, settings: Settings, file: File):
 
     file.status = FileStatus.UPLOADED.value
     file.save()
+    logger.info(f"Archivo completo subido en piezas: {file.path.name}")
     return
 
 
 def get_or_create_file_records(paths: List[Path], settings: Settings) -> List[File]:
-    logger.info(f"Se encontraron {len(paths)} archivos para procesar")
+    logger.info(f"Procesando {len(paths)} archivos encontrados")
     file_records = []
     for path in paths:
         if not path.exists():
+            logger.debug(f"El path {path} no existe, se omite")
             continue
         elif path.is_dir():
+            logger.debug(f"El path {path} es un directorio, se omite")
             continue
         elif settings.is_excluded(path):
+            logger.debug(f"El archivo {path.name} está excluido por configuración")
             continue
 
         file = _get_or_create_file_record(path, settings)
         file_records.append(file)
+    logger.info(f"Se registraron {len(file_records)} archivos válidos para subir")
     return file_records
 
 
 def main():
     setup_logging(f"{__file__}.log", logging.DEBUG)
 
+    logger.info("Iniciando proceso de subida de archivos")
     settings = get_settings("env/test.env")
     target = Path(
-        r"D:\github Leo\toTelegram\tests\Otan Mian Anoixi (Live - Bonus Track)-(240p).mp4"
+        r"D:\\github Leo\\toTelegram\\tests\\Otan Mian Anoixi (Live - Bonus Track)-(240p).mp4"
     )
 
     init_database(settings)
@@ -271,10 +241,12 @@ def main():
     paths = list(target.glob("*")) if target.is_dir() else [target]
     file_records = get_or_create_file_records(paths, settings)
 
-    # # Managers
     client = None
     for file in file_records:
         if file.get_status() == FileStatus.UPLOADED:
+            logger.info(
+                f"El archivo {file.path.name} ya estaba marcado como subido, se omite"
+            )
             continue
 
         if client is None:
@@ -284,8 +256,11 @@ def main():
             upload_single_file(client, settings, file)
             file.status = FileStatus.UPLOADED.value
             file.save()
+            logger.debug(f"Estado de archivo actualizado a UPLOADED: {file.path.name}")
         else:
             handle_pieces_file(client, settings, file)
+
+    logger.info(f"Proceso completado. {len(file_records)} archivos procesados")
 
 
 if __name__ == "__main__":
