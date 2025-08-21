@@ -37,7 +37,7 @@ class File(BaseModel):
 
     filename = peewee.CharField()
     size = cast(int, peewee.IntegerField())
-    md5sum = peewee.CharField(unique=True)
+    md5sum = cast(str, peewee.CharField(unique=True))
     mimetype = peewee.CharField()
     category = peewee.CharField(
         constraints=[peewee.Check("category IN ('single-file', 'pieces-file')")],
