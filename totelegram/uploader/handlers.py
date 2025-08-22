@@ -3,6 +3,7 @@ import json
 import logging
 import lzma
 from pathlib import Path
+from token import OP
 from typing import List, Optional, Tuple, Union
 from venv import logger
 from datetime import datetime
@@ -19,7 +20,23 @@ from totelegram.uploader.database import (
     save_pieces,
 )
 from totelegram.uploader.telegram import init_telegram_client
+from typing import Optional
 
+_last_percentage = {}
+
+def progress_bar(current: int, total: int, filename: Optional[str] = None):
+    porcentage = int(current * 100 / total)
+    
+    # clave única por archivo
+    key = filename or "_default"
+
+    # solo loguea si es múltiplo de 5 y no se repite
+    if porcentage % 2 == 0 and _last_percentage.get(key) != porcentage:
+        _last_percentage[key] = porcentage
+        logger.info(
+            f"Subiendo el archivo {filename} "
+            f"({current} de {total}) {porcentage}%"
+        )
 
 def get_or_chunked_file(file: File, settings: Settings) -> List[Piece]:
     if file.type != FileCategory.CHUNKED:
@@ -74,7 +91,7 @@ def upload_file(client, record: Union[File, Piece], settings: Settings)-> Messag
         "file_name": filename,
         "caption": caption,
     }
-    tg_message = client.send_document(**send_data)
+    tg_message = client.send_document(**send_data, progress=progress_bar, progress_args=(record.path.name,))
     if isinstance(record, Piece):
         logger.info(f"Pieza subida correctamente: {record.path.name}")
         record.path.unlink()
