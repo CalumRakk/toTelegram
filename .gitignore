@@ -31,3 +31,4 @@ build/
 *.db
 env
 *.log
+tests/

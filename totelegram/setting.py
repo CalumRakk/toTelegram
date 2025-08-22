@@ -55,7 +55,7 @@ def get_settings(env_path: Union[Path, str] = ".env") -> Settings:
     Carga configuración desde un archivo .env
 
     La utilidad principal es ocultar el falso positivo de pylance al advertir que faltan argumentos que van a ser cargados desde el archivo .env
-    # https://github.com/pydantic/pydantic/issues/3753
+    Ver https://github.com/pydantic/pydantic/issues/3753
     """
     env_path = Path(env_path) if isinstance(env_path, str) else env_path
     try:

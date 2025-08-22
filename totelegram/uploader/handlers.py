@@ -53,7 +53,7 @@ def _build_names(
     return None, None
 
 
-def upload_file(client, record: Union[File, Piece], settings: Settings):
+def upload_file(client, record: Union[File, Piece], settings: Settings)-> Message:
     logger.info(f"Subiendo archivo único: {record.path}…")
 
     if isinstance(record, File):
