@@ -1,7 +1,7 @@
 from setuptools import setup, find_packages
 
 setup(
-    name="totelegram",
+    name="toTelegram",
     version="0.2.0",
     description="toTelegram sube archivos a telegram sin importar el tamaño.",
     # long_description=open("README.md", encoding="utf-8").read(),
@@ -19,6 +19,6 @@ setup(
     ],
     packages=find_packages(),
     entry_points={
-        "console_scripts": ["totelegram=totelegram.cli:run_script"],
+        "console_scripts": ["totg=totelegram.cli:run_script"],
     },
 )
