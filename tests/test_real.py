@@ -10,7 +10,7 @@ sys.path.append(os.getcwd())
 from totelegram.logging_config import setup_logging
 from totelegram.uploader.database import init_database
 from unittest.mock import MagicMock, patch
-from totelegram.models import File, FileCategory, FileStatus, Message, db_proxy
+from totelegram.models import File, FileCategory, FileStatus, Message, Piece, db_proxy
 from totelegram.setting import get_settings
 from totelegram.uploader.handlers import main, upload_file
 from totelegram.uploader.telegram import init_telegram_client
@@ -63,7 +63,32 @@ class TestSendFile(unittest.TestCase):
             db_proxy.close()
             self.settings.database_path.unlink()
             logging.info("Base de datos borrada")
- 
+    
+    def test_upload_pieces_file(self):
+        try:     
+            file_size= self.target.stat().st_size
+            self.settings.max_filesize_bytes= int(file_size / 2)
+
+            result = main(target=self.target, settings=self.settings)
+            file: File = result[0]
+
+            with self.subTest("resultado tiene un elemento"):
+                self.assertEqual(len(result), 1)
+
+            with self.subTest("archivo es de tipo single-file"):
+                self.assertEqual(file.type, FileCategory.CHUNKED)
+
+            with self.subTest("archivo está subido"):
+                self.assertEqual(file.status, FileStatus.UPLOADED)
+
+            messages= [piece.message.get_message() for piece in file.pieces]
+            self._remove_messages(messages)
+
+        finally:
+            logging.info("Borrando base de datos")
+            db_proxy.close()
+            self.settings.database_path.unlink()
+            logging.info("Base de datos borrada")
       
       
 

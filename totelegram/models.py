@@ -92,6 +92,10 @@ class Piece(BaseModel):
     def path(self) -> Path:
         return Path(self.path_str)
 
+    @property
+    def message(self) -> "Message": # type: ignore
+        # sobreescribe la busqueda inverta de peewee para evitar el falto positivo de pylance
+        return Message.get(Message.piece == self)
 
 class Message(BaseModel):
     message_id = peewee.IntegerField()
@@ -113,4 +117,5 @@ class Message(BaseModel):
         """Instancia un Message de Telegram a partir de la información guardada en la base de datos
         Nota: No todos los atributos del Message instanciado se puede acceder con ".", algunos son simplemente diccionario de python. Para saber más ver la funcion parse_message_json_data
         """
+        # TODO: modificar la existencia de este método. Es poco intuitivo. ¿ message.get_message() ? 
         return parse_message_json_data(self.json_data)
