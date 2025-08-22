@@ -18,10 +18,11 @@ from pyrogram import types
 
 
 class TestSendFile(unittest.TestCase):
-
-    def setUp(self):
-        setup_logging(f"{__file__}.log", logging.DEBUG)
-        self.settings = get_settings("env/test.env")
+    @classmethod
+    def tearDownClass(cls):
+        logging.shutdown()
+    def setUp(self):  
+        self.settings = get_settings("env/test.env")        
         self.settings.database_name = "test.db"
         self.target = Path(r"tests\medias\Otan Mian Anoixi (Live - Bonus Track)-(240p).mp4")
     def _remove_messages(self, messages: List[types.Message]):
@@ -42,7 +43,9 @@ class TestSendFile(unittest.TestCase):
             client.delete_messages(chat_id, messages_)  # type: ignore
             logging.info(f"Se borraron {len(messages_)} subidos al chat {chat_id}")  
     def test_upload_single_file(self): 
-        try:     
+        try: 
+            setup_logging(r"tests\logstest_upload_single_file.log", logging.DEBUG)   
+            init_database(self.settings)
             result = main(target=self.target, settings=self.settings)
             file: File = result[0]
 
@@ -59,13 +62,17 @@ class TestSendFile(unittest.TestCase):
             self._remove_messages([message])
 
         finally:
-            logging.info("Borrando base de datos")
+            logger= logging.getLogger(__name__)
+            logger.info("Borrando base de datos")
             db_proxy.close()
             self.settings.database_path.unlink()
-            logging.info("Base de datos borrada")
-    
+            logger.info("Base de datos borrada")
+
+
     def test_upload_pieces_file(self):
-        try:     
+        try: 
+            setup_logging(r"tests\logs\test_upload_pieces_file.log", logging.DEBUG) 
+            init_database(self.settings)     
             file_size= self.target.stat().st_size
             self.settings.max_filesize_bytes= int(file_size / 2)
 
@@ -85,10 +92,13 @@ class TestSendFile(unittest.TestCase):
             self._remove_messages(messages)
 
         finally:
-            logging.info("Borrando base de datos")
+            logger= logging.getLogger(__name__)
+            logger.info("Borrando base de datos")
             db_proxy.close()
             self.settings.database_path.unlink()
-            logging.info("Base de datos borrada")
+            logger.info("Base de datos borrada")
+    
+
       
       
 

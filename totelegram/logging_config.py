@@ -42,6 +42,10 @@ def handler_supervisor_stderr(formatter: logging.Formatter) -> logging.StreamHan
 
 
 def setup_logging(path: str, level: int = logging.INFO) -> None:
+    for handler in logging.root.handlers[:]:
+        logging.root.removeHandler(handler)
+        handler.close()
+        
     formatter = logger_formatter()
 
     running_under_supervisord = any(
