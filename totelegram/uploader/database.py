@@ -10,7 +10,7 @@ import peewee
 
 from totelegram.filechunker import FileChunker
 from totelegram.logging_config import setup_logging
-from totelegram.models import File, FileCategory, FileStatus, Message, Piece, db
+from totelegram.models import File, FileCategory, FileStatus, Message, Piece, db_proxy
 from totelegram.setting import Settings, get_settings
 from totelegram.utils import create_md5sum_by_hashlib, get_mimetype
 
@@ -20,12 +20,12 @@ logger = logging.getLogger(__name__)
 def init_database(settings: Settings):
     logger.info(f"Iniciando base de datos en {settings.database_path}")
     database = peewee.SqliteDatabase(str(settings.database_path))
-    db.initialize(database)
+    
+    db_proxy.initialize(database)
 
-    database.connect()
-    database.create_tables([Piece, Message, File], safe=True)
+    db_proxy.create_tables([Piece, Message, File], safe=True)
     logger.info("Base de datos inicializada correctamente")
-    database.close()
+    db_proxy.close()
 
 
 def _get_or_create_file_record(path: Path, settings: Settings) -> File:
@@ -132,7 +132,7 @@ def upload_piece_to_telegram(client, settings: Settings, piece: Piece):
 
 def save_pieces(chunks: List[Path], file: File) -> List[Piece]:
     logger.info(f"Guardando {len(chunks)} piezas en base de datos…")
-    with db.atomic():
+    with db_proxy.atomic():
         pieces = []
         for path in chunks:
             piece = Piece.create(

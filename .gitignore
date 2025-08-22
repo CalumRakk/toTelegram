@@ -27,8 +27,8 @@ site/
 /toTelegram.egg-info
 build/
 *.yaml
-/tests
 *.db
 env
 *.log
-tests/
+!tests\test_real.py
+!tests\medias

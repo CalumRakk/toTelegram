@@ -3,7 +3,14 @@ import locale
 import logging
 from totelegram.setting import Settings
 
+_client_instance = None
+
 def init_telegram_client(settings: Settings):
+    global _client_instance
+
+    if _client_instance:
+        return _client_instance
+
     logger= logging.getLogger(__name__)
     logger.info("Iniciando cliente de Telegram")
 
@@ -23,4 +30,5 @@ def init_telegram_client(settings: Settings):
     )
     client.start()  # type: ignore
     logger.info("Cliente de Telegram inicializado correctamente")
+    _client_instance= client
     return client

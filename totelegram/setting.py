@@ -33,10 +33,13 @@ class Settings(BaseSettings):
     worktable: Path = Path(get_user_config_dir(app_name)).resolve()
     exclude_files: List[str] = []
     database_name: str = f"{app_name}.sqlite"
-    database_path: Path = worktable / database_name
 
     max_filesize_bytes: int = 2_097_152_000
     max_filename_length: int = 55
+
+    @property
+    def database_path(self) -> Path:
+        return self.worktable / self.database_name
 
     def is_excluded(self, path: Path) -> bool:
         """Devuelve True si el archivo coincide con algún patrón de exclusión."""

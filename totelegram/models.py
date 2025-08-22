@@ -10,7 +10,7 @@ from pyrogram.utils import get_channel_id
 
 from totelegram.uploader.parse import parse_message_json_data
 
-db = peewee.Proxy()
+db_proxy = peewee.Proxy()
 
 
 class FileCategory(str, enum.Enum):
@@ -33,7 +33,7 @@ class BaseModel(peewee.Model):
         return super().save(*args, **kwargs)
 
     class Meta:
-        database = db
+        database = db_proxy
 
 
 class File(BaseModel):

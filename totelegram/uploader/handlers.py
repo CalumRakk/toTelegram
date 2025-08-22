@@ -54,7 +54,7 @@ def _build_names(
 
 
 def upload_file(client, record: Union[File, Piece], settings: Settings)-> Message:
-    logger.info(f"Subiendo archivo único: {record.path}…")
+    logger.info(f"Subiendo archivo único: {record.path.name}…")
 
     if isinstance(record, File):
         md5sum = record.md5sum
@@ -147,7 +147,7 @@ def generate_snapshot(file: File):
         return
 
 
-def main(target: Path, settings: Settings):
+def main(target: Path, settings: Settings)-> List[File]:
     logger.info("Iniciando proceso de subida de archivos")
     init_database(settings)
 
@@ -155,6 +155,7 @@ def main(target: Path, settings: Settings):
     file_records = get_or_create_file_records(paths, settings)
 
     client = None
+    results=[]
     for file in file_records:
         if file.get_status() == FileStatus.UPLOADED:
             logger.info(
@@ -174,5 +175,8 @@ def main(target: Path, settings: Settings):
             handle_pieces_file(client, settings, file)
 
         generate_snapshot(file)
+        results.append(file)
+
+    return results
 
     logger.info(f"Proceso completado. {len(file_records)} archivos procesados")
