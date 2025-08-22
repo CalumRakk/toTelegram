@@ -1,6 +1,7 @@
 import logging
 import os
 import sys
+import warnings
 
 
 def logger_formatter() -> logging.Formatter:
@@ -75,5 +76,6 @@ def setup_logging(path: str, level: int = logging.INFO) -> None:
         "peewee",
         "pyrogram",
     ]
+    warnings.filterwarnings("ignore", category=DeprecationWarning, module="pyrogram")
     for lib_name in libraries_to_silence:
         logging.getLogger(lib_name).setLevel(logging.CRITICAL)
