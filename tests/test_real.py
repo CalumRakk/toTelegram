@@ -44,7 +44,7 @@ class TestSendFile(unittest.TestCase):
             logging.info(f"Se borraron {len(messages_)} subidos al chat {chat_id}")  
     def test_upload_single_file(self): 
         try: 
-            setup_logging(r"tests\logstest_upload_single_file.log", logging.DEBUG)   
+            setup_logging(r"tests\logs\test_upload_single_file.log", logging.DEBUG)   
             init_database(self.settings)
             result = main(target=self.target, settings=self.settings)
             file: File = result[0]
