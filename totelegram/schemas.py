@@ -14,7 +14,7 @@ class File(BaseModel):
     medatada: dict
 
 
-class Message(TypedDict):
+class Message(BaseModel):
     file_name: str
     message_id: int
     size: int
@@ -45,4 +45,4 @@ class Snapshot(BaseModel):
     kind: Literal["single-file", "pieces-file"]
     manager: ManagerSingleFile | ManagerPieces
     createdTime: str  # comprobar el formato de datetime
-    version = "3.0"
+    version :str = "3.0"
