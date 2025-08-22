@@ -54,12 +54,12 @@ def _build_names(
 
 
 def upload_file(client, record: Union[File, Piece], settings: Settings)-> Message:
-    logger.info(f"Subiendo archivo único: {record.path.name}…")
-
     if isinstance(record, File):
+        logger.info(f"Subiendo archivo único: {record.path.name}…")
         md5sum = record.md5sum
         model_field = "file"
     elif isinstance(record, Piece):
+        logger.info(f"Subiendo pieza: {record.path.name}…")
         md5sum = record.file.md5sum
         model_field = "piece"
     else:
@@ -75,13 +75,20 @@ def upload_file(client, record: Union[File, Piece], settings: Settings)-> Messag
         "caption": caption,
     }
     tg_message = client.send_document(**send_data)
-
+    if isinstance(record, Piece):
+        logger.info(f"Pieza subida correctamente: {record.path.name}")
+        record.path.unlink()
+        logger.debug(f"Se borra el archivo temporal: {record.path}")
+    else:
+        logger.info(f"Archivo único subido correctamente: {record.path.name}")
+        
     message_data = {
         "message_id": tg_message.id,
         "chat_id": tg_message.chat.id,
         "json_data": json.loads(str(tg_message)),
     }
-    message_data.update(field)
+    message_data.update(field) 
+    
     return Message.create(**message_data)
 
 
