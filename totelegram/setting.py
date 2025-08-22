@@ -37,6 +37,8 @@ class Settings(BaseSettings):
     max_filesize_bytes: int = 2_097_152_000
     max_filename_length: int = 55
 
+    lod_path :str = str(worktable / f"app_name.log")
+
     @property
     def database_path(self) -> Path:
         return self.worktable / self.database_name

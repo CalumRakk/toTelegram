@@ -187,7 +187,7 @@ def generate_snapshot(file: File):
         json.dump(snapshot.model_dump(), f)
     logger.info(f"Snapshot de {file.path.name} generado correctamente")
 
-def main(target: Path, settings: Settings)-> List[File]:
+def upload(target: Path, settings: Settings)-> List[File]:
     logger.info("Iniciando proceso de subida de archivos")
     init_database(settings)
 

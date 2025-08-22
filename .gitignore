@@ -32,3 +32,4 @@ env
 *.log
 !tests\test_real.py
 !tests\medias
+*.egg-info

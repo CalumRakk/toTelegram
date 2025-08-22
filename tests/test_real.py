@@ -12,7 +12,7 @@ from totelegram.uploader.database import init_database
 from unittest.mock import MagicMock, patch
 from totelegram.models import File, FileCategory, FileStatus, Message, Piece, db_proxy
 from totelegram.setting import get_settings
-from totelegram.uploader.handlers import main, upload_file
+from totelegram.uploader.handlers import upload, upload_file
 from totelegram.uploader.telegram import init_telegram_client
 from pyrogram import types
 
@@ -46,7 +46,7 @@ class TestSendFile(unittest.TestCase):
         try: 
             setup_logging(r"tests\logs\test_upload_single_file.log", logging.DEBUG)   
             init_database(self.settings)
-            result = main(target=self.target, settings=self.settings)
+            result = upload(target=self.target, settings=self.settings)
             file: File = result[0]
 
             with self.subTest("resultado tiene un elemento"):
@@ -76,7 +76,7 @@ class TestSendFile(unittest.TestCase):
             file_size= self.target.stat().st_size
             self.settings.max_filesize_bytes= int(file_size / 2)
 
-            result = main(target=self.target, settings=self.settings)
+            result = upload(target=self.target, settings=self.settings)
             file: File = result[0]
 
             with self.subTest("resultado tiene un elemento"):
@@ -102,5 +102,5 @@ class TestSendFile(unittest.TestCase):
       
       
 
-if __name__ == "__main__":
+if __name__ == "__upload__":
     unittest.main()

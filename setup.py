@@ -1,12 +1,12 @@
 from setuptools import setup, find_packages
 
 setup(
-    name="toTelegram",
+    name="totelegram",
     version="0.2.0",
     description="toTelegram sube archivos a telegram sin importar el tamaño.",
-    long_description=open("README.md", encoding="utf-8").read(),
-    long_description_content_type="text/markdown",
-    readme="README.md",
+    # long_description=open("README.md", encoding="utf-8").read(),
+    # long_description_content_type="text/markdown",
+    # readme="README.md",
     author="Leo",
     url="https://github.com/CalumRakk/toTelegram",
     install_requires=[
@@ -19,6 +19,6 @@ setup(
     ],
     packages=find_packages(),
     entry_points={
-        "console_scripts": ["toTelegram=toTelegram.cli:run_script"],
+        "console_scripts": ["totelegram=totelegram.cli:run_script"],
     },
 )
