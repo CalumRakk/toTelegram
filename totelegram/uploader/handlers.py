@@ -188,6 +188,7 @@ def generate_snapshot(file: File):
     logger.info(f"Snapshot de {file.path.name} generado correctamente")
 
 def upload(target: Path, settings: Settings)-> List[File]:
+    target= Path(target) if isinstance(target, str) else target
     logger.info("Iniciando proceso de subida de archivos")
     init_database(settings)
 
