@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="toTelegram",
-    version="0.1.4",
+    version="0.2.0",
     description="toTelegram sube archivos a telegram sin importar el tamaño.",
     long_description=open("README.md", encoding="utf-8").read(),
     long_description_content_type="text/markdown",
@@ -10,13 +10,12 @@ setup(
     author="Leo",
     url="https://github.com/CalumRakk/toTelegram",
     install_requires=[
-        "filetype",
-        "PyExifTool",
-        "pyrogram",
-        "PyYAML>=6.0",
-        "humanfriendly",
-        "ffmpeg-python",
-        "tqdm",
+       "filetype==1.2.0",
+        "peewee==3.17.9",
+        "pydantic==2.11.7",
+        "pydantic-settings==2.10.1",
+        "Pyrogram==2.0.106",
+        "TgCrypto==1.2.5"
     ],
     packages=find_packages(),
     entry_points={
