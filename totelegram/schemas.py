@@ -1,4 +1,4 @@
-from typing import Literal
+from typing import List, Literal
 
 from pydantic import BaseModel
 from typing_extensions import TypedDict
@@ -32,7 +32,7 @@ class Piece(BaseModel):
 class ManagerPieces(BaseModel):
     kind: Literal["pieces-file"]
     file: File
-    pieces: dict
+    pieces: List[Piece]
 
 
 class ManagerSingleFile(BaseModel):

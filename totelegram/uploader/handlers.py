@@ -11,7 +11,7 @@ from pyrogram.types import Message as PyrogramMessage
 from totelegram.filechunker import FileChunker
 from totelegram.logging_config import setup_logging
 from totelegram.models import File, FileCategory, FileStatus, Message, Piece
-from totelegram.schemas import ManagerSingleFile, Snapshot
+from totelegram.schemas import ManagerPieces, ManagerSingleFile, Snapshot
 from totelegram.setting import Settings, get_settings
 from totelegram.uploader.database import (
     get_or_create_file_records,
@@ -113,24 +113,10 @@ def generate_snapshot(file: File):
     output = file.path.with_suffix(".json.xz")
     logger.info(f"Generando snapshot de {file.path.name}…")
 
-    if file.type == FileCategory.SINGLE:
-        from totelegram.schemas import File as FileSchema
-        from totelegram.schemas import Message as MessageSchema
-
-        manager_kind = FileCategory.SINGLE.value
-
-        tg_message= file.message.get_message()
-        media:dict= getattr(tg_message, tg_message.media.value) # type: ignore
-
-        message = MessageSchema(
-            message_id=tg_message.id,
-            chat_id=tg_message.chat.id,
-            link=tg_message.link,
-            file_name=media["file_name"],
-            size= media["file_size"],
-        )
-
-        ifile = FileSchema(
+    from totelegram.schemas import File as FileSchema
+    from totelegram.schemas import Message as MessageSchema
+    from totelegram.schemas import Piece as PieceSchema
+    ifile = FileSchema(
             kind="file",
             filename=file.filename,
             fileExtension=file.path.suffix,
@@ -139,20 +125,50 @@ def generate_snapshot(file: File):
             size=file.size,
             medatada={},
         )
+    if file.type == FileCategory.SINGLE:
+        manager_kind = FileCategory.SINGLE.value
 
-        single = ManagerSingleFile(kind=manager_kind, file=ifile, message=message)
-        
-        snapshot= Snapshot(
-            kind=manager_kind,
-            manager=single,
-            createdTime=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        )        
-        
-        with lzma.open(output, "wt") as f:
-            json.dump(snapshot.model_dump(), f)
-        logger.info(f"Snapshot de {file.path.name} generado correctamente")
-        return
+        tg_message= file.message.get_message()
+        media:dict= getattr(tg_message, tg_message.media.value) # type: ignore
+        message = MessageSchema(
+            message_id=tg_message.id,
+            chat_id=tg_message.chat.id,
+            link=tg_message.link,
+            file_name=media["file_name"],
+            size= media["file_size"],
+        )
 
+        manager = ManagerSingleFile(kind=manager_kind, file=ifile, message=message)
+        
+    elif file.type == FileCategory.CHUNKED:
+        manager_kind = FileCategory.CHUNKED.value
+        pieces=[]
+        for piece in file.pieces:
+            tg_message= piece.message.get_message()
+            media:dict= getattr(tg_message, tg_message.media.value) # type: ignore
+            message = MessageSchema(
+                message_id=tg_message.id,
+                chat_id=tg_message.chat.id,
+                link=tg_message.link,
+                file_name=media["file_name"],
+                size= media["file_size"],
+            )
+            ipiece= PieceSchema(kind="#piece", filename=piece.filename, size=piece.size, message=message)
+            pieces.append(ipiece)
+        manager = ManagerPieces(kind=manager_kind, file=ifile, pieces=pieces)    
+    else:
+        raise Exception(f"Tipo de archivo desconocido: {file.type}")
+
+
+    snapshot= Snapshot(
+        kind=manager_kind,
+        manager=manager,
+        createdTime=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    )        
+    
+    with lzma.open(output, "wt") as f:
+        json.dump(snapshot.model_dump(), f)
+    logger.info(f"Snapshot de {file.path.name} generado correctamente")
 
 def main(target: Path, settings: Settings)-> List[File]:
     logger.info("Iniciando proceso de subida de archivos")
@@ -184,6 +200,6 @@ def main(target: Path, settings: Settings)-> List[File]:
         generate_snapshot(file)
         results.append(file)
 
+    logger.info(f"Proceso completado. {len(file_records)} archivos procesados")
     return results
 
-    logger.info(f"Proceso completado. {len(file_records)} archivos procesados")

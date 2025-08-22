@@ -83,8 +83,8 @@ class File(BaseModel):
 
 class Piece(BaseModel):
     path_str = cast(str, peewee.CharField())
-    filename = peewee.CharField()
-    size = peewee.IntegerField()
+    filename = cast(str, peewee.CharField())
+    size =cast(int, peewee.IntegerField())
     is_uploaded = cast(bool, peewee.BooleanField(default=False))
     file = peewee.ForeignKeyField(File, backref="pieces")
 
