@@ -19,9 +19,10 @@ class FileCategory(str, enum.Enum):
 
 
 class FileStatus(str, enum.Enum):
-    NEW = "NEW"
+    PENDING = "PENDING"
     SPLITTED = "SPLITTED"
     UPLOADED = "UPLOADED"
+    ORPHANED = "ORPHANED"
 
 
 class BaseModel(peewee.Model):
@@ -49,14 +50,15 @@ class File(BaseModel):
     status = cast(
         str,
         peewee.CharField(
-            default="NEW",
-            constraints=[peewee.Check("status IN ('NEW', 'SPLITTED', 'UPLOADED')")],
+            default="PENDING",
+            constraints=[peewee.Check("status IN ('PENDING', 'SPLITTED', 'UPLOADED','ORPHANED')")],
         ),
     )
 
     def get_status(self) -> FileStatus:
         return FileStatus(self.status)
-
+    def get_category(self) -> FileCategory:
+        return FileCategory(self.category)
     @property
     def path(self) -> Path:
         return Path(self.path_str)
@@ -103,6 +105,7 @@ class Message(BaseModel):
     json_data = cast(dict, JSONField())
     file = peewee.ForeignKeyField(File, null=True)
     piece = peewee.ForeignKeyField(Piece, null=True)
+    
 
     def save(self, *args, **kwargs):
         if (self.file is None and self.piece is None) or (

@@ -178,3 +178,4 @@ def get_or_create_file_records(paths: List[Path], settings: Settings) -> List[Fi
     else:
         logger.info(f"Se obtuvieron {len(file_records)} file_records")
     return file_records
+
