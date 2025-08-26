@@ -18,7 +18,7 @@ def parse_message_json_data(json_data: dict):
     media_type= enums.MessageMediaType(media_type_str)
 
     data["chat"] = chat
-    data["from_user"] = user
+    # data["from_user"] = user
     data["media"] = media_type
 
     message = types.Message(**data)

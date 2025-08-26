@@ -71,6 +71,7 @@ def _build_names(
 
 
 def upload_file(client, record: Union[File, Piece], settings: Settings)-> Message:
+    logger.info("="*50)
     if isinstance(record, File):
         logger.info(f"Subiendo archivo único: {record.path.name}…")
         md5sum = record.md5sum
@@ -91,6 +92,8 @@ def upload_file(client, record: Union[File, Piece], settings: Settings)-> Messag
         "file_name": filename,
         "caption": caption,
     }
+    chat_info= client.get_chat(settings.chat_id)    
+    logger.info(f"Chat: {chat_info.title}")
     tg_message = client.send_document(**send_data, progress=progress_bar, progress_args=(record.path.name,))
     if isinstance(record, Piece):
         logger.info(f"Pieza subida correctamente: {record.path.name}")
