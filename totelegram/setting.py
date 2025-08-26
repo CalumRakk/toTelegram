@@ -22,8 +22,8 @@ def get_user_config_dir(app_name: str) -> Path:
 
 
 class Settings(BaseSettings):
-    api_hash: str = Field(..., description="Telegram API hash")
-    api_id: int = Field(..., description="Telegram API ID")
+    api_hash: str = Field(description="Telegram API hash", default="d524b414d21f4d37f08684c1df41ac9c")
+    api_id: int = Field(description="Telegram API ID", default=611335)
     session_name: str = "me"
     chat_id: Union[str, int] = Field(
         ..., description="ID del chat o enlace de invitación"

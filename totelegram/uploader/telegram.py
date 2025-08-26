@@ -16,7 +16,7 @@ def init_telegram_client(settings: Settings):
 
     from pyrogram.client import Client
 
-    lang, encoding = locale.getlocale()
+    lang, encoding = locale.getdefaultlocale()
     iso639 = "en"
     if lang:
         iso639 = lang.split("_")[0]

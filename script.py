@@ -6,8 +6,8 @@ from totelegram.uploader.handlers import upload
 
 if __name__ == "__main__":
     setup_logging(f"{__file__}.log", logging.DEBUG)
-    settings = get_settings("env/.env")
+    settings = get_settings("env/public.env")
     target = Path(
-        r"C:\Users\Leo\Videos\Replay 2025-08-23 00-39-04.mkv"
+        r"C:\Users\Leo\Downloads\tsetup-x64.6.0.2.exe"
     )
     upload(target=target, settings=settings)

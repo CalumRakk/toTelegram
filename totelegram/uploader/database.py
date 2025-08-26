@@ -157,15 +157,15 @@ def get_or_create_file_records(paths: List[Path], settings: Settings) -> List[Fi
 
     file_records = []
     for path in paths:
-        logger.debug(f"Procesando path: {path}")
+        logger.info(f"Procesando path: {path}")
         if not path.exists():
-            logger.debug(f"El path {path} no existe, se omite")
+            logger.info(f"No existe: {path}, se omite")
             continue
         elif path.is_dir():
-            logger.debug(f"El path {path} es un directorio, se omite")
+            logger.info(f"Es un directorio: {path}, se omite")
             continue
         elif settings.is_excluded(path):
-            logger.debug(f"El archivo {path.name} está excluido por configuración")
+            logger.info(f"Está excluido por configuración: {path}, se omite ")
             continue
 
         file = _get_or_create_file_record(path, settings)
