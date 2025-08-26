@@ -202,6 +202,7 @@ def upload(target: Path, settings: Settings)-> List[File]:
             logger.info(
                 f"El archivo {file.path.name} ya estaba marcado como subido, se omite"
             )
+            generate_snapshot(file)
             continue
 
         if client is None:
