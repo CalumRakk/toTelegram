@@ -22,7 +22,9 @@ def get_user_config_dir(app_name: str) -> Path:
 
 
 class Settings(BaseSettings):
-    api_hash: str = Field(description="Telegram API hash", default="d524b414d21f4d37f08684c1df41ac9c")
+    api_hash: str = Field(
+        description="Telegram API hash", default="d524b414d21f4d37f08684c1df41ac9c"
+    )
     api_id: int = Field(description="Telegram API ID", default=611335)
     session_name: str = "me"
     chat_id: Union[str, int] = Field(
@@ -32,12 +34,13 @@ class Settings(BaseSettings):
     app_name: str = "toTelegram"
     worktable: Path = Path(get_user_config_dir(app_name)).resolve()
     exclude_files: List[str] = []
+    exclude_files_default: List[str] = ["*.log", "*.json", "*.json.xz"]
     database_name: str = f"{app_name}.sqlite"
 
     max_filesize_bytes: int = 2_097_152_000
     max_filename_length: int = 55
 
-    lod_path :str = str(worktable / f"app_name.log")
+    lod_path: str = str(worktable / f"app_name.log")
 
     @property
     def database_path(self) -> Path:
@@ -46,6 +49,10 @@ class Settings(BaseSettings):
     def is_excluded(self, path: Path) -> bool:
         """Devuelve True si el archivo coincide con algún patrón de exclusión."""
         return any(path.match(pattern) for pattern in self.exclude_files)
+
+    def is_excluded_default(self, path: Path) -> bool:
+        """Devuelve True si el archivo coincide con algún patrón de exclusión."""
+        return any(path.match(pattern) for pattern in self.exclude_files_default)
 
     @field_validator("chat_id", mode="before")
     def convert_to_int_if_possible(cls, v):

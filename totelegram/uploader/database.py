@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 def init_database(settings: Settings):
     logger.info(f"Iniciando base de datos en {settings.database_path}")
     database = peewee.SqliteDatabase(str(settings.database_path))
-    
+
     db_proxy.initialize(database)
 
     db_proxy.create_tables([Piece, Message, File], safe=True)
@@ -68,6 +68,7 @@ def upload_single_file(client, settings: Settings, file: File):
     send_data = {
         "chat_id": settings.chat_id,
         "document": file.path,
+        "disable_notification": True,
     }
     if len(file.path.name) >= settings.max_filename_length:
         logger.debug(f"El nombre de {file.path.name} excede el límite, se usará md5sum")
@@ -103,6 +104,7 @@ def upload_piece_to_telegram(client, settings: Settings, piece: Piece):
     send_data = {
         "chat_id": settings.chat_id,
         "document": piece.path,
+        "disable_notification": True,
     }
     if len(piece.file.path.name) >= settings.max_filename_length:
         logger.debug(
@@ -146,6 +148,7 @@ def save_pieces(chunks: List[Path], file: File) -> List[Piece]:
     logger.info(f"Se guardaron {len(chunks)} piezas correctamente")
     return pieces
 
+
 def get_or_create_file_records(paths: List[Path], settings: Settings) -> List[File]:
     if len(paths) == 0:
         logger.info("No se especificaron paths, se omite")
@@ -153,7 +156,9 @@ def get_or_create_file_records(paths: List[Path], settings: Settings) -> List[Fi
     elif len(paths) == 1:
         logger.info(f"Obteniendo file_record del path especificado...")
     else:
-        logger.info(f"Obteniendo file_records de los {len(paths)} paths especificados...")
+        logger.info(
+            f"Obteniendo file_records de los {len(paths)} paths especificados..."
+        )
 
     file_records = []
     for path in paths:
@@ -167,15 +172,17 @@ def get_or_create_file_records(paths: List[Path], settings: Settings) -> List[Fi
         elif settings.is_excluded(path):
             logger.info(f"Está excluido por configuración: {path}, se omite ")
             continue
+        elif settings.is_excluded_default(path):
+            logger.info(f"Está excluido por configuración: {path}, se omite ")
+            continue
 
         file = _get_or_create_file_record(path, settings)
         file_records.append(file)
 
     if len(file_records) == 0:
-        logger.info("No se obtuvinieron file_records") 
+        logger.info("No se obtuvinieron file_records")
     elif len(file_records) == 1:
         logger.info(f"Se obtuvo {len(file_records)} file_record")
     else:
         logger.info(f"Se obtuvieron {len(file_records)} file_records")
     return file_records
-

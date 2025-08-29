@@ -33,3 +33,5 @@ env
 !tests\test_real.py
 !tests\medias
 *.egg-info
+validate.py
+validate2.py
