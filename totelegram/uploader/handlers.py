@@ -1,21 +1,16 @@
 # uploader/handlers.py
 import json
-import logging
 import lzma
 from pathlib import Path
-from pyexpat import model
 from totelegram.models import db_proxy
-from token import OP
 from typing import List, Optional, Tuple, Union
 from venv import logger
 from datetime import datetime
-from pyrogram.types import Message as MessageTg
-import peewee
+from pyrogram.types.messages_and_media.message import Message as MessageTg
 from totelegram.filechunker import FileChunker
-from totelegram.logging_config import setup_logging
 from totelegram.models import File, FileCategory, FileStatus, Message, Piece
 from totelegram.schemas import ManagerPieces, ManagerSingleFile, Snapshot
-from totelegram.setting import Settings, get_settings
+from totelegram.setting import Settings
 from totelegram.uploader.database import (
     get_or_create_file_records,
     init_database,

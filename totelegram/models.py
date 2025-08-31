@@ -1,15 +1,12 @@
 import enum
 from datetime import datetime
 from pathlib import Path
-from typing import Literal, cast, get_args
-from pyrogram import types
+from typing import cast
 import peewee
 from playhouse.sqlite_ext import JSONField
-from pyrogram.enums import ChatType
-from pyrogram.utils import get_channel_id
 
 from totelegram.uploader.parse import parse_message_json_data
-
+from pyrogram.types.messages_and_media.message import Message as MessageTg
 db_proxy = peewee.Proxy()
 
 
@@ -116,7 +113,7 @@ class Message(BaseModel):
             )
         return super().save(*args, **kwargs)
 
-    def get_message(self)-> types.Message:
+    def get_message(self)-> MessageTg:
         """Instancia un Message de Telegram a partir de la información guardada en la base de datos
         Nota: No todos los atributos del Message instanciado se puede acceder con ".", algunos son simplemente diccionario de python. Para saber más ver la funcion parse_message_json_data
         """
