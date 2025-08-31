@@ -1,9 +1,8 @@
-# uploader/telegram_service.py
 import locale
 import logging
 from totelegram.models import File, FileCategory
 from totelegram.setting import Settings
-from pyrogram.types.messages_and_media.message import Message as MessageTg
+
 _client_instance = None
 
 def init_telegram_client(settings: Settings):

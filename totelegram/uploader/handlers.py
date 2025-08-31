@@ -6,7 +6,7 @@ from totelegram.models import db_proxy
 from typing import List, Optional, Tuple, Union
 from venv import logger
 from datetime import datetime
-from pyrogram.types.messages_and_media.message import Message as MessageTg
+
 from totelegram.filechunker import FileChunker
 from totelegram.models import File, FileCategory, FileStatus, Message, Piece
 from totelegram.schemas import ManagerPieces, ManagerSingleFile, Snapshot

@@ -1,8 +1,10 @@
-from pyrogram.types.messages_and_media.message import Message
-from pyrogram.enums import MessageMediaType
-from pyrogram.types.user_and_chats.chat import Chat
+
+
+
 
 def parse_message_json_data(json_data: dict):
+    from pyrogram.types import Message, Chat
+    from pyrogram.enums import MessageMediaType
     data = json_data.copy()
     data.pop("_")
 

@@ -14,7 +14,7 @@ from totelegram.models import File, FileCategory, FileStatus, db_proxy
 from totelegram.setting import get_settings
 from totelegram.uploader.handlers import upload, upload_file
 from totelegram.uploader.telegram import init_telegram_client
-from pyrogram.types.messages_and_media.message import Message as MessageTg
+
 
 
 class TestSendFile(unittest.TestCase):
@@ -25,7 +25,7 @@ class TestSendFile(unittest.TestCase):
         self.settings = get_settings("env/test.env")        
         self.settings.database_name = "test.db"
         self.target = Path(r"tests\medias\Otan Mian Anoixi (Live - Bonus Track)-(240p).mp4")
-    def _remove_messages(self, messages: List[MessageTg]):
+    def _remove_messages(self, messages: List):
         logger= logging.getLogger(__name__)
         logger.info(f"Borrando {len(messages)} archivos subidos en Telegram")
 
