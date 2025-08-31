@@ -66,14 +66,14 @@ class File(BaseModel):
         return Piece.select().where(Piece.file == self)
 
     @property
-    def messages(self) -> list["Message"]:
+    def messages(self) -> list["MessageDB"]:
         # sobreescribe la busqueda inverta de peewee para evitar el falto positivo de pylance
-        return Message.select().where(Message.file == self)
+        return MessageDB.select().where(MessageDB.file == self)
 
     @property
-    def message(self) -> "Message": # type: ignore
+    def message(self) -> "MessageDB": # type: ignore
         # sobreescribe la busqueda inverta de peewee para evitar el falto positivo de pylance
-        return Message.get(Message.file == self)
+        return MessageDB.get(MessageDB.file == self)
 
     @property
     def type(self) -> FileCategory:
@@ -92,11 +92,11 @@ class Piece(BaseModel):
         return Path(self.path_str)
 
     @property
-    def message(self) -> "Message": # type: ignore
+    def message(self) -> "MessageDB": # type: ignore
         # sobreescribe la busqueda inverta de peewee para evitar el falto positivo de pylance
-        return Message.get(Message.piece == self)
+        return MessageDB.get(MessageDB.piece == self)
 
-class Message(BaseModel):
+class MessageDB(BaseModel):
     message_id = peewee.IntegerField()
     chat_id = peewee.IntegerField()
     json_data = cast(dict, JSONField())
@@ -114,8 +114,8 @@ class Message(BaseModel):
         return super().save(*args, **kwargs)
 
     def get_message(self):
-        """Instancia un Message de Telegram a partir de la información guardada en la base de datos
-        Nota: No todos los atributos del Message instanciado se puede acceder con ".", algunos son simplemente diccionario de python. Para saber más ver la funcion parse_message_json_data
+        """Instancia un MessageDB de Telegram a partir de la información guardada en la base de datos
+        Nota: No todos los atributos del MessageDB instanciado se puede acceder con ".", algunos son simplemente diccionario de python. Para saber más ver la funcion parse_message_json_data
         """
         # TODO: modificar la existencia de este método. Es poco intuitivo. ¿ message.get_message() ? 
         return parse_message_json_data(self.json_data)

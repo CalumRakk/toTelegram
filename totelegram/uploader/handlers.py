@@ -8,7 +8,7 @@ from venv import logger
 from datetime import datetime
 
 from totelegram.filechunker import FileChunker
-from totelegram.models import File, FileCategory, FileStatus, Message, Piece
+from totelegram.models import File, FileCategory, FileStatus, MessageDB, Piece
 from totelegram.schemas import ManagerPieces, ManagerSingleFile, Snapshot
 from totelegram.setting import Settings
 from totelegram.uploader.database import (
@@ -104,7 +104,7 @@ def upload_file(client, record: Union[File, Piece], settings: Settings):
         "json_data": json.loads(str(tg_message)),
         model_field: record
     }
-    Message.create(**message_data)        
+    MessageDB.create(**message_data)        
 
     # Actualizar el estado
     if isinstance(record, Piece):

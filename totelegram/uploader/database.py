@@ -10,7 +10,7 @@ import peewee
 
 from totelegram.filechunker import FileChunker
 from totelegram.logging_config import setup_logging
-from totelegram.models import File, FileCategory, FileStatus, Message, Piece, db_proxy
+from totelegram.models import File, FileCategory, FileStatus, MessageDB, Piece, db_proxy
 from totelegram.setting import Settings, get_settings
 from totelegram.utils import create_md5sum_by_hashlib, get_mimetype
 
@@ -23,7 +23,7 @@ def init_database(settings: Settings):
 
     db_proxy.initialize(database)
 
-    db_proxy.create_tables([Piece, Message, File], safe=True)
+    db_proxy.create_tables([Piece, MessageDB, File], safe=True)
     logger.info("Base de datos inicializada correctamente")
     db_proxy.close()
 
@@ -85,7 +85,7 @@ def upload_single_file(client, settings: Settings, file: File):
             "json_data": str(message_telegram),
             "file": file,
         }
-        message = Message.create(**message_data)
+        message = MessageDB.create(**message_data)
         logger.debug(
             f"Registro de mensaje creado en base de datos para {file.path.name}"
         )
@@ -117,7 +117,7 @@ def upload_piece_to_telegram(client, settings: Settings, piece: Piece):
     logger.info(f"Pieza subida correctamente: {piece.filename}")
 
     try:
-        message = Message.create(
+        message = MessageDB.create(
             message_id=message_telegram.id,
             chat_id=message_telegram.chat.id,
             json_data=json.loads(str(message_telegram)),
