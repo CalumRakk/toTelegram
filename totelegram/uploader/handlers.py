@@ -1,14 +1,13 @@
 # uploader/handlers.py
 import json
 import lzma
+from datetime import datetime
 from pathlib import Path
-from totelegram.models import db_proxy
 from typing import List, Optional, Tuple, Union
 from venv import logger
-from datetime import datetime
 
 from totelegram.filechunker import FileChunker
-from totelegram.models import File, FileCategory, FileStatus, MessageDB, Piece
+from totelegram.models import File, FileCategory, FileStatus, MessageDB, Piece, db_proxy
 from totelegram.schemas import ManagerPieces, ManagerSingleFile, Snapshot
 from totelegram.setting import Settings
 from totelegram.uploader.database import (
@@ -16,8 +15,7 @@ from totelegram.uploader.database import (
     init_database,
     save_pieces,
 )
-from totelegram.uploader.telegram import init_telegram_client, is_empty_message
-from typing import Optional
+from totelegram.uploader.telegram import init_telegram_client, is_empty_message, stop_telegram_client
 
 _last_percentage = {}
 
@@ -156,7 +154,7 @@ def generate_snapshot(file: File):
     if file.type == FileCategory.SINGLE:
         manager_kind = FileCategory.SINGLE.value
 
-        tg_message= file.message.get_message()
+        tg_message= file.message_db.get_message()
         media:dict= getattr(tg_message, tg_message.media.value) # type: ignore
         message = MessageSchema(
             message_id=tg_message.id,
@@ -172,7 +170,7 @@ def generate_snapshot(file: File):
         manager_kind = FileCategory.CHUNKED.value
         pieces=[]
         for piece in file.pieces:
-            tg_message= piece.message.get_message()
+            tg_message= piece.message
             media:dict= getattr(tg_message, tg_message.media.value) # type: ignore
             message = MessageSchema(
                 message_id=tg_message.id,
@@ -209,8 +207,8 @@ def mark_file_as_orphan(client, file:File):
     elif file.get_category() == FileCategory.CHUNKED:
         to_update=[]
         for piece in file.pieces:
-            message_id= piece.message.message_id
-            chat_id= piece.message.chat_id
+            message_id= piece.message.id
+            chat_id= piece.message.chat.id
             message: MessageTg= client.get_messages(chat_id, message_id) # type: ignore
             if message.empty:
                 piece.is_uploaded=False
@@ -219,7 +217,7 @@ def mark_file_as_orphan(client, file:File):
             for piece in to_update:             
                 piece.is_uploaded=False
                 piece.save()
-                piece.message.delete_instance()
+                piece.message_db.delete_instance() # TODO: verificar si realmente se elimina.
             file.status = FileStatus.ORPHANED.value
             file.save()       
     else:
@@ -244,7 +242,8 @@ def upload(target: Path, settings: Settings)-> List[Snapshot]:
                 logger.info(
                     f"El archivo {file.path.name} ya estaba marcado como subido, se omite"
                 )
-                generate_snapshot(file)
+                snapshot=generate_snapshot(file)
+                snapshots.append(snapshot)
                 continue
 
         if file.type == FileCategory.SINGLE:
@@ -256,5 +255,6 @@ def upload(target: Path, settings: Settings)-> List[Snapshot]:
         snapshots.append(snapshot)
 
     logger.info(f"Proceso completado. {len(file_records)} archivos procesados")
+    stop_telegram_client()
     return snapshots
 

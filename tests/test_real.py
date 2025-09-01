@@ -26,6 +26,11 @@ class TestSendFile(unittest.TestCase):
         self.settings.database_name = "test.db"
         self.target = Path(r"tests\medias\Otan Mian Anoixi (Live - Bonus Track)-(240p).mp4")
     def _remove_messages(self, messages: List):
+        """Elimina los archivos subidos a Telegram
+
+        Args:
+            messages (Pyrogram.types.Message): Los mensajes a borrar
+        """
         logger= logging.getLogger(__name__)
         logger.info(f"Borrando {len(messages)} archivos subidos en Telegram")
 
@@ -47,7 +52,7 @@ class TestSendFile(unittest.TestCase):
             setup_logging(r"tests\logs\test_upload_single_file.log", logging.DEBUG)   
             init_database(self.settings)
             result = upload(target=self.target, settings=self.settings)
-            file: File = result[0]
+            file: File = File.get(File.md5sum == result[0].manager.file.md5sum)
 
             with self.subTest("resultado tiene un elemento"):
                 self.assertEqual(len(result), 1)
@@ -58,7 +63,7 @@ class TestSendFile(unittest.TestCase):
             with self.subTest("archivo está subido"):
                 self.assertEqual(file.status, FileStatus.UPLOADED)
 
-            message= file.message.get_message()
+            message= file.message_db.get_message()
             self._remove_messages([message])
 
         finally:
@@ -77,7 +82,7 @@ class TestSendFile(unittest.TestCase):
             self.settings.max_filesize_bytes= int(file_size / 2)
 
             result = upload(target=self.target, settings=self.settings)
-            file: File = result[0]
+            file: File = File.get(File.md5sum == result[0].manager.file.md5sum)
 
             with self.subTest("resultado tiene un elemento"):
                 self.assertEqual(len(result), 1)
@@ -88,7 +93,7 @@ class TestSendFile(unittest.TestCase):
             with self.subTest("archivo está subido"):
                 self.assertEqual(file.status, FileStatus.UPLOADED)
 
-            messages= [piece.message.get_message() for piece in file.pieces]
+            messages= [piece.message for piece in file.pieces]
             self._remove_messages(messages)
 
         finally:

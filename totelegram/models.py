@@ -8,7 +8,8 @@ from playhouse.sqlite_ext import JSONField
 from totelegram.uploader.parse import parse_message_json_data
 
 db_proxy = peewee.Proxy()
-
+# TODO: cuando se hable de message se debe entender siempre como una instancia de Message de Pyrogram
+# TODO: Si se desea hablar de la copia de message guardada en la BD, se debe usar siempre MessageDB
 
 class FileCategory(str, enum.Enum):
     SINGLE = "single-file"
@@ -62,18 +63,13 @@ class File(BaseModel):
 
     @property
     def pieces(self) -> list["Piece"]:
-        # sobreescribe la busqueda inverta de peewee para evitar el falto positivo de pylance
         return Piece.select().where(Piece.file == self)
 
     @property
-    def messages(self) -> list["MessageDB"]:
-        # sobreescribe la busqueda inverta de peewee para evitar el falto positivo de pylance
-        return MessageDB.select().where(MessageDB.file == self)
-
-    @property
-    def message(self) -> "MessageDB": # type: ignore
-        # sobreescribe la busqueda inverta de peewee para evitar el falto positivo de pylance
+    def message_db(self) -> "MessageDB": # type: ignore
+        """Devuelve el MessageDB relacionado con el File. Solo para SINGLE-FILES."""
         return MessageDB.get(MessageDB.file == self)
+    
 
     @property
     def type(self) -> FileCategory:
@@ -92,8 +88,11 @@ class Piece(BaseModel):
         return Path(self.path_str)
 
     @property
-    def message(self) -> "MessageDB": # type: ignore
-        # sobreescribe la busqueda inverta de peewee para evitar el falto positivo de pylance
+    def message(self):
+        messagedb= MessageDB.get(MessageDB.piece == self)
+        return parse_message_json_data(messagedb.json_data)
+    @property
+    def message_db(self)->"MessageDB":
         return MessageDB.get(MessageDB.piece == self)
 
 class MessageDB(BaseModel):

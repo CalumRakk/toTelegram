@@ -1,5 +1,6 @@
 import locale
 import logging
+
 from totelegram.models import File, FileCategory
 from totelegram.setting import Settings
 
@@ -39,17 +40,24 @@ def is_empty_message(client, file:File):
     
     Nota: Si es CHUNKED, devuelve True si alguna de las piezas no se encuentra en Telegram.
     """
+    from pyrogram.types import Message
     if file.get_category() == FileCategory.SINGLE:
-        message_tg: MessageTg= client.get_messages(message.chat_id, message.message_id) # type: ignore
-        if message_tg.empty:
+        message_db= file.message_db
+        message: Message= client.get_messages(message_db.chat_id, message_db.message_id) # type: ignore
+        if message.empty:
             return True
         return False
     elif file.get_category() == FileCategory.CHUNKED:
         for piece in file.pieces:
-            chat_id= piece.message.chat_id
-            message_id= piece.message.message_id
-            message_tg: MessageTg= client.get_messages(chat_id, message_id) # type: ignore
-            if message_tg.empty:
+            chat_id= piece.message_db.chat_id
+            message_id= piece.message_db.message_id
+            message: Message= client.get_messages(chat_id, message_id) # type: ignore
+            if message.empty:
                 return True
         return False
     
+def stop_telegram_client():
+    global _client_instance
+    if _client_instance:
+        _client_instance.stop() # type: ignore
+        _client_instance= None
