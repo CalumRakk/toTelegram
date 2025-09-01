@@ -197,6 +197,8 @@ def generate_snapshot(file: File):
     with lzma.open(output, "wt") as f:
         json.dump(snapshot.model_dump(), f)
     logger.info(f"Snapshot de {file.path.name} generado correctamente")
+    return snapshot
+
 def mark_file_as_orphan(client, file:File):
     """Marca como orphan (huerfano) un archivo que no se pudo subir a Telegram
     
@@ -223,7 +225,7 @@ def mark_file_as_orphan(client, file:File):
     else:
         raise Exception(f"Tipo de archivo desconocido: {file.type}")
 
-def upload(target: Path, settings: Settings)-> List[File]:
+def upload(target: Path, settings: Settings)-> List[Snapshot]:
     target= Path(target) if isinstance(target, str) else target
     logger.info("Iniciando proceso de subida de archivos")
     init_database(settings)
@@ -232,7 +234,7 @@ def upload(target: Path, settings: Settings)-> List[File]:
     file_records = get_or_create_file_records(paths, settings)
 
     client = init_telegram_client(settings)
-    results=[]
+    snapshots=[]
     for file in file_records:
         if file.get_status() == FileStatus.UPLOADED:
             if is_empty_message(client, file):
@@ -250,9 +252,9 @@ def upload(target: Path, settings: Settings)-> List[File]:
         else:
             handle_pieces_file(client, settings, file)
 
-        generate_snapshot(file)
-        results.append(file)
+        snapshot=generate_snapshot(file)
+        snapshots.append(snapshot)
 
     logger.info(f"Proceso completado. {len(file_records)} archivos procesados")
-    return results
+    return snapshots
 
