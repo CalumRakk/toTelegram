@@ -15,7 +15,11 @@ from totelegram.uploader.database import (
     init_database,
     save_pieces,
 )
-from totelegram.uploader.telegram import init_telegram_client, is_empty_message, stop_telegram_client
+from totelegram.uploader.telegram import (
+    init_telegram_client,
+    is_empty_message,
+    stop_telegram_client,
+)
 
 _last_percentage = {}
 
@@ -191,10 +195,14 @@ def generate_snapshot(file: File):
         manager=manager,
         createdTime=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     )        
-    
-    with lzma.open(output, "wt") as f:
-        json.dump(snapshot.model_dump(), f)
-    logger.info(f"Snapshot de {file.path.name} generado correctamente")
+    if not output.exists():
+        logger.info(f"Generando snapshot de {file.path.name}…")
+        
+        with lzma.open(output, "wt") as f:
+            json.dump(snapshot.model_dump(), f)
+        logger.info(f"Snapshot de {file.path.name} generado correctamente.")
+    else:
+        logger.info(f"Snapshot de {file.path.name} existe localmente, se omite su generación.")
     return snapshot
 
 def mark_file_as_orphan(client, file:File):

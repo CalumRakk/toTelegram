@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="totelegram",
-    version="0.2.0",
+    version="0.2.1",
     description="toTelegram sube archivos a telegram sin importar el tamaño.",
     # long_description=open("README.md", encoding="utf-8").read(),
     # long_description_content_type="text/markdown",
