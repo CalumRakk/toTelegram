@@ -1,20 +1,43 @@
-import io
 import json
-import locale
 import logging
-from math import log
 from pathlib import Path
-from typing import List
+from typing import List, Union
 
 import peewee
 
-from totelegram.filechunker import FileChunker
-from totelegram.logging_config import setup_logging
-from totelegram.models import File, FileCategory, FileStatus, MessageDB, Piece, db_proxy
-from totelegram.setting import Settings, get_settings
+from totelegram.models import File, FileCategory, MessageDB, Piece, db_proxy
+from totelegram.setting import Settings
 from totelegram.utils import create_md5sum_by_hashlib, get_mimetype
 
 logger = logging.getLogger(__name__)
+
+
+def register_upload_success(record: Union[File, Piece], tg_message) -> MessageDB:
+    """
+    Registra en la BD que un archivo o pieza se subió exitosamente y guarda la ref del mensaje.
+    Recibe el objeto tg_message de Pyrogram (o cualquier objeto con .id, .chat.id y __str__).
+    """
+    logger.debug(f"Registrando mensaje exitoso para: {record.filename}")
+
+    data = {
+        "message_id": tg_message.id,
+        "chat_id": tg_message.chat.id,
+        "json_data": json.loads(str(tg_message)),
+    }
+
+    if isinstance(record, File):
+        data["file"] = record
+    elif isinstance(record, Piece):
+        data["piece"] = record
+    else:
+        raise ValueError(f"Tipo de registro no soportado: {type(record)}")
+
+    try:
+        message_db = MessageDB.create(**data)
+        return message_db
+    except Exception as e:
+        logger.error(f"Error al guardar mensaje en BD para {record.filename}: {e}")
+        raise
 
 
 def init_database(settings: Settings):
@@ -60,76 +83,6 @@ def _get_or_create_file_record(path: Path, settings: Settings) -> File:
     file = File.create(**file_data)
     logger.debug(f"El path {path.name} fue creado en la base de datos File={file.id}")
     return file
-
-
-def upload_single_file(client, settings: Settings, file: File):
-    logger.info(f"Subiendo archivo único: {file.path.name}…")
-
-    send_data = {
-        "chat_id": settings.chat_id,
-        "document": file.path,
-        "disable_notification": True,
-    }
-    if len(file.path.name) >= settings.max_filename_length:
-        logger.debug(f"El nombre de {file.path.name} excede el límite, se usará md5sum")
-        send_data["file_name"] = f"{file.md5sum}.{file.path.suffix}"
-        send_data["caption"] = file.path.name
-
-    message_telegram = client.send_document(**send_data)
-    logger.info(f"Archivo único subido correctamente: {file.path.name}")
-
-    try:
-        message_data = {
-            "message_id": message_telegram.id,
-            "chat_id": message_telegram.chat.id,
-            "json_data": str(message_telegram),
-            "file": file,
-        }
-        message = MessageDB.create(**message_data)
-        logger.debug(
-            f"Registro de mensaje creado en base de datos para {file.path.name}"
-        )
-        return message
-    except Exception as e:
-        logger.error(f"Error al registrar mensaje de {file.path.name}: {e}")
-        raise
-
-
-def upload_piece_to_telegram(client, settings: Settings, piece: Piece):
-    if piece.is_uploaded:
-        logger.info(f"La pieza {piece.filename} ya fue subida a Telegram")
-        return
-
-    logger.info(f"Subiendo pieza: {piece.filename}…")
-    send_data = {
-        "chat_id": settings.chat_id,
-        "document": piece.path,
-        "disable_notification": True,
-    }
-    if len(piece.file.path.name) >= settings.max_filename_length:
-        logger.debug(
-            f"El nombre de {piece.file.path.name} excede el límite, se usará md5sum"
-        )
-        send_data["file_name"] = f"{piece.file.md5sum}.{piece.file.path.suffix}"
-        send_data["caption"] = piece.file.path.name
-
-    message_telegram = client.send_document(**send_data)
-    logger.info(f"Pieza subida correctamente: {piece.filename}")
-
-    try:
-        message = MessageDB.create(
-            message_id=message_telegram.id,
-            chat_id=message_telegram.chat.id,
-            json_data=json.loads(str(message_telegram)),
-            piece=piece,
-        )
-        logger.debug(
-            f"Registro de mensaje creado en base de datos para pieza {piece.filename}"
-        )
-        return message
-    except Exception as e:
-        logger.error(f"Error al registrar mensaje de la pieza {piece.filename}: {e}")
-        raise
 
 
 def save_pieces(chunks: List[Path], file: File) -> List[Piece]:

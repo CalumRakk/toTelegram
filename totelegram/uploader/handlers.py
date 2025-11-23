@@ -7,12 +7,13 @@ from typing import List, Optional, Tuple, Union
 from venv import logger
 
 from totelegram.filechunker import FileChunker
-from totelegram.models import File, FileCategory, FileStatus, MessageDB, Piece, db_proxy
+from totelegram.models import File, FileCategory, FileStatus, Piece, db_proxy
 from totelegram.schemas import ManagerPieces, ManagerSingleFile, Snapshot
 from totelegram.setting import Settings
 from totelegram.uploader.database import (
     get_or_create_file_records,
     init_database,
+    register_upload_success,
     save_pieces,
 )
 from totelegram.uploader.telegram import (
@@ -119,14 +120,7 @@ def upload_file(client, record: Union[File, Piece], settings: Settings):
         if file_wrapper:
             file_wrapper.close()
 
-    # Vincular SingleFile o Piece con el mensaje enviado a Telegram
-    message_data = {
-        "message_id": tg_message.id,
-        "chat_id": tg_message.chat.id,
-        "json_data": json.loads(str(tg_message)),
-        model_field: record,
-    }
-    MessageDB.create(**message_data)
+    register_upload_success(record, tg_message)
 
     # Actualizar el estado
     if isinstance(record, Piece):
