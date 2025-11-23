@@ -11,6 +11,7 @@ from totelegram.models import File, FileCategory, FileStatus, Piece, db_proxy
 from totelegram.schemas import ManagerPieces, ManagerSingleFile, Snapshot
 from totelegram.setting import Settings
 from totelegram.uploader.database import (
+    _get_or_create_file_record,
     get_or_create_file_records,
     init_database,
     register_upload_success,
@@ -19,6 +20,7 @@ from totelegram.uploader.database import (
 from totelegram.uploader.telegram import (
     init_telegram_client,
     is_empty_message,
+    stop_telegram_client,
     telegram_client_context,
 )
 from totelegram.utils import ThrottledFile
@@ -250,6 +252,50 @@ def mark_file_as_orphan(client, file: File):
             file.save()
     else:
         raise Exception(f"Tipo de archivo desconocido: {file.type}")
+
+
+def process_single_file(target: Path, settings: Settings) -> bool:
+    """
+    Realiza el ciclo completo para UN solo archivo:
+    1. Inicia DB.
+    2. Comprueba estado local (sin conectar a Telegram).
+    3. Si falta: Conecta -> Sube -> Desconecta.
+
+    Retorna True si se realizó una subida.
+    Retorna False si se omitió porque ya existía.
+    """
+    target = Path(target)
+
+    init_database(settings)
+
+    # 1. COMPROBACIÓN LOCAL
+    file_record = _get_or_create_file_record(target, settings)
+    if file_record.get_status() == FileStatus.UPLOADED:
+        logger.info(f"SKIP: {target.name} ya está marcado como SUBIDO en BD local.")
+        return False
+
+    # 2. SUBIDA
+    logger.info(f"Iniciando sesión {settings.session_name} para subir {target.name}...")
+    client = init_telegram_client(settings)
+
+    did_upload = False
+    try:
+        if file_record.type == FileCategory.SINGLE:
+            upload_file(client, file_record, settings)
+        else:
+            handle_pieces_file(client, settings, file_record)
+
+        generate_snapshot(file_record)
+        did_upload = True
+
+    except Exception as e:
+        logger.error(f"Error subiendo {target.name}: {e}")
+
+    finally:
+        logger.info("Cerrando cliente de Telegram...")
+        stop_telegram_client()
+
+    return did_upload
 
 
 def upload(target: Path, settings: Settings) -> List[Snapshot]:

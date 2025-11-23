@@ -25,7 +25,7 @@ class ThrottledFile(io.BufferedIOBase):
         self._bytes_read = 0
 
         # Atributos esenciales para Pyrogram
-        self.name = str(path)
+        self.name = path.name
         self.mode = "rb"
 
     def read(self, size: int = -1) -> bytes:  # type: ignore
