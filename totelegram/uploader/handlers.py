@@ -19,7 +19,7 @@ from totelegram.uploader.database import (
 from totelegram.uploader.telegram import (
     init_telegram_client,
     is_empty_message,
-    stop_telegram_client,
+    telegram_client_context,
 )
 from totelegram.utils import ThrottledFile
 
@@ -262,29 +262,29 @@ def upload(target: Path, settings: Settings) -> List[Snapshot]:
 
     client = init_telegram_client(settings)
     snapshots = []
-    for file in file_records:
-        if file.get_status() == FileStatus.UPLOADED:
-            if is_empty_message(client, file):
-                logger.info(
-                    f"El archivo está marcado como subido, pero no se encontró en Telegram. Se volverá a subir"
-                )
-                mark_file_as_orphan(client, file)
+    with telegram_client_context(settings) as client:
+        for file in file_records:
+            if file.get_status() == FileStatus.UPLOADED:
+                if is_empty_message(client, file):
+                    logger.info(
+                        f"El archivo está marcado como subido, pero no se encontró en Telegram. Se volverá a subir"
+                    )
+                    mark_file_as_orphan(client, file)
+                else:
+                    logger.info(
+                        f"El archivo {file.path.name} ya estaba marcado como subido, se omite"
+                    )
+                    snapshot = generate_snapshot(file)
+                    snapshots.append(snapshot)
+                    continue
+
+            if file.type == FileCategory.SINGLE:
+                upload_file(client, file, settings)
             else:
-                logger.info(
-                    f"El archivo {file.path.name} ya estaba marcado como subido, se omite"
-                )
-                snapshot = generate_snapshot(file)
-                snapshots.append(snapshot)
-                continue
+                handle_pieces_file(client, settings, file)
 
-        if file.type == FileCategory.SINGLE:
-            upload_file(client, file, settings)
-        else:
-            handle_pieces_file(client, settings, file)
-
-        snapshot = generate_snapshot(file)
-        snapshots.append(snapshot)
+            snapshot = generate_snapshot(file)
+            snapshots.append(snapshot)
 
     logger.info(f"Proceso completado. {len(file_records)} archivos procesados")
-    stop_telegram_client()
     return snapshots
