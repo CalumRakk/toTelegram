@@ -35,3 +35,4 @@ env
 *.egg-info
 validate.py
 validate2.py
+script.py

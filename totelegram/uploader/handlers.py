@@ -20,12 +20,14 @@ from totelegram.uploader.telegram import (
     is_empty_message,
     stop_telegram_client,
 )
+from totelegram.utils import ThrottledFile
 
 _last_percentage = {}
 
+
 def progress_bar(current: int, total: int, filename: Optional[str] = None):
     porcentage = int(current * 100 / total)
-    
+
     # clave única por archivo
     key = filename or "_default"
 
@@ -33,9 +35,9 @@ def progress_bar(current: int, total: int, filename: Optional[str] = None):
     if porcentage % 2 == 0 and _last_percentage.get(key) != porcentage:
         _last_percentage[key] = porcentage
         logger.info(
-            f"Subiendo el archivo {filename} "
-            f"({current} de {total}) {porcentage}%"
+            f"Subiendo el archivo {filename} " f"({current} de {total}) {porcentage}%"
         )
+
 
 def get_or_chunked_file(file: File, settings: Settings) -> List[Piece]:
     if file.type != FileCategory.CHUNKED:
@@ -68,6 +70,7 @@ def _build_names(
         return filename, caption
     return None, None
 
+
 def _get_model_field_and_md5sum(record: Union[File, Piece]):
     if isinstance(record, File):
         model_field = "file"
@@ -79,34 +82,51 @@ def _get_model_field_and_md5sum(record: Union[File, Piece]):
         raise ValueError("record debe ser de tipo File o Piece")
     return model_field, md5sum
 
+
 def upload_file(client, record: Union[File, Piece], settings: Settings):
-    logger.info("="*50)
+    logger.info("=" * 50)
 
     model_field, md5sum = _get_model_field_and_md5sum(record)
     filename, caption = _build_names(record.path, md5sum, settings)
 
     # Información del chat
-    chat_info= client.get_chat(settings.chat_id)    
+    chat_info = client.get_chat(settings.chat_id)
     logger.info(f"Chat: {chat_info.title}")
-    
-    # Subir el archivo
-    tg_message = client.send_document(
-        chat_id=settings.chat_id,
-        document=str(record.path),
-        file_name=filename, 
-        caption=caption, 
-        progress=progress_bar, 
-        progress_args=(record.path.name,)
-    )
-    
+
+    limit_bytes = settings.upload_limit_rate_kbps * 1024
+
+    # Variable para guardar el objeto wrapper si se usa
+    file_wrapper = None
+    document_to_upload = str(record.path)
+
+    if limit_bytes > 0:
+        logger.info(
+            f"Aplicando límite de velocidad: {settings.upload_limit_rate_kbps} KB/s"
+        )
+        file_wrapper = ThrottledFile(record.path, limit_bytes)
+        document_to_upload = file_wrapper
+
+    try:
+        tg_message = client.send_document(
+            chat_id=settings.chat_id,
+            document=document_to_upload,
+            file_name=filename,
+            caption=caption,
+            progress=progress_bar,
+            progress_args=(record.path.name,),
+        )
+    finally:
+        if file_wrapper:
+            file_wrapper.close()
+
     # Vincular SingleFile o Piece con el mensaje enviado a Telegram
     message_data = {
         "message_id": tg_message.id,
         "chat_id": tg_message.chat.id,
         "json_data": json.loads(str(tg_message)),
-        model_field: record
+        model_field: record,
     }
-    MessageDB.create(**message_data)        
+    MessageDB.create(**message_data)
 
     # Actualizar el estado
     if isinstance(record, Piece):
@@ -116,7 +136,7 @@ def upload_file(client, record: Union[File, Piece], settings: Settings):
         record.path.unlink(missing_ok=True)
         logger.debug(f"Se borra el archivo temporal: {record.path}")
     else:
-        logger.info(f"Archivo único subido correctamente: {record.path.name}")           
+        logger.info(f"Archivo único subido correctamente: {record.path.name}")
         record.status = FileStatus.UPLOADED.value
         record.save()
 
@@ -146,93 +166,100 @@ def generate_snapshot(file: File):
     from totelegram.schemas import File as FileSchema
     from totelegram.schemas import Message as MessageSchema
     from totelegram.schemas import Piece as PieceSchema
+
     ifile = FileSchema(
-            kind="file",
-            filename=file.filename,
-            fileExtension=file.path.suffix,
-            mimeType=file.mimetype,
-            md5sum=file.md5sum,
-            size=file.size,
-            medatada={},
-        )
+        kind="file",
+        filename=file.filename,
+        fileExtension=file.path.suffix,
+        mimeType=file.mimetype,
+        md5sum=file.md5sum,
+        size=file.size,
+        medatada={},
+    )
     if file.type == FileCategory.SINGLE:
         manager_kind = FileCategory.SINGLE.value
 
-        tg_message= file.message_db.get_message()
-        media:dict= getattr(tg_message, tg_message.media.value) # type: ignore
+        tg_message = file.message_db.get_message()
+        media: dict = getattr(tg_message, tg_message.media.value)  # type: ignore
         message = MessageSchema(
             message_id=tg_message.id,
             chat_id=tg_message.chat.id,
             link=tg_message.link,
             file_name=media["file_name"],
-            size= media["file_size"],
+            size=media["file_size"],
         )
 
         manager = ManagerSingleFile(kind=manager_kind, file=ifile, message=message)
-        
+
     elif file.type == FileCategory.CHUNKED:
         manager_kind = FileCategory.CHUNKED.value
-        pieces=[]
+        pieces = []
         for piece in file.pieces:
-            tg_message= piece.message
-            media:dict= getattr(tg_message, tg_message.media.value) # type: ignore
+            tg_message = piece.message
+            media: dict = getattr(tg_message, tg_message.media.value)  # type: ignore
             message = MessageSchema(
                 message_id=tg_message.id,
                 chat_id=tg_message.chat.id,
                 link=tg_message.link,
                 file_name=media["file_name"],
-                size= media["file_size"],
+                size=media["file_size"],
             )
-            ipiece= PieceSchema(kind="#piece", filename=piece.filename, size=piece.size, message=message)
+            ipiece = PieceSchema(
+                kind="#piece", filename=piece.filename, size=piece.size, message=message
+            )
             pieces.append(ipiece)
-        manager = ManagerPieces(kind=manager_kind, file=ifile, pieces=pieces)    
+        manager = ManagerPieces(kind=manager_kind, file=ifile, pieces=pieces)
     else:
         raise Exception(f"Tipo de archivo desconocido: {file.type}")
 
-
-    snapshot= Snapshot(
+    snapshot = Snapshot(
         kind=manager_kind,
         manager=manager,
         createdTime=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-    )        
+    )
     if not output.exists():
         logger.info(f"Generando snapshot de {file.path.name}…")
-        
+
         with lzma.open(output, "wt") as f:
             json.dump(snapshot.model_dump(), f)
         logger.info(f"Snapshot de {file.path.name} generado correctamente.")
     else:
-        logger.info(f"Snapshot de {file.path.name} existe localmente, se omite su generación.")
+        logger.info(
+            f"Snapshot de {file.path.name} existe localmente, se omite su generación."
+        )
     return snapshot
 
-def mark_file_as_orphan(client, file:File):
+
+def mark_file_as_orphan(client, file: File):
     """Marca como orphan (huerfano) un archivo que no se pudo subir a Telegram
-    
-    Nota: Si el archivo es CHUNKED, marca el archivo como orphan y actualiza el estado de las pieces en `is_uploaded=False` solo las que no se encuentren en Telegram."""
+
+    Nota: Si el archivo es CHUNKED, marca el archivo como orphan y actualiza el estado de las pieces en `is_uploaded=False` solo las que no se encuentren en Telegram.
+    """
     if file.get_category() == FileCategory.SINGLE:
         file.status = FileStatus.ORPHANED.value
         file.save()
     elif file.get_category() == FileCategory.CHUNKED:
-        to_update=[]
+        to_update = []
         for piece in file.pieces:
-            message_id= piece.message.id
-            chat_id= piece.message.chat.id
-            message: MessageTg= client.get_messages(chat_id, message_id) # type: ignore
+            message_id = piece.message.id
+            chat_id = piece.message.chat.id
+            message: MessageTg = client.get_messages(chat_id, message_id)  # type: ignore
             if message.empty:
-                piece.is_uploaded=False
-                to_update.append(piece)        
-        with db_proxy.atomic():     
-            for piece in to_update:             
-                piece.is_uploaded=False
+                piece.is_uploaded = False
+                to_update.append(piece)
+        with db_proxy.atomic():
+            for piece in to_update:
+                piece.is_uploaded = False
                 piece.save()
-                piece.message_db.delete_instance() # TODO: verificar si realmente se elimina.
+                piece.message_db.delete_instance()  # TODO: verificar si realmente se elimina.
             file.status = FileStatus.ORPHANED.value
-            file.save()       
+            file.save()
     else:
         raise Exception(f"Tipo de archivo desconocido: {file.type}")
 
-def upload(target: Path, settings: Settings)-> List[Snapshot]:
-    target= Path(target) if isinstance(target, str) else target
+
+def upload(target: Path, settings: Settings) -> List[Snapshot]:
+    target = Path(target) if isinstance(target, str) else target
     logger.info("Iniciando proceso de subida de archivos")
     init_database(settings)
 
@@ -240,17 +267,19 @@ def upload(target: Path, settings: Settings)-> List[Snapshot]:
     file_records = get_or_create_file_records(paths, settings)
 
     client = init_telegram_client(settings)
-    snapshots=[]
+    snapshots = []
     for file in file_records:
         if file.get_status() == FileStatus.UPLOADED:
             if is_empty_message(client, file):
-                logger.info(f"El archivo está marcado como subido, pero no se encontró en Telegram. Se volverá a subir")
+                logger.info(
+                    f"El archivo está marcado como subido, pero no se encontró en Telegram. Se volverá a subir"
+                )
                 mark_file_as_orphan(client, file)
             else:
                 logger.info(
                     f"El archivo {file.path.name} ya estaba marcado como subido, se omite"
                 )
-                snapshot=generate_snapshot(file)
+                snapshot = generate_snapshot(file)
                 snapshots.append(snapshot)
                 continue
 
@@ -259,10 +288,9 @@ def upload(target: Path, settings: Settings)-> List[Snapshot]:
         else:
             handle_pieces_file(client, settings, file)
 
-        snapshot=generate_snapshot(file)
+        snapshot = generate_snapshot(file)
         snapshots.append(snapshot)
 
     logger.info(f"Proceso completado. {len(file_records)} archivos procesados")
     stop_telegram_client()
     return snapshots
-

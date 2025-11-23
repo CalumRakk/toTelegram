@@ -1,12 +1,86 @@
 import hashlib
+import io
 import logging
 import re
+import time
 from pathlib import Path
 from time import sleep
 
 import filetype
 
 logger = logging.getLogger(__name__)
+
+
+class ThrottledFile(io.BufferedIOBase):
+    """
+    Wrapper para limitar la velocidad de lectura.
+    Hereda de io.BufferedIOBase para pasar todas las validaciones de tipo (isinstance).
+    """
+
+    def __init__(self, path: Path, speed_limit_bytes_per_s: int):
+        self._path = path
+        self._speed_limit = speed_limit_bytes_per_s
+        self._file = open(path, "rb")
+        self._start_time = time.monotonic()
+        self._bytes_read = 0
+
+        # Atributos esenciales para Pyrogram
+        self.name = str(path)
+        self.mode = "rb"
+
+    def read(self, size: int = -1) -> bytes:  # type: ignore
+        # Si size es -1 o None, leer todo (comportamiento estándar)
+        if size is None or size < 0:
+            chunk = self._file.read()
+        else:
+            chunk = self._file.read(size)
+
+        if not chunk:
+            return b""
+
+        self._bytes_read += len(chunk)
+
+        if self._speed_limit > 0:
+            elapsed = time.monotonic() - self._start_time
+            # Evitar división por cero
+            if elapsed > 0:
+                expected_time = self._bytes_read / self._speed_limit
+                sleep_time = expected_time - elapsed
+                if sleep_time > 0:
+                    time.sleep(sleep_time)
+
+        return chunk
+
+    def seek(self, offset: int, whence: int = 0) -> int:
+        return self._file.seek(offset, whence)
+
+    def tell(self) -> int:
+        return self._file.tell()
+
+    def fileno(self) -> int:
+        return self._file.fileno()
+
+    def close(self) -> None:
+        return self._file.close()
+
+    def flush(self) -> None:
+        return self._file.flush()
+
+    @property
+    def closed(self) -> bool:
+        return self._file.closed
+
+    def readable(self) -> bool:
+        return True
+
+    def seekable(self) -> bool:
+        return True
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
 
 
 def create_md5sum_by_hashlib(path: Path):
@@ -20,8 +94,9 @@ def create_md5sum_by_hashlib(path: Path):
 def get_mimetype(path: Path):
     kind = filetype.guess(path)
     if kind is None:
-        print("Cannot guess file type!")
-        return
+        # Si filetype no puede adivinar, asumimos que es un flujo de bytes genérico.
+        # Esto evita el crash en base de datos y permite subir archivos "raros"
+        return "application/octet-stream"
     return kind.mime
 
 

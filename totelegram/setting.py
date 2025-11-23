@@ -2,11 +2,10 @@ import os
 import sys
 from os import getenv
 from pathlib import Path
-from platform import system
-from typing import List, Optional, Union, cast
+from typing import List, Union, cast
 
 from pydantic import Field, ValidationError, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings
 
 
 def get_user_config_dir(app_name: str) -> Path:
@@ -39,6 +38,8 @@ class Settings(BaseSettings):
 
     max_filesize_bytes: int = 2_097_152_000
     max_filename_length: int = 55
+
+    upload_limit_rate_kbps: int = 0
 
     lod_path: str = str(worktable / f"app_name.log")
 
@@ -76,5 +77,5 @@ def get_settings(env_path: Union[Path, str] = ".env") -> Settings:
             return settings
         raise FileNotFoundError(f"El archivo de configuración {env_path} no existe.")
     except ValidationError as e:
-        print("❌ Error en configuración:", e)
+        print("Error en configuración:", e)
         raise
