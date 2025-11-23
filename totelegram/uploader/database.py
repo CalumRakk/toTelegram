@@ -52,28 +52,60 @@ def init_database(settings: Settings):
 
 
 def _get_or_create_file_record(path: Path, settings: Settings) -> File:
+    # 1. Obtener metadatos actuales del sistema de archivos
+    stat = path.stat()
+    current_size = stat.st_size
+    current_mtime = stat.st_mtime
+    path_str = str(path)
+
+    # Buscamos si existe un registro que coincida en ruta, tamaño y fecha.
+    cached_file = File.get_or_none(
+        (File.path_str == path_str)
+        & (File.size == current_size)
+        & (File.mtime == current_mtime)
+    )
+    if cached_file:
+        logger.debug(
+            f"CACHE HIT: {path.name} detectado por metadatos (mtime). Saltando cálculo MD5."
+        )
+        return cached_file
+
     md5sum = create_md5sum_by_hashlib(path)
     file = File.get_or_none(md5sum=md5sum)
 
     if file is not None:
-        logger.debug(f"El path {path.name} ya está en la base de datos")
-        if file.path_str != str(path):
-            logger.debug(f"Actualizando ruta de {path.name} en base de datos")
-            file.path_str = str(path)
+        logger.debug(f"El archivo ya existía por MD5 (posible cambio de ruta/fecha)")
+        changed = False
+        if file.path_str != path_str:
+            file.path_str = path_str
+            changed = True
+
+        if file.mtime != current_mtime:
+            file.mtime = current_mtime
+            changed = True
+
+        if file.size != current_size:
+            file.size = current_size
+            changed = True
+
+        if changed:
             file.save()
+            logger.debug("Metadatos actualizados en BD.")
         return file
-    logger.debug(f"El path {path.name} no está en la base de datos")
+
+    logger.debug(f"Creando nuevo registro en BD para {path.name}")
     mimetype = get_mimetype(path)
-    filesize = path.stat().st_size
 
     file_data = {
-        "path_str": str(path),
+        "path_str": path_str,
         "filename": path.name,
-        "size": path.stat().st_size,
+        "size": current_size,
         "mimetype": mimetype,
         "md5sum": md5sum,
+        "mtime": current_mtime,
     }
-    if filesize <= settings.max_filesize_bytes:
+
+    if current_size <= settings.max_filesize_bytes:
         file_data["category"] = FileCategory.SINGLE.value
         logger.debug(f"El path {path.name} es de tipo SINGLE")
     else:
@@ -81,7 +113,6 @@ def _get_or_create_file_record(path: Path, settings: Settings) -> File:
         logger.debug(f"El path {path.name} es de tipo CHUNKED")
 
     file = File.create(**file_data)
-    logger.debug(f"El path {path.name} fue creado en la base de datos File={file.id}")
     return file
 
 

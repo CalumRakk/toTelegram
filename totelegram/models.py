@@ -2,6 +2,7 @@ import enum
 from datetime import datetime
 from pathlib import Path
 from typing import cast
+
 import peewee
 from playhouse.sqlite_ext import JSONField
 
@@ -10,6 +11,7 @@ from totelegram.uploader.parse import parse_message_json_data
 db_proxy = peewee.Proxy()
 # TODO: cuando se hable de message se debe entender siempre como una instancia de Message de Pyrogram
 # TODO: Si se desea hablar de la copia de message guardada en la BD, se debe usar siempre MessageDB
+
 
 class FileCategory(str, enum.Enum):
     SINGLE = "single-file"
@@ -49,14 +51,19 @@ class File(BaseModel):
         str,
         peewee.CharField(
             default="PENDING",
-            constraints=[peewee.Check("status IN ('PENDING', 'SPLITTED', 'UPLOADED','ORPHANED')")],
+            constraints=[
+                peewee.Check("status IN ('PENDING', 'SPLITTED', 'UPLOADED','ORPHANED')")
+            ],
         ),
     )
+    mtime = cast(float, peewee.FloatField(default=0.0))
 
     def get_status(self) -> FileStatus:
         return FileStatus(self.status)
+
     def get_category(self) -> FileCategory:
         return FileCategory(self.category)
+
     @property
     def path(self) -> Path:
         return Path(self.path_str)
@@ -66,10 +73,9 @@ class File(BaseModel):
         return Piece.select().where(Piece.file == self)
 
     @property
-    def message_db(self) -> "MessageDB": # type: ignore
+    def message_db(self) -> "MessageDB":  # type: ignore
         """Devuelve el MessageDB relacionado con el File. Solo para SINGLE-FILES."""
         return MessageDB.get(MessageDB.file == self)
-    
 
     @property
     def type(self) -> FileCategory:
@@ -79,7 +85,7 @@ class File(BaseModel):
 class Piece(BaseModel):
     path_str = cast(str, peewee.CharField())
     filename = cast(str, peewee.CharField())
-    size =cast(int, peewee.IntegerField())
+    size = cast(int, peewee.IntegerField())
     is_uploaded = cast(bool, peewee.BooleanField(default=False))
     file = peewee.ForeignKeyField(File, backref="pieces")
 
@@ -89,11 +95,13 @@ class Piece(BaseModel):
 
     @property
     def message(self):
-        messagedb= MessageDB.get(MessageDB.piece == self)
+        messagedb = MessageDB.get(MessageDB.piece == self)
         return parse_message_json_data(messagedb.json_data)
+
     @property
-    def message_db(self)->"MessageDB":
+    def message_db(self) -> "MessageDB":
         return MessageDB.get(MessageDB.piece == self)
+
 
 class MessageDB(BaseModel):
     message_id = peewee.IntegerField()
@@ -101,7 +109,6 @@ class MessageDB(BaseModel):
     json_data = cast(dict, JSONField())
     file = peewee.ForeignKeyField(File, null=True)
     piece = peewee.ForeignKeyField(Piece, null=True)
-    
 
     def save(self, *args, **kwargs):
         if (self.file is None and self.piece is None) or (
@@ -116,5 +123,5 @@ class MessageDB(BaseModel):
         """Instancia un MessageDB de Telegram a partir de la información guardada en la base de datos
         Nota: No todos los atributos del MessageDB instanciado se puede acceder con ".", algunos son simplemente diccionario de python. Para saber más ver la funcion parse_message_json_data
         """
-        # TODO: modificar la existencia de este método. Es poco intuitivo. ¿ message.get_message() ? 
+        # TODO: modificar la existencia de este método. Es poco intuitivo. ¿ message.get_message() ?
         return parse_message_json_data(self.json_data)
