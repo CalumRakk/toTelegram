@@ -1,10 +1,36 @@
 from pathlib import Path
-from typing import Iterator, List, Union
+from typing import List, Union
 
 from totelegram.models import File
 from totelegram.setting import Settings
 
+
 class FileChunker:
+    @classmethod
+    def split_file(
+        cls, 
+        file_path: Union[str, Path], 
+        chunk_size: int, 
+        output_folder: Path
+    ) -> List[Path]:
+        """
+        Divide un archivo en trozos.
+        """
+        file_path = Path(file_path)
+        output_folder.mkdir(exist_ok=True, parents=True)
+        
+        file_size = file_path.stat().st_size
+        
+        if not file_path.exists():
+            raise FileNotFoundError(f"El archivo {file_path} no existe.")
+        if file_size <= chunk_size:
+            raise ValueError(f"El archivo es más pequeño que el tamaño del chunk.")
+
+        ranges = cls._chunk_ranges(file_size, chunk_size)
+        chunks = cls._split_file(file_path, ranges, output_folder)
+        return chunks
+    
+
     @classmethod
     def _should_throw_error(cls, file: File, settings: Settings) -> None:
         chunk_size = settings.max_filesize_bytes
@@ -61,7 +87,7 @@ class FileChunker:
 
     
     @classmethod
-    def split_file(
+    def split_file_dummy(
         cls,
         file: File,
         settings: Settings,

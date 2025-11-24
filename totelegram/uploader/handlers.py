@@ -35,7 +35,11 @@ def get_or_chunked_file(file: File, settings: Settings) -> List[Piece]:
 
     if file.get_status() == FileStatus.PENDING:
         logger.info(f"Dividiendo archivo en piezas: {file.path.name}…")
-        chunks = FileChunker.split_file(file, settings)
+        chunks = FileChunker.split_file(
+            file_path=file.path,
+            chunk_size=settings.max_filesize_bytes,
+            output_folder=settings.worktable / "chunks"
+        )
         logger.info(f"Archivo dividido correctamente en {len(chunks)} piezas")
         pieces = save_pieces(chunks, file)
         file.status = FileStatus.SPLITTED.value
