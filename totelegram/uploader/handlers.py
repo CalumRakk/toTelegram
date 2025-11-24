@@ -1,10 +1,9 @@
-# uploader/handlers.py
 import json
+import logging
 import lzma
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Tuple, Union
-from venv import logger
 
 from totelegram.filechunker import FileChunker
 from totelegram.models import File, FileCategory, FileStatus, Piece, db_proxy
@@ -23,23 +22,10 @@ from totelegram.uploader.telegram import (
     stop_telegram_client,
     telegram_client_context,
 )
-from totelegram.utils import ThrottledFile, is_excluded
+from totelegram.utils import ThrottledFile, UploadProgress, is_excluded
 
 _last_percentage = {}
-
-
-def progress_bar(current: int, total: int, filename: Optional[str] = None):
-    porcentage = int(current * 100 / total)
-
-    # clave única por archivo
-    key = filename or "_default"
-
-    # solo loguea si es múltiplo de 5 y no se repite
-    if porcentage % 2 == 0 and _last_percentage.get(key) != porcentage:
-        _last_percentage[key] = porcentage
-        logger.info(
-            f"Subiendo el archivo {filename} " f"({current} de {total}) {porcentage}%"
-        )
+logger = logging.getLogger(__name__)
 
 
 def get_or_chunked_file(file: File, settings: Settings) -> List[Piece]:
@@ -110,12 +96,14 @@ def upload_file(client, record: Union[File, Piece], settings: Settings):
         document_to_upload = file_wrapper
 
     try:
+        progress_tracker = UploadProgress(record.path.name)
+
         tg_message = client.send_document(
             chat_id=settings.chat_id,
             document=document_to_upload,
             file_name=filename,
             caption=caption,
-            progress=progress_bar,
+            progress=progress_tracker,
             progress_args=(record.path.name,),
         )
     finally:
