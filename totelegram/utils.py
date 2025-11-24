@@ -3,6 +3,7 @@ import io
 import logging
 import re
 import time
+from contextlib import contextmanager
 from pathlib import Path
 from time import sleep
 from typing import TYPE_CHECKING
@@ -14,6 +15,16 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+@contextmanager
+def open_upload_source(path: Path,limit_rate_kbps:int):
+    """Contexto manager que decide inteligentemente cómo entregar el archivo a Pyrogram."""    
+    if limit_rate_kbps > 0:
+        limit_bytes= limit_rate_kbps * 1024
+        with ThrottledFile(path, limit_bytes) as throttled_file:
+            yield throttled_file
+    else:
+        # Se devuelve un string si el usuario no especifica un limite.
+        yield str(path)
 
 class UploadProgress:
     """

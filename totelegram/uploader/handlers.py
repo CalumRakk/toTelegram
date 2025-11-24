@@ -22,9 +22,8 @@ from totelegram.uploader.telegram import (
     stop_telegram_client,
     telegram_client_context,
 )
-from totelegram.utils import ThrottledFile, UploadProgress, is_excluded
+from totelegram.utils import UploadProgress, is_excluded, open_upload_source
 
-_last_percentage = {}
 logger = logging.getLogger(__name__)
 
 
@@ -82,20 +81,11 @@ def upload_file(client, record: Union[File, Piece], settings: Settings):
     chat_info = client.get_chat(settings.chat_id)
     logger.info(f"Chat: {chat_info.title}")
 
-    limit_bytes = settings.upload_limit_rate_kbps * 1024
-
-    # Variable para guardar el objeto wrapper si se usa
-    file_wrapper = None
-    document_to_upload = str(record.path)
-
-    if limit_bytes > 0:
-        logger.info(
-            f"Aplicando límite de velocidad: {settings.upload_limit_rate_kbps} KB/s"
-        )
-        file_wrapper = ThrottledFile(record.path, limit_bytes)
-        document_to_upload = file_wrapper
-
-    try:
+    with open_upload_source(record.path, settings.upload_limit_rate_kbps) as document_to_upload:
+        if settings.upload_limit_rate_kbps > 0:
+            logger.info(
+                f"Aplicando límite de velocidad: {settings.upload_limit_rate_kbps} KB/s"
+            )        
         progress_tracker = UploadProgress(record.path.name)
 
         tg_message = client.send_document(
@@ -104,11 +94,8 @@ def upload_file(client, record: Union[File, Piece], settings: Settings):
             file_name=filename,
             caption=caption,
             progress=progress_tracker,
-            progress_args=(record.path.name,),
         )
-    finally:
-        if file_wrapper:
-            file_wrapper.close()
+
 
     register_upload_success(record, tg_message)
 
