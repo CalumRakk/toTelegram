@@ -7,7 +7,7 @@ import peewee
 
 from totelegram.models import File, FileCategory, MessageDB, Piece, db_proxy
 from totelegram.setting import Settings
-from totelegram.utils import create_md5sum_by_hashlib, get_mimetype
+from totelegram.utils import create_md5sum_by_hashlib, get_mimetype, is_excluded
 
 logger = logging.getLogger(__name__)
 
@@ -147,17 +147,8 @@ def get_or_create_file_records(paths: List[Path], settings: Settings) -> List[Fi
     file_records = []
     for path in paths:
         logger.info(f"Procesando path: {path}")
-        if not path.exists():
-            logger.info(f"No existe: {path}, se omite")
-            continue
-        elif path.is_dir():
-            logger.info(f"Es un directorio: {path}, se omite")
-            continue
-        elif settings.is_excluded(path):
-            logger.info(f"Está excluido por configuración: {path}, se omite ")
-            continue
-        elif settings.is_excluded_default(path):
-            logger.info(f"Está excluido por configuración: {path}, se omite ")
+        if is_excluded(path, settings):
+            logger.info(f"Path excluido, se omite: {path}")
             continue
 
         file = _get_or_create_file_record(path, settings)

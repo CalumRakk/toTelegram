@@ -23,7 +23,7 @@ from totelegram.uploader.telegram import (
     stop_telegram_client,
     telegram_client_context,
 )
-from totelegram.utils import ThrottledFile
+from totelegram.utils import ThrottledFile, is_excluded
 
 _last_percentage = {}
 
@@ -265,6 +265,9 @@ def process_single_file(target: Path, settings: Settings) -> bool:
     Retorna False si se omitió porque ya existía.
     """
     target = Path(target)
+    if is_excluded(target, settings):
+        logger.info(f"Path excluido, se omite: {target}")
+        return False
 
     init_database(settings)
 

@@ -5,8 +5,12 @@ import re
 import time
 from pathlib import Path
 from time import sleep
+from typing import TYPE_CHECKING
 
 import filetype
+
+if TYPE_CHECKING:
+    from totelegram.setting import Settings
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +85,24 @@ class ThrottledFile(io.BufferedIOBase):
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.close()
+
+
+def is_excluded(path: Path, settings: "Settings") -> bool:
+    """Devuelve True si el path debe ser excluido según las reglas de exclusión."""
+    logger.info(f"Comprobando path exclusion de {path=}")
+    if not path.exists():
+        logger.info(f"No existe: {path}, se omite")
+        return True
+    elif path.is_dir():
+        logger.info(f"Es un directorio: {path}, se omite")
+        return True
+    elif settings.is_excluded(path):
+        logger.info(f"Está excluido por configuración: {path}, se omite ")
+        return True
+    elif settings.is_excluded_default(path):
+        logger.info(f"Está excluido por configuración: {path}, se omite ")
+        return True
+    return False
 
 
 def create_md5sum_by_hashlib(path: Path):
