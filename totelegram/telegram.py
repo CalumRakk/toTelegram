@@ -2,7 +2,6 @@ import locale
 import logging
 from contextlib import contextmanager
 
-from totelegram.models import File, FileCategory
 from totelegram.setting import Settings
 
 _client_instance = None
@@ -48,29 +47,6 @@ def telegram_client_context(settings: Settings):
         yield client
     finally:
         stop_telegram_client()
-
-
-def is_empty_message(client, file: File):
-    """Comprobar si el File sigue disponible en Telegram.
-
-    Nota: Si es CHUNKED, devuelve True si alguna de las piezas no se encuentra en Telegram.
-    """
-    from pyrogram.types import Message
-
-    if file.get_category() == FileCategory.SINGLE:
-        message_db = file.message_db
-        message: Message = client.get_messages(message_db.chat_id, message_db.message_id)  # type: ignore
-        if message.empty:
-            return True
-        return False
-    elif file.get_category() == FileCategory.CHUNKED:
-        for piece in file.pieces:
-            chat_id = piece.message_db.chat_id
-            message_id = piece.message_db.message_id
-            message: Message = client.get_messages(chat_id, message_id)  # type: ignore
-            if message.empty:
-                return True
-        return False
 
 
 def stop_telegram_client():

@@ -2,11 +2,12 @@ import argparse
 import logging
 
 from totelegram.logging_config import setup_logging
+from totelegram.orchestrator import upload
 from totelegram.setting import get_settings
-from totelegram.uploader.handlers import upload
+
 
 def run_script():
-    
+
     parser = argparse.ArgumentParser(
         prog="toTelegram",
         description="Sube archivos a Telegram sin importar el tamaño.",

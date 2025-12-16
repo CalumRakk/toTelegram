@@ -1,48 +1,38 @@
-from typing import List, Literal
+from datetime import datetime
+from typing import List
 
-from pydantic import BaseModel
-from typing_extensions import TypedDict
+from pydantic import BaseModel, Field
+
+from totelegram.enums import Strategy
+
+MANIFEST_VERSION = "4.0"
 
 
-class File(BaseModel):
-    kind: Literal["file"]
+class SourceMetadata(BaseModel):
     filename: str
-    fileExtension: str
-    mimeType: str
+    size: int
     md5sum: str
-    size: int
-    medatada: dict
+    mime_type: str
 
 
-class Message(BaseModel):
-    file_name: str
+class RemotePart(BaseModel):
+    sequence: int = Field(description="Orden de la parte, iniciando en 0")
     message_id: int
-    size: int
     chat_id: int
     link: str
+    part_filename: str
+    part_size: int
 
 
-class Piece(BaseModel):
-    kind: Literal["#piece"]
-    filename: str
-    size: int
-    message: Message
+class UploadManifest(BaseModel):
+    version: str = MANIFEST_VERSION
+    created_at: datetime = Field(default_factory=datetime.now)
+    strategy: Strategy
+    source: SourceMetadata
+    parts: List[RemotePart]
 
 
-class ManagerPieces(BaseModel):
-    kind: Literal["pieces-file"]
-    file: File
-    pieces: List[Piece]
-
-
-class ManagerSingleFile(BaseModel):
-    kind: Literal["single-file"]
-    file: File
-    message: Message
-
-
-class Snapshot(BaseModel):
-    kind: Literal["single-file", "pieces-file"]
-    manager: ManagerSingleFile | ManagerPieces
-    createdTime: str  # comprobar el formato de datetime
-    version :str = "3.0"
+class StrategyConfig(BaseModel):
+    max_filesize_bytes: int
+    upload_limit_rate_kbps: int
+    chat_id: str
