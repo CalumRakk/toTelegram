@@ -13,6 +13,24 @@ from totelegram.telegram import telegram_client_context
 logger = logging.getLogger(__name__)
 
 
+def is_excluded(path: Path, settings: "Settings") -> bool:
+    """Devuelve True si el path debe ser excluido según las reglas de exclusión."""
+    logger.info(f"Comprobando path exclusion de {path=}")
+    if not path.exists():
+        logger.info(f"No existe: {path}, se omite")
+        return True
+    elif path.is_dir():
+        logger.info(f"Es un directorio: {path}, se omite")
+        return True
+    elif settings.is_excluded(path):
+        logger.info(f"Está excluido por configuración: {path}, se omite ")
+        return True
+    elif settings.is_excluded_default(path):
+        logger.info(f"Está excluido por configuración: {path}, se omite ")
+        return True
+    return False
+
+
 def upload(target: Path, settings: Settings):
     init_database(settings)
     paths = list(target.glob("*")) if target.is_dir() else [target]

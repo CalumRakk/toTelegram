@@ -5,9 +5,30 @@ from typing import Optional, Tuple
 from totelegram.enums import Strategy
 from totelegram.models import Payload, RemotePayload
 from totelegram.setting import Settings
-from totelegram.utils import UploadProgress, open_upload_source
+from totelegram.streams import open_upload_source
 
 logger = logging.getLogger(__name__)
+
+
+class UploadProgress:
+    """
+    Maneja el estado del progreso de subida para un archivo específico.
+    Actúa como un 'callable' para ser compatible con Pyrogram.
+    """
+
+    def __init__(self, filename: str):
+        self.filename = filename
+        self.last_percentage = -1
+
+    def __call__(self, current: int, total: int):
+        percentage = int(current * 100 / total)
+
+        # Loguear solo si cambia el porcentaje y es múltiplo de 5
+        if percentage % 5 == 0 and self.last_percentage != percentage:
+            self.last_percentage = percentage
+            logger.info(
+                f"Subiendo {self.filename}: {current} de {total} bytes ({percentage}%)"
+            )
 
 
 class UploadService:
