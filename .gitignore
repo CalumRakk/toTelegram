@@ -19,14 +19,12 @@ __pycache__
 !/requirements.txt
 site/
 /docs
-*.yaml
 !config.yaml
 *.json.xz
 !video.mp4
 /dist
 /toTelegram.egg-info
 build/
-*.yaml
 *.db
 env
 *.log
