@@ -2,7 +2,7 @@ import logging
 
 import peewee
 
-from totelegram.setting import Settings
+from totelegram.core.setting import Settings
 
 logger = logging.getLogger(__name__)
 db_proxy = peewee.Proxy()

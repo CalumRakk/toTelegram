@@ -7,15 +7,15 @@ from typing import TYPE_CHECKING, Generator, cast
 import peewee
 from playhouse.sqlite_ext import JSONField
 
-from totelegram.enums import JobStatus, Strategy
+from totelegram.core.enums import JobStatus, Strategy
 
 if TYPE_CHECKING:
-    from totelegram.setting import Settings
+    from totelegram.core.setting import Settings
 
-from totelegram.schemas import StrategyConfig
+from totelegram.core.schemas import StrategyConfig
 from totelegram.store.database import db_proxy
 from totelegram.store.fields import EnumField, PydanticJSONField
-from totelegram.utils import create_md5sum_by_hashlib
+from totelegram.utils import create_md5sum_by_hashlib, get_mimetype
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +37,7 @@ class SourceFile(BaseModel):
     md5sum = cast(str, peewee.CharField(unique=True))
     size = cast(int, peewee.IntegerField())
     mtime = cast(float, peewee.FloatField())
-    mimetype = cast(str, peewee.CharField(null=True))
+    mimetype = cast(str, peewee.CharField())
 
     @property
     def path(self) -> Path:
@@ -106,19 +106,19 @@ class SourceFile(BaseModel):
             md5sum=md5sum,
             size=current_size,
             mtime=current_mtime,
+            mimetype=get_mimetype(path),
         )
         return source
 
 
 class Job(BaseModel):
     id: int
-    payloads: Generator["Payload"]
+    payloads: Generator["Payload", None, None]
 
     source = cast(SourceFile, peewee.ForeignKeyField(SourceFile))
     strategy = cast(Strategy, EnumField(Strategy))
     config = cast(StrategyConfig, PydanticJSONField(StrategyConfig))
     status = cast(JobStatus, EnumField(JobStatus))
-    created_at = peewee.DateTimeField()
 
     @property
     def path(self) -> Path:
