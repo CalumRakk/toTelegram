@@ -2,8 +2,9 @@ import logging
 from pathlib import Path
 
 from build.lib.totelegram.utils import is_excluded
+from totelegram.database import init_database
 from totelegram.enums import JobStatus
-from totelegram.models import Job, SourceFile, init_database
+from totelegram.models import Job, SourceFile
 from totelegram.services.chunking import ChunkingService
 from totelegram.services.snapshot import SnapshotService
 from totelegram.services.uploader import UploadService
@@ -11,24 +12,6 @@ from totelegram.setting import Settings
 from totelegram.telegram import telegram_client_context
 
 logger = logging.getLogger(__name__)
-
-
-def is_excluded(path: Path, settings: "Settings") -> bool:
-    """Devuelve True si el path debe ser excluido según las reglas de exclusión."""
-    logger.info(f"Comprobando path exclusion de {path=}")
-    if not path.exists():
-        logger.info(f"No existe: {path}, se omite")
-        return True
-    elif path.is_dir():
-        logger.info(f"Es un directorio: {path}, se omite")
-        return True
-    elif settings.is_excluded(path):
-        logger.info(f"Está excluido por configuración: {path}, se omite ")
-        return True
-    elif settings.is_excluded_default(path):
-        logger.info(f"Está excluido por configuración: {path}, se omite ")
-        return True
-    return False
 
 
 def upload(target: Path, settings: Settings):

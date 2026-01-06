@@ -2,6 +2,7 @@ import logging
 import lzma
 from pathlib import Path
 
+from build.lib.totelegram.uploader.parse import parse_message_json_data
 from totelegram.models import Job, Payload, RemotePayload
 from totelegram.schemas import (
     MANIFEST_VERSION,
@@ -9,8 +10,6 @@ from totelegram.schemas import (
     SourceMetadata,
     UploadManifest,
 )
-
-from .parse import parse_message_json_data
 
 logger = logging.getLogger(__name__)
 

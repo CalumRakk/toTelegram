@@ -7,27 +7,17 @@ from typing import TYPE_CHECKING, Generator, cast
 import peewee
 from playhouse.sqlite_ext import JSONField
 
+from totelegram.enums import JobStatus, Strategy
+
 if TYPE_CHECKING:
     from totelegram.setting import Settings
 
-from totelegram.enums import EnumField, JobStatus, PydanticJSONField, Strategy
+from totelegram.database import db_proxy
+from totelegram.fields import EnumField, PydanticJSONField
 from totelegram.schemas import StrategyConfig
 from totelegram.utils import create_md5sum_by_hashlib
 
 logger = logging.getLogger(__name__)
-db_proxy = peewee.Proxy()
-
-
-def init_database(settings: Settings):
-    logger.info(f"Iniciando base de datos en {settings.database_path}")
-    database = peewee.SqliteDatabase(str(settings.database_path))
-
-    db_proxy.initialize(database)
-
-    # Creamos las tablas con los nuevos modelos
-    db_proxy.create_tables([SourceFile, Job, Payload, RemotePayload], safe=True)
-    logger.info("Base de datos inicializada correctamente")
-    db_proxy.close()
 
 
 class BaseModel(peewee.Model):

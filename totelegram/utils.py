@@ -3,10 +3,32 @@ import logging
 import re
 from pathlib import Path
 from time import sleep
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from totelegram.setting import Settings
 
 import filetype
 
 logger = logging.getLogger(__name__)
+
+
+def is_excluded(path: Path, settings: "Settings") -> bool:
+    """Devuelve True si el path debe ser excluido según las reglas de exclusión."""
+    logger.info(f"Comprobando path exclusion de {path=}")
+    if not path.exists():
+        logger.info(f"No existe: {path}, se omite")
+        return True
+    elif path.is_dir():
+        logger.info(f"Es un directorio: {path}, se omite")
+        return True
+    elif settings.is_excluded(path):
+        logger.info(f"Está excluido por configuración: {path}, se omite ")
+        return True
+    elif settings.is_excluded_default(path):
+        logger.info(f"Está excluido por configuración: {path}, se omite ")
+        return True
+    return False
 
 
 def create_md5sum_by_hashlib(path: Path):
