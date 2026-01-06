@@ -2,9 +2,9 @@ import logging
 from pathlib import Path
 from typing import Optional, Tuple
 
-from totelegram.enums import Strategy
-from totelegram.models import Payload, RemotePayload
-from totelegram.setting import Settings
+from totelegram.core.enums import Strategy
+from totelegram.core.setting import Settings
+from totelegram.store.models import Payload, RemotePayload
 from totelegram.streams import open_upload_source
 
 logger = logging.getLogger(__name__)

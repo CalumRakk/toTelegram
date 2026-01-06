@@ -1,9 +1,9 @@
 import argparse
 import logging
 
+from totelegram.core.setting import get_settings
 from totelegram.logging_config import setup_logging
 from totelegram.orchestrator import upload
-from totelegram.setting import get_settings
 
 
 def run_script():

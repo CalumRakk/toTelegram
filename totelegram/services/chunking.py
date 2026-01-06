@@ -2,9 +2,9 @@ import logging
 from pathlib import Path
 from typing import List, Tuple, Union
 
-from totelegram.enums import Strategy
-from totelegram.models import Job, Payload
-from totelegram.setting import Settings
+from totelegram.core.enums import Strategy
+from totelegram.core.setting import Settings
+from totelegram.store.models import Job, Payload
 
 logger = logging.getLogger(__name__)
 

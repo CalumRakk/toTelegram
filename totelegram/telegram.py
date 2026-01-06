@@ -2,7 +2,7 @@ import locale
 import logging
 from contextlib import contextmanager
 
-from totelegram.setting import Settings
+from totelegram.core.setting import Settings
 
 _client_instance = None
 

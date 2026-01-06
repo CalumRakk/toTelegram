@@ -6,7 +6,7 @@ from time import sleep
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from totelegram.setting import Settings
+    from totelegram.core.setting import Settings
 
 import filetype
 

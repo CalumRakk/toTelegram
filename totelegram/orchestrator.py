@@ -2,13 +2,13 @@ import logging
 from pathlib import Path
 
 from build.lib.totelegram.utils import is_excluded
-from totelegram.database import init_database
-from totelegram.enums import JobStatus
-from totelegram.models import Job, SourceFile
+from totelegram.core.enums import JobStatus
+from totelegram.core.setting import Settings
 from totelegram.services.chunking import ChunkingService
 from totelegram.services.snapshot import SnapshotService
 from totelegram.services.uploader import UploadService
-from totelegram.setting import Settings
+from totelegram.store.database import init_database
+from totelegram.store.models import Job, SourceFile
 from totelegram.telegram import telegram_client_context
 
 logger = logging.getLogger(__name__)

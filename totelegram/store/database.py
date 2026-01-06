@@ -9,7 +9,7 @@ db_proxy = peewee.Proxy()
 
 
 def init_database(settings: Settings):
-    from totelegram.models import Job, Payload, RemotePayload, SourceFile
+    from totelegram.store.models import Job, Payload, RemotePayload, SourceFile
 
     logger.info(f"Iniciando base de datos en {settings.database_path}")
     database = peewee.SqliteDatabase(str(settings.database_path))

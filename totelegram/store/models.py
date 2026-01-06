@@ -12,9 +12,9 @@ from totelegram.enums import JobStatus, Strategy
 if TYPE_CHECKING:
     from totelegram.setting import Settings
 
-from totelegram.database import db_proxy
-from totelegram.fields import EnumField, PydanticJSONField
 from totelegram.schemas import StrategyConfig
+from totelegram.store.database import db_proxy
+from totelegram.store.fields import EnumField, PydanticJSONField
 from totelegram.utils import create_md5sum_by_hashlib
 
 logger = logging.getLogger(__name__)

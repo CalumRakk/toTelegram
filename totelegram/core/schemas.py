@@ -3,7 +3,7 @@ from typing import List
 
 from pydantic import BaseModel, Field
 
-from totelegram.enums import Strategy
+from totelegram.core.enums import Strategy
 
 MANIFEST_VERSION = "4.0"
 
