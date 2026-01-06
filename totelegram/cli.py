@@ -33,4 +33,5 @@ def run_script():
     if args.command == "update":
         settings = get_settings(args.env)
         setup_logging(settings.lod_path, logging.INFO)
-        upload(target=args.path, settings=settings)
+        for manifest in upload(target=args.path, settings=settings):
+            pass

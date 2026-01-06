@@ -30,16 +30,14 @@ def upload(target: Path, settings: Settings):
                 continue
             uploader = UploadService(client, settings)
             try:
-                source_asset = SourceFile.get_or_create_from_path(path)
-                job = Job.get_or_create_from_source(source_asset, settings)
+                source = SourceFile.get_or_create_from_path(path)
+                job = Job.get_or_create_from_source(source, settings)
                 if job.status == JobStatus.UPLOADED:
                     logger.info(f"Job {job.id} ya completado. Verificando snapshot...")
                     SnapshotService.generate_snapshot(job)
                     continue
 
                 payloads = chunker.process_job(job)
-
-                all_uploaded = True
                 for payload in payloads:
                     try:
                         uploader.upload_payload(payload)
@@ -48,12 +46,9 @@ def upload(target: Path, settings: Settings):
                         all_uploaded = False
                         break
 
-                if all_uploaded:
-                    job.status = JobStatus.UPLOADED
-                    job.save()
-                    snapshot = SnapshotService.generate_snapshot(job)
-                    snapshots.append(snapshot)
-                    logger.info(f"Job {job.id} finalizado con éxito.")
+                job.set_uploaded()
+                logger.info(f"Job {job.id} finalizado con éxito.")
+                yield SnapshotService.generate_snapshot(job)
 
             except Exception as e:
                 logger.error(f"Error procesando ruta {path}: {e}")

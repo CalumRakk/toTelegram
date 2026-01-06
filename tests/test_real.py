@@ -90,7 +90,7 @@ class TestSendFile(unittest.TestCase):
 
         self.target = self._create_dummy_file(1)
 
-        result = upload(target=self.target, settings=self.settings)
+        result = [i for i in upload(target=self.target, settings=self.settings)]
 
         self.assertTrue(
             len(result) > 0, "Debería haber retornado al menos un manifiesto"
@@ -130,7 +130,7 @@ class TestSendFile(unittest.TestCase):
         # Esto obligará a partirlo en 3 partes (2MB, 2MB, 1MB)
         self.settings.max_filesize_bytes = 2 * 1024 * 1024
 
-        result = upload(target=self.target, settings=self.settings)
+        result = [i for i in upload(target=self.target, settings=self.settings)]
 
         self.assertTrue(len(result) > 0)
         manifest = result[0]
@@ -163,7 +163,7 @@ class TestSendFile(unittest.TestCase):
         logger.info(f"Iniciando test de velocidad: {file_size_mb}MB a {limit_kbps}KB/s")
 
         start_time = time.time()
-        result = upload(target=dummy_path, settings=self.settings)
+        result = [i for i in upload(target=dummy_path, settings=self.settings)]
         end_time = time.time()
 
         duration = end_time - start_time

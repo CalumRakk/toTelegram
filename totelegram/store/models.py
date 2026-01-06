@@ -129,6 +129,10 @@ class Job(BaseModel):
         self.status = JobStatus.SPLITTED
         self.save(only=[Job.status, Job.updated_at])
 
+    def set_uploaded(self):
+        self.status = JobStatus.UPLOADED
+        self.save(only=[Job.status, Job.updated_at])
+
     @classmethod
     def get_or_create_from_source(
         cls, source: SourceFile, settings: "Settings"
