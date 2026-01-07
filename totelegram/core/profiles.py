@@ -26,6 +26,9 @@ class ProfileManager:
             self._save_config({"active": None, "profiles": {}})
 
     def _load_config(self) -> dict:
+        if not CONFIG_FILE.exists():
+            return {"active": None, "profiles": {}}
+
         with open(CONFIG_FILE, "r") as f:
             return json.load(f)
 
@@ -108,3 +111,12 @@ class ProfileManager:
         success, _ = unset_key(path, key)
         if not success:
             raise IOError(f"No se pudo eliminar la clave {key} en {path}")
+
+    def get_name_active_profile(self) -> Optional[str]:
+        """Devuelve el nombre del perfil activo."""
+        config = self._load_config()
+        return config.get("active")
+
+    def get_profiles_names(self) -> list[str]:
+        config = self._load_config()
+        return list(config["profiles"].keys())
