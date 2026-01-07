@@ -1,5 +1,5 @@
 import json
-from typing import List, Optional, cast, get_origin
+from typing import List, Optional, get_origin
 
 import typer
 from pydantic import ValidationError
@@ -27,10 +27,10 @@ pm = ProfileManager()
 @profile_app.command("list")
 def list_profiles():
     """Lista todos los perfiles disponibles y marca el activo."""
-    data = pm.list_profiles()
-    active = data.get("active")
-    profiles = cast(dict, data.get("profiles", {}))
 
+    registry = pm.list_profiles()
+    active = registry.active
+    profiles = registry.profiles
     if not profiles:
         console.print("[yellow]No hay perfiles configurados.[/yellow]")
         console.print("Usa [bold]totelegram profile create[/bold] para crear uno.")
@@ -94,11 +94,11 @@ def create_profile(
         )
         console.print(f"Ruta: {path}")
 
-        config = pm._load_config()
-        if config["active"] is None:
+        config = pm.list_profiles()
+        if config.active is None:
             pm.set_active(name)
             console.print(f"[green]Perfil '{name}' activado.[/green]")
-        elif config["active"] != name:
+        elif config.active != name:
             if typer.confirm("¿Deseas activar este perfil ahora?"):
                 pm.set_active(name)
                 console.print(f"[green]Perfil '{name}' activado.[/green]")
@@ -261,10 +261,10 @@ def list_options():
     try:
         path = pm.get_profile_path()
         current_settings = get_settings(path)
-        config_data = pm._load_config()
-        active_profile_name = config_data.get("active", "Desconocido")
+
+        registry = pm.list_profiles()
+        active_profile_name = registry.active or "Desconocido"
     except (ValueError, FileNotFoundError):
-        # Si no hay perfil activo, no pasa nada, current_settings se queda en None
         pass
 
     # Configurar Tabla
@@ -306,8 +306,26 @@ def list_options():
         )
 
     console.print(table)
+
+    # Sugerencia establecer valores
     console.print(
-        "\n[yellow]Usa [bold]totelegram profile set CLAVE valor[/bold] para modificar.[/yellow]"
+        "\nUsa el comando "
+        "[yellow]totelegram profile set <KEY> <VALUE>[/yellow] "
+        "para modificar una opción."
+    )
+
+    # Sugerencia para añadir valores a listas
+    console.print(
+        "\nUsa el comando "
+        "[yellow]totelegram profile add <KEY> <VALUE>[/yellow] "
+        "para agregar un elemento a una lista."
+    )
+
+    # Sugerencia para remover valores de listas
+    console.print(
+        "\nUsa el comando "
+        "[yellow]totelegram profile remove <KEY> <VALUE>[/yellow] "
+        "para remover un elemento de una lista."
     )
 
 
@@ -354,7 +372,7 @@ def add_to_list(
 
         current_list.append(value)
         try:
-            Settings.validate_single_setting(key, current_list)
+            Settings.validate_single_setting(key, current_list)  # type: ignore
         except ValidationError as e:
             console.print(f"[bold red]Error validando la lista resultante:[/bold red]")
             console.print(e)
@@ -399,7 +417,7 @@ def remove_from_list(
             return
 
         current_list.remove(value)
-        Settings.validate_single_setting(key, current_list)
+        Settings.validate_single_setting(key, current_list)  # type: ignore
 
         json_val = json.dumps(current_list)
         pm.update_setting(key, json_val, name=profile)

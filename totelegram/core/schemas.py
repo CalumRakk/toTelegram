@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import List
+from typing import Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -36,3 +36,10 @@ class StrategyConfig(BaseModel):
     max_filesize_bytes: int
     upload_limit_rate_kbps: int
     chat_id: str
+
+
+class ProfileRegistry(BaseModel):
+    """Modelo que representa el archivo config.json global de perfiles"""
+
+    active: Optional[str] = None
+    profiles: Dict[str, str] = Field(default_factory=dict)
