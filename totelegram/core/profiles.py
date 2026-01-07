@@ -3,6 +3,8 @@ import logging
 from pathlib import Path
 from typing import Dict, Optional
 
+from dotenv import dotenv_values, set_key, unset_key
+
 from totelegram.core.setting import get_user_config_dir
 
 APP_NAME = "toTelegram"
@@ -83,3 +85,26 @@ class ProfileManager:
     def profile_exists(self, name: str) -> bool:
         config = self._load_config()
         return name in config["profiles"]
+
+    def get_profile_values(
+        self, name: Optional[str] = None
+    ) -> Dict[str, Optional[str]]:
+        """Devuelve un diccionario con las claves y valores del .env del perfil."""
+        path = self.get_profile_path(name)
+        return dotenv_values(path)
+
+    def update_setting(self, key: str, value: str, name: Optional[str] = None):
+        """Actualiza o añade una clave en el .env del perfil especificado."""
+        path = self.get_profile_path(name)
+
+        # set_key escribe físicamente en el archivo .env manteniendo el formato
+        success, _, _ = set_key(path, key, value, quote_mode="never")
+        if not success:
+            raise IOError(f"No se pudo escribir en el archivo {path}")
+
+    def delete_setting(self, key: str, name: Optional[str] = None):
+        """Elimina (comenta/borra) una clave del .env."""
+        path = self.get_profile_path(name)
+        success, _ = unset_key(path, key)
+        if not success:
+            raise IOError(f"No se pudo eliminar la clave {key} en {path}")

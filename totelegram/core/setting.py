@@ -2,9 +2,9 @@ import os
 import sys
 from os import getenv
 from pathlib import Path
-from typing import List, Union, cast
+from typing import Any, Dict, List, Union, cast, get_origin
 
-from pydantic import Field, ValidationError, field_validator
+from pydantic import Field, TypeAdapter, ValidationError, field_validator
 from pydantic_settings import BaseSettings
 
 
@@ -61,6 +61,56 @@ class Settings(BaseSettings):
             return int(v)
         except (ValueError, TypeError):
             return str(v)
+
+    @classmethod
+    def get_schema_info(cls) -> List[Dict[str, str]]:
+        """
+        Retorna una lista con la metadata de cada configuración disponible.
+        Útil para mostrar ayuda al usuario.
+        """
+        info = []
+        for name, field in cls.model_fields.items():
+            type_annotation = field.annotation
+            if get_origin(type_annotation) is None:
+                type_name = type_annotation.__name__  # type: ignore
+            else:
+                type_name = str(type_annotation).replace("typing.", "")
+
+            desc = field.description or "Sin descripción"
+            default_val = field.default
+
+            # Si el default es PydanticUndefined, no mostrar nada
+            if str(default_val) == "PydanticUndefined":
+                default_val = "(Requerido)"
+
+            info.append(
+                {
+                    "key": name.upper(),
+                    "type": type_name,
+                    "description": desc,
+                    "default": str(default_val),
+                }
+            )
+        return info
+
+    @classmethod
+    def validate_single_setting(cls, key: str, value: str) -> Any:
+        """
+        Valida un solo campo simulando su inyección desde variable de entorno.
+        Lanza ValidationError si falla.
+        Retorna el valor python casteado si es correcto.
+        """
+        field_name = key.lower()
+        if field_name not in cls.model_fields:
+            raise ValueError(f"La configuración '{key}' no existe en el sistema.")
+
+        field_info = cls.model_fields[field_name]
+        target_type = field_info.annotation
+
+        adapter = TypeAdapter(target_type)
+
+        # Intentamos validar. Pydantic intentará convertir "true" a True, "123" a 123, etc.
+        return adapter.validate_python(value)
 
 
 def get_settings(env_path: Union[Path, str] = ".env") -> Settings:
