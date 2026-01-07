@@ -1,11 +1,10 @@
 import json
-from typing import List, Optional, get_origin
+from typing import List, Optional
 
 import typer
 from pydantic import ValidationError
 from rich.markup import escape
 from rich.table import Table
-from typer.models import OptionInfo
 
 from totelegram.console import console
 from totelegram.core.profiles import ProfileManager
@@ -16,18 +15,7 @@ app = typer.Typer(help="Gestión de perfiles de configuración.")
 pm = ProfileManager()
 
 
-@app.command("list")
-def list_profiles():
-    """Lista todos los perfiles disponibles y marca el activo."""
-
-    registry = pm.list_profiles()
-    active = registry.active
-    profiles = registry.profiles
-    if not profiles:
-        console.print("[yellow]No hay perfiles configurados.[/yellow]")
-        console.print("Usa [bold]totelegram profile create[/bold] para crear uno.")
-        return
-
+def _render_profiles_table(active: str, profiles: dict):
     table = Table(title="Perfiles de toTelegram")
     table.add_column("Estado", style="cyan", no_wrap=True)
     table.add_column("Nombre", style="magenta")
@@ -40,6 +28,16 @@ def list_profiles():
         table.add_row(status, f"[{style_name}]{name}[/{style_name}]", path)
 
     console.print(table)
+
+
+@app.command("list")
+def list_profiles():
+    registry = pm.list_profiles()
+    if not registry.profiles:
+        console.print("[yellow]No hay perfiles.[/yellow]")
+        return
+    assert registry.active is not None
+    _render_profiles_table(registry.active, registry.profiles)
 
 
 @app.command("create")
@@ -114,71 +112,25 @@ def use_profile(name: str):
 
 @app.command("set")
 def set_config(
-    key: str = typer.Argument(..., help="Clave a modificar (ej. MAX_FILESIZE_BYTES)"),
+    key: str = typer.Argument(..., help="Clave a modificar"),
     value: str = typer.Argument(..., help="Nuevo valor"),
-    profile: Optional[str] = typer.Option(
-        None, "--profile", "-p", help="Perfil destino (opcional)"
-    ),
+    profile: Optional[str] = typer.Option(None, "--profile", "-p"),
 ):
-    """Edita una configuración validando el tipo de dato."""
-    if pm.get_profiles_names() == []:
-        console.print("[bold red]No hay perfiles configurados.[/bold red]")
-        console.print("Usa [bold]totelegram profile create[/bold] para crear uno.")
+    """Edita una configuración."""
+    target_profile = profile or pm.get_name_active_profile()
+    if not target_profile:
+        console.print("[bold red]No hay perfil activo ni seleccionado.[/bold red]")
         return
 
     try:
-        try:
-            key = key.upper()
-            field_info = Settings.model_fields.get(key.lower())
-            val_to_validate = value
-            if field_info:
-                origin = get_origin(field_info.annotation)
-                if origin is list or origin is List:
-                    try:
-                        val_to_validate = json.loads(value)
-                    except json.JSONDecodeError:
-                        console.print(
-                            "[bold red]Error:[/bold red] Para campos tipo lista usa formato JSON."
-                        )
-                        console.print('Ejemplo: \'["*.log", "*.tmp"]\'')
-                        console.print(
-                            "O mejor usa el comando [bold]profile add[/bold]."
-                        )
-                        return
+        pm.smart_update_setting(key, value, profile_name=target_profile)
 
-            converted_val = Settings.validate_single_setting(key, val_to_validate)
-            final_storage_value = value
-            if isinstance(converted_val, list):
-                final_storage_value = json.dumps(converted_val)
-
-            if profile is None or isinstance(profile, OptionInfo):
-                profile = pm.get_name_active_profile()
-            else:
-                profile = profile
-
-            pm.update_setting(key, final_storage_value, name=profile)
-        except ValidationError as e:
-            console.print(f"[bold red]Valor inválido para {key}:[/bold red]")
-            for err in e.errors():
-                msg = err.get("msg")
-                console.print(f" - {msg}")
-            return
-        except ValueError as e:
-            console.print(f"[bold red]Error:[/bold red] {e}")
-            console.print(
-                "Ejecuta 'totelegram profile options' para ver las claves válidas."
-            )
-            return
-
-        pm.update_setting(key, value, name=profile)
-
-        target_profile = profile if profile else "activo"
         console.print(
-            f"[bold green]✔[/bold green] {key} actualizado exitosamente en perfil '{target_profile}'."
+            f"[bold green]✔[/bold green] {key.upper()} actualizado en '[cyan]{target_profile}[/cyan]'."
         )
 
-    except Exception as e:
-        console.print(f"[bold red]Error crítico:[/bold red] {e}")
+    except (ValidationError, ValueError) as e:
+        console.print(f"[bold red]Error:[/bold red] {e}")
 
 
 @app.command("options")
@@ -278,91 +230,21 @@ def _get_current_list_value(key: str, profile: Optional[str]) -> List:
 
 @app.command("add")
 def add_to_list(
-    key: str = typer.Argument(..., help="Clave de configuración (tipo lista)"),
-    value: str = typer.Argument(..., help="Valor a agregar a la lista"),
-    profile: Optional[str] = typer.Option(None, "--profile", "-p"),
+    key: str, value: str, profile: Optional[str] = typer.Option(None, "--profile", "-p")
 ):
-    """Agrega un elemento a una configuración tipo lista (ej. EXCLUDE_FILES)."""
     try:
-        key = key.upper()
-        field_info = Settings.model_fields.get(key.lower())
-        if not field_info:
-            console.print(f"[bold red]La clave {key} no existe.[/bold red]")
-            return
-
-        origin = get_origin(field_info.annotation)
-        if origin is not list and origin is not List:
-            console.print(f"[bold red]La clave {key} no es una lista.[/bold red]")
-            console.print("Usa 'totelegram profile set' para valores simples.")
-            return
-
-        current_list = _get_current_list_value(key, profile)
-        if value in current_list:
-            console.print(f"[yellow]El valor '{value}' ya existe en {key}.[/yellow]")
-            return
-
-        current_list.append(value)
-        try:
-            Settings.validate_single_setting(key, current_list)  # type: ignore
-        except ValidationError as e:
-            console.print(f"[bold red]Error validando la lista resultante:[/bold red]")
-            console.print(e)
-            return
-
-        json_val = json.dumps(current_list)
-        pm.update_setting(key, json_val, name=profile)
-
-        target_profile = profile if profile else "activo"
-        console.print(
-            f"[bold green]✔[/bold green] Agregado '{value}' a {key} en perfil '{target_profile}'."
-        )
-        console.print(f"Lista actual: {current_list}")
-
+        new_list = pm.modify_list_setting("add", key, value, profile)
+        console.print(f"[green]✔ Agregado. Lista actual: {new_list}[/green]")
     except Exception as e:
-        console.print(f"[bold red]Error crítico:[/bold red] {e}")
+        console.print(f"[red]{e}[/red]")
 
 
 @app.command("remove")
 def remove_from_list(
-    key: str = typer.Argument(..., help="Clave de configuración (tipo lista)"),
-    value: str = typer.Argument(..., help="Valor a remover de la lista"),
-    profile: Optional[str] = typer.Option(None, "--profile", "-p"),
+    key: str, value: str, profile: Optional[str] = typer.Option(None, "--profile", "-p")
 ):
-    """Remueve un elemento de una configuración tipo lista."""
-    if pm.get_profiles_names() == []:
-        console.print("[bold red]No hay perfiles configurados.[/bold red]")
-        console.print("Usa [bold]totelegram profile create[/bold] para crear uno.")
-        return
-
     try:
-        key = key.upper()
-        field_info = Settings.model_fields.get(key.lower())
-        if not field_info:
-            return
-
-        current_list = _get_current_list_value(key, profile)
-        if value not in current_list:
-            console.print(
-                f"[yellow]El valor '{value}' no está en la lista {key}.[/yellow]"
-            )
-            return
-
-        current_list.remove(value)
-        Settings.validate_single_setting(key, current_list)  # type: ignore
-
-        json_val = json.dumps(current_list)
-        pm.update_setting(key, json_val, name=profile)
-
-        console.print(f"[bold green]✔[/bold green] Removido '{value}' de {key}.")
-
+        new_list = pm.modify_list_setting("remove", key, value, profile)
+        console.print(f"[green]✔ Removido. Lista actual: {new_list}[/green]")
     except Exception as e:
-        console.print(f"[bold red]Error:[/bold red] {e}")
-
-
-def run_script():
-    """Punto de entrada para el setup.py"""
-    app()
-
-
-if __name__ == "__main__":
-    app()
+        console.print(f"[red]{e}[/red]")

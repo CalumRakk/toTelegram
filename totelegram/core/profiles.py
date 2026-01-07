@@ -1,12 +1,12 @@
 import json
 import logging
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, get_origin
 
 from dotenv import dotenv_values, set_key, unset_key
 
 from totelegram.core.schemas import ProfileRegistry
-from totelegram.core.setting import get_user_config_dir
+from totelegram.core.setting import Settings, get_user_config_dir
 
 APP_NAME = "toTelegram"
 CONFIG_DIR = Path(get_user_config_dir(APP_NAME))
@@ -118,3 +118,59 @@ class ProfileManager:
     def get_profiles_names(self) -> List[str]:
         config = self._load_config()
         return list(config.profiles.keys())
+
+    def smart_update_setting(
+        self, key: str, value: str, profile_name: Optional[str] = None
+    ):
+        """
+        Valida, convierte y guarda una configuración.
+        Lanza ValueError o ValidationError si algo falla.
+        """
+        key = key.upper()
+        field_info = Settings.model_fields.get(key.lower())
+
+        if not field_info:
+            raise ValueError(f"La clave '{key}' no es una configuración válida.")
+
+        # Detectar si esperamos una lista y el usuario pasó un JSON string
+        origin = get_origin(field_info.annotation)
+        if (origin is list or origin is List) and value.startswith("["):
+            try:
+                json_val = json.loads(value)
+                validated_val = Settings.validate_single_setting(key, json_val)
+                value_to_save = json.dumps(validated_val)
+
+            except json.JSONDecodeError:
+                raise ValueError(
+                    f"El valor para {key} debe ser una lista JSON válida (ej: '[\"*.log\"]')"
+                )
+        else:
+            # Caso normal (str, int, bool)
+            validated_val = Settings.validate_single_setting(key, value)
+            value_to_save = str(validated_val)
+
+        self.update_setting(key, value_to_save, name=profile_name)
+        return validated_val
+
+    def modify_list_setting(
+        self, action: str, key: str, value: str, profile: Optional[str] = None
+    ):
+        """
+        action: 'add' o 'remove'
+        """
+        key = key.upper()
+        current_raw = self.get_profile_values(profile).get(key)
+        current_list = json.loads(current_raw) if current_raw else []
+
+        if action == "add":
+            if value in current_list:
+                raise ValueError(f"'{value}' ya existe en {key}")
+            current_list.append(value)
+        elif action == "remove":
+            if value not in current_list:
+                raise ValueError(f"'{value}' no existe en {key}")
+            current_list.remove(value)
+
+        Settings.validate_single_setting(key, current_list)  # type: ignore
+        self.update_setting(key, json.dumps(current_list), name=profile)
+        return current_list
