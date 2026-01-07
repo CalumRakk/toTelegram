@@ -1,5 +1,6 @@
 import logging
 from pathlib import Path
+from typing import Generator
 
 from build.lib.totelegram.utils import is_excluded
 from totelegram.core.enums import JobStatus
@@ -39,12 +40,7 @@ def upload(target: Path, settings: Settings):
 
                 payloads = chunker.process_job(job)
                 for payload in payloads:
-                    try:
-                        uploader.upload_payload(payload)
-                    except Exception as e:
-                        logger.error(f"Fallo subida payload {payload.id}: {e}")
-                        all_uploaded = False
-                        break
+                    uploader.upload_payload(payload)
 
                 job.set_uploaded()
                 logger.info(f"Job {job.id} finalizado con éxito.")

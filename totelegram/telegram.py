@@ -2,6 +2,7 @@ import locale
 import logging
 from contextlib import contextmanager
 
+
 from totelegram.core.setting import Settings
 
 _client_instance = None
