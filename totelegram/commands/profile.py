@@ -43,6 +43,9 @@ def list_profiles():
 @app.command("create")
 def create_profile(
     name=typer.Argument(None, help="Nombre del perfil (ej. personal)"),
+    api_id=typer.Option(None, help="API ID", prompt=True),
+    api_hash=typer.Option(None, help="API Hash", prompt=True),
+    chat_id=typer.Option(None, help="Chat ID o Username destino", prompt=True),
 ):
     """Crea un nuevo perfil de configuración interactivamente."""
     # TODO: añadir logica para argumentos opcionales sin tener que entrar al modo interactivo.
@@ -58,19 +61,13 @@ def create_profile(
                 console.print("Operación cancelada.")
                 return
 
-        api_id = typer.prompt("API ID", type=int)
-        api_hash = typer.prompt("API Hash", type=str)
-        chat_id = typer.prompt("Chat ID o Username destino", type=str)
-
         validator = ValidationService(console)
         is_valid = validator.validate_setup(name, api_id, api_hash, chat_id)
         if not is_valid:
             console.print("\n[bold red]La validación falló.[/bold red]")
             if not typer.confirm("¿Guardar de todos modos?"):
+                console.print("Operación cancelada.")
                 return
-            console.print(
-                "[yellow]Guardando configuración inválida bajo riesgo del usuario...[/yellow]"
-            )
 
         path = pm.create_profile(
             name=name,
@@ -97,6 +94,7 @@ def create_profile(
 
     except Exception as e:
         console.print(f"[bold red]Error creando perfil:[/bold red] {e}")
+        raise typer.Exit(code=1)
 
 
 @app.command("use")
@@ -131,6 +129,7 @@ def set_config(
 
     except (ValidationError, ValueError) as e:
         console.print(f"[bold red]Error:[/bold red] {e}")
+        raise typer.Exit(code=1)
 
 
 @app.command("options")
@@ -237,6 +236,7 @@ def add_to_list(
         console.print(f"[green]✔ Agregado. Lista actual: {new_list}[/green]")
     except Exception as e:
         console.print(f"[red]{e}[/red]")
+        raise typer.Exit(code=1)
 
 
 @app.command("remove")
@@ -248,3 +248,4 @@ def remove_from_list(
         console.print(f"[green]✔ Removido. Lista actual: {new_list}[/green]")
     except Exception as e:
         console.print(f"[red]{e}[/red]")
+        raise typer.Exit(code=1)
