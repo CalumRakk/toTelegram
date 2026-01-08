@@ -25,32 +25,32 @@ class Settings(BaseSettings):
     chat_id: Union[str, int] = Field(
         ..., description="ID del chat o enlace de invitación"
     )
-
     api_hash: str = Field(
         description="Telegram API hash", default="d524b414d21f4d37f08684c1df41ac9c"
     )
     api_id: int = Field(description="Telegram API ID", default=611335)
 
-    app_name: str = "toTelegram"
-    worktable: Path = Path(get_user_config_dir(app_name)).resolve()
-    exclude_files: List[str] = []
-    exclude_files_default: List[str] = ["*.log", "*.json", "*.json.xz"]
-    database_name: str = f"{app_name}.sqlite"
-
     max_filesize_bytes: int = 2_097_152_000
     max_filename_length: int = 55
-
     upload_limit_rate_kbps: int = 0
+    exclude_files: List[str] = []
 
+    app_name: str = "toTelegram"
+    database_name: str = f"{app_name}.sqlite"
+    exclude_files_default: List[str] = ["*.log", "*.json", "*.json.xz"]
+
+    worktable: Path = Path(get_user_config_dir(app_name)).resolve()
     log_path: str = str(worktable / f"app_name.log")
 
     # ClassVar asegura que Pydantic ignore esto al validar datos.
     INTERNAL_FIELDS: ClassVar[Set[str]] = {
-        "PROFILE_NAME",
         "APP_NAME",
         "LOG_PATH",
         "DATABASE_NAME",
         "EXCLUDE_FILES_DEFAULT",
+        "PROFILE_NAME",
+        "API_HASH",
+        "API_ID",
     }
     SENSITIVE_FIELDS: ClassVar[Set[str]] = {"API_HASH", "API_ID"}
 

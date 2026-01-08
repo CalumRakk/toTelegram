@@ -18,7 +18,6 @@ __pycache__
 !/split
 !/requirements.txt
 site/
-/docs
 !config.yaml
 *.json.xz
 !video.mp4
