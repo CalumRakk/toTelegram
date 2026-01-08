@@ -8,8 +8,8 @@ from dotenv import dotenv_values, set_key, unset_key
 from totelegram.core.schemas import ProfileRegistry
 from totelegram.core.setting import Settings, get_user_config_dir
 
-APP_NAME = "toTelegram"
-CONFIG_DIR = Path(get_user_config_dir(APP_NAME))
+APP_session_name = "toTelegram"
+CONFIG_DIR = Path(get_user_config_dir(APP_session_name))
 PROFILES_DIR = CONFIG_DIR / "profiles"
 CONFIG_FILE = CONFIG_DIR / "config.json"
 
@@ -43,37 +43,37 @@ class ProfileManager:
         with open(CONFIG_FILE, "w") as f:
             f.write(config.model_dump_json(indent=4))
 
-    def create_profile(self, name: str, api_id, api_hash, chat_id) -> Path:
+    def create_profile(self, profile_name: str, api_id, api_hash, chat_id) -> Path:
         """Crea un archivo .env físico y lo registra."""
         env_content = (
             f"API_ID={api_id}\n"
             f"API_HASH={api_hash}\n"
             f"CHAT_ID={chat_id}\n"
-            f"SESSION_NAME={name}\n"
+            f"profile_name={profile_name}\n"
         )
 
-        file_path = PROFILES_DIR / f"{name}.env"
+        file_path = PROFILES_DIR / f"{profile_name}.env"
         with open(file_path, "w") as f:
             f.write(env_content)
 
         config = self._load_config()
-        config.profiles[name] = str(file_path)
+        config.profiles[profile_name] = str(file_path)
         self._save_config(config)
 
         return file_path
 
-    def set_active(self, name: str):
+    def set_active(self, profile_name: str):
         config = self._load_config()
-        if name not in config.profiles:
-            raise ValueError(f"El perfil '{name}' no existe.")
+        if profile_name not in config.profiles:
+            raise ValueError(f"El perfil '{profile_name}' no existe.")
 
-        config.active = name
+        config.active = profile_name
         self._save_config(config)
 
-    def get_profile_path(self, name: Optional[str] = None) -> Path:
+    def get_profile_path(self, profile_name: Optional[str] = None) -> Path:
         config = self._load_config()
 
-        target = name if name else config.active
+        target = profile_name if profile_name else config.active
 
         if not target:
             raise ValueError(
@@ -89,24 +89,24 @@ class ProfileManager:
         """Devuelve el objeto tipado en lugar de un dict."""
         return self._load_config()
 
-    def profile_exists(self, name: str) -> bool:
+    def profile_exists(self, profile_name: str) -> bool:
         config = self._load_config()
-        return name in config.profiles
+        return profile_name in config.profiles
 
     def get_profile_values(
-        self, name: Optional[str] = None
+        self, profile_name: Optional[str] = None
     ) -> Dict[str, Optional[str]]:
-        path = self.get_profile_path(name)
+        path = self.get_profile_path(profile_name)
         return dotenv_values(path)
 
-    def update_setting(self, key: str, value: str, name: Optional[str] = None):
-        path = self.get_profile_path(name)
+    def update_setting(self, key: str, value: str, profile_name: Optional[str] = None):
+        path = self.get_profile_path(profile_name)
         success, _, _ = set_key(path, key, value, quote_mode="never")
         if not success:
             raise IOError(f"No se pudo escribir en el archivo {path}")
 
-    def delete_setting(self, key: str, name: Optional[str] = None):
-        path = self.get_profile_path(name)
+    def delete_setting(self, key: str, profile_name: Optional[str] = None):
+        path = self.get_profile_path(profile_name)
         success, _ = unset_key(path, key)
         if not success:
             raise IOError(f"No se pudo eliminar la clave {key} en {path}")
@@ -115,7 +115,7 @@ class ProfileManager:
         config = self._load_config()
         return config.active
 
-    def get_profiles_names(self) -> List[str]:
+    def get_profiles_session_names(self) -> List[str]:
         config = self._load_config()
         return list(config.profiles.keys())
 
@@ -127,8 +127,12 @@ class ProfileManager:
         Lanza ValueError o ValidationError si algo falla.
         """
         key = key.upper()
-        field_info = Settings.model_fields.get(key.lower())
+        if key in Settings.INTERNAL_FIELDS:
+            raise ValueError(
+                f"La configuración '{key}' es interna o de sistema y no puede modificarse manualmente."
+            )
 
+        field_info = Settings.model_fields.get(key.lower())
         if not field_info:
             raise ValueError(f"La clave '{key}' no es una configuración válida.")
 
@@ -149,7 +153,7 @@ class ProfileManager:
             validated_val = Settings.validate_single_setting(key, value)
             value_to_save = str(validated_val)
 
-        self.update_setting(key, value_to_save, name=profile_name)
+        self.update_setting(key, value_to_save, profile_name=profile_name)
         return validated_val
 
     def modify_list_setting(
@@ -172,5 +176,5 @@ class ProfileManager:
             current_list.remove(value)
 
         Settings.validate_single_setting(key, current_list)  # type: ignore
-        self.update_setting(key, json.dumps(current_list), name=profile)
+        self.update_setting(key, json.dumps(current_list), profile_name=profile)
         return current_list

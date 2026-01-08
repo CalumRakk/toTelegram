@@ -13,7 +13,9 @@ class TestJobLogic(unittest.TestCase):
         db_proxy.initialize(self.test_db)
         db_proxy.create_tables([SourceFile, Job])
 
-        self.settings = Settings(chat_id=123, max_filesize_bytes=100)
+        self.settings = Settings(
+            profile_name="test", chat_id=123, max_filesize_bytes=100
+        )
 
     def tearDown(self):
         self.test_db.close()

@@ -42,27 +42,30 @@ def list_profiles():
 
 @app.command("create")
 def create_profile(
-    name=typer.Argument(None, help="Nombre del perfil (ej. personal)"),
-    api_id=typer.Option(None, help="API ID", prompt=True),
-    api_hash=typer.Option(None, help="API Hash", prompt=True),
-    chat_id=typer.Option(None, help="Chat ID o Username destino", prompt=True),
+    profile_name: str = typer.Argument(..., help="Nombre del perfil (ej. personal)"),
+    api_id: int = typer.Option(..., help="API ID", prompt=True),
+    api_hash: str = typer.Option(..., help="API Hash", prompt=True),
+    chat_id: str = typer.Option(
+        ..., help="Chat ID o Usersession_name destino", prompt=True
+    ),
 ):
     """Crea un nuevo perfil de configuración interactivamente."""
-    # TODO: añadir logica para argumentos opcionales sin tener que entrar al modo interactivo.
     try:
-        if name is None:
-            name = typer.prompt("Nombre del perfil (ej. personal)", type=str)
+        if profile_name is None:
+            profile_name = typer.prompt("Nombre del perfil (ej. personal)", type=str)
 
-        if pm.profile_exists(name):
-            console.print(f"[bold red]El perfil '{name}' ya existe.[/bold red]")
+        if pm.profile_exists(profile_name):
+            console.print(f"[bold red]El perfil '{profile_name}' ya existe.[/bold red]")
             if typer.confirm("¿Deseas sobreescribirlo?"):
-                console.print(f"[yellow]Sobrescribiendo el perfil '{name}'...[/yellow]")
+                console.print(
+                    f"[yellow]Sobrescribiendo el perfil '{profile_name}'...[/yellow]"
+                )
             else:
                 console.print("Operación cancelada.")
                 return
 
         validator = ValidationService(console)
-        is_valid = validator.validate_setup(name, api_id, api_hash, chat_id)
+        is_valid = validator.validate_setup(profile_name, api_id, api_hash, chat_id)
         if not is_valid:
             console.print("\n[bold red]La validación falló.[/bold red]")
             if not typer.confirm("¿Guardar de todos modos?"):
@@ -70,27 +73,27 @@ def create_profile(
                 return
 
         path = pm.create_profile(
-            name=name,
+            profile_name=profile_name,
             api_id=api_id,
             api_hash=api_hash,
             chat_id=chat_id,
         )
 
         console.print(
-            f"\n[bold green]✔ Perfil '{name}' guardado exitosamente![/bold green]"
+            f"\n[bold green]✔ Perfil '{profile_name}' guardado exitosamente![/bold green]"
         )
         console.print(f"Ruta: {path}")
 
         config = pm.list_profiles()
         if config.active is None:
-            pm.set_active(name)
-            console.print(f"[green]Perfil '{name}' activado.[/green]")
-        elif config.active != name:
+            pm.set_active(profile_name)
+            console.print(f"[green]Perfil '{profile_name}' activado.[/green]")
+        elif config.active != profile_name:
             if typer.confirm("¿Deseas activar este perfil ahora?"):
-                pm.set_active(name)
-                console.print(f"[green]Perfil '{name}' activado.[/green]")
+                pm.set_active(profile_name)
+                console.print(f"[green]Perfil '{profile_name}' activado.[/green]")
         else:
-            console.print(f"[green]Perfil '{name}' activo.[/green]")
+            console.print(f"[green]Perfil '{profile_name}' activo.[/green]")
 
     except Exception as e:
         console.print(f"[bold red]Error creando perfil:[/bold red] {e}")
@@ -98,11 +101,13 @@ def create_profile(
 
 
 @app.command("use")
-def use_profile(name: str):
+def use_profile(profile_name: str):
     """Cambia el perfil activo."""
     try:
-        pm.set_active(name)
-        console.print(f"[bold green]✔ Ahora usando el perfil: {name}[/bold green]")
+        pm.set_active(profile_name)
+        console.print(
+            f"[bold green]✔ Ahora usando el perfil: {profile_name}[/bold green]"
+        )
     except ValueError as e:
         console.print(f"[bold red]Error:[/bold red] {e}")
         list_profiles()
@@ -115,16 +120,16 @@ def set_config(
     profile: Optional[str] = typer.Option(None, "--profile", "-p"),
 ):
     """Edita una configuración."""
-    target_profile = profile or pm.get_name_active_profile()
-    if not target_profile:
+    profile_name = profile or pm.get_name_active_profile()
+    if not profile_name:
         console.print("[bold red]No hay perfil activo ni seleccionado.[/bold red]")
         return
 
     try:
-        pm.smart_update_setting(key, value, profile_name=target_profile)
+        pm.smart_update_setting(key, value, profile_name=profile_name)
 
         console.print(
-            f"[bold green]✔[/bold green] {key.upper()} actualizado en '[cyan]{target_profile}[/cyan]'."
+            f"[bold green]✔[/bold green] {key.upper()} actualizado en '[cyan]{profile_name}[/cyan]'."
         )
 
     except (ValidationError, ValueError) as e:
@@ -161,14 +166,14 @@ def list_options():
     table.add_column("Descripción", style="white")
 
     # Campos que preferimos censurar visualmente
-    SENSITIVE_KEYS = ["API_HASH"]
     for item in schema:
         key = item["key"]
 
         current_val_str = "-"
         if current_settings:
             val = getattr(current_settings, key.lower(), None)
-            if key in SENSITIVE_KEYS and val:
+            if key in Settings.SENSITIVE_FIELDS and val:
+                val = str(val)
                 current_val_str = val[:3] + "•" * (len(str(val)) - 4) + val[-3:]
             else:
                 current_val_str = str(val)

@@ -2,7 +2,7 @@ import os
 import sys
 from os import getenv
 from pathlib import Path
-from typing import Any, Dict, List, Union, cast, get_origin
+from typing import Any, ClassVar, Dict, List, Set, Union, cast, get_origin
 
 from pydantic import Field, TypeAdapter, ValidationError, field_validator
 from pydantic_settings import BaseSettings
@@ -21,14 +21,15 @@ def get_user_config_dir(app_name: str) -> Path:
 
 
 class Settings(BaseSettings):
+    profile_name: str = Field(description="Nombre de la sesión")
+    chat_id: Union[str, int] = Field(
+        ..., description="ID del chat o enlace de invitación"
+    )
+
     api_hash: str = Field(
         description="Telegram API hash", default="d524b414d21f4d37f08684c1df41ac9c"
     )
     api_id: int = Field(description="Telegram API ID", default=611335)
-    session_name: str = "me"
-    chat_id: Union[str, int] = Field(
-        ..., description="ID del chat o enlace de invitación"
-    )
 
     app_name: str = "toTelegram"
     worktable: Path = Path(get_user_config_dir(app_name)).resolve()
@@ -41,7 +42,17 @@ class Settings(BaseSettings):
 
     upload_limit_rate_kbps: int = 0
 
-    lod_path: str = str(worktable / f"app_name.log")
+    log_path: str = str(worktable / f"app_name.log")
+
+    # ClassVar asegura que Pydantic ignore esto al validar datos.
+    INTERNAL_FIELDS: ClassVar[Set[str]] = {
+        "PROFILE_NAME",
+        "APP_NAME",
+        "LOG_PATH",
+        "DATABASE_NAME",
+        "EXCLUDE_FILES_DEFAULT",
+    }
+    SENSITIVE_FIELDS: ClassVar[Set[str]] = {"API_HASH", "API_ID"}
 
     @property
     def database_path(self) -> Path:
@@ -70,6 +81,9 @@ class Settings(BaseSettings):
         """
         info = []
         for name, field in cls.model_fields.items():
+            if name.upper() in cls.INTERNAL_FIELDS:
+                continue
+
             type_annotation = field.annotation
             if get_origin(type_annotation) is None:
                 type_name = type_annotation.__name__  # type: ignore

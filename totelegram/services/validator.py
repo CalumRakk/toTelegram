@@ -29,7 +29,7 @@ class ValidationService:
         self.console = console
 
     def validate_setup(
-        self, session_name: str, api_id: int, api_hash: str, target_chat_id: str
+        self, profile_name: str, api_id: int, api_hash: str, target_chat_id: str
     ) -> bool:
         """Flujo principal de validación."""
 
@@ -37,11 +37,11 @@ class ValidationService:
         workdir.mkdir(parents=True, exist_ok=True)
 
         self.console.print(
-            f"\n[bold blue]Iniciando validación para '{session_name}'...[/bold blue]"
+            f"\n[bold blue]Iniciando validación para '{profile_name}'...[/bold blue]"
         )
 
         client = Client(
-            name=session_name,
+            name=profile_name,
             api_id=api_id,
             api_hash=api_hash,
             workdir=str(workdir),

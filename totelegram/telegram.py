@@ -2,7 +2,6 @@ import locale
 import logging
 from contextlib import contextmanager
 
-
 from totelegram.core.setting import Settings
 
 _client_instance = None
@@ -46,7 +45,7 @@ def init_telegram_client(settings: Settings):
         iso639 = lang.split("_")[0]
 
     client = Client(
-        settings.session_name,
+        settings.profile_name,
         api_id=settings.api_id,
         api_hash=settings.api_hash,
         workdir=str(settings.worktable),
