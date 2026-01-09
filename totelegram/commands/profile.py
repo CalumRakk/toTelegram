@@ -275,11 +275,14 @@ def _get_current_list_value(key: str, profile: Optional[str]) -> List:
         return []
 
     try:
-        return json.loads(raw_val)
+        val = json.loads(raw_val)
+        if not isinstance(val, list):
+            return [str(val)]
+        return val
     except json.JSONDecodeError:
-        # Si por alguna razón no es JSON válido (ej: legacy o error manual),
-        # intentamos tratarlo como un único valor en una lista o devolvemos vacío
-        return [raw_val]
+        if "," in raw_val:
+            return [x.strip() for x in raw_val.split(",") if x.strip()]
+        return [raw_val.strip()]
 
 
 def print_tip_exclude_files(console: Console):
