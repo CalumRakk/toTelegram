@@ -1,9 +1,13 @@
 import json
+import os
 from typing import List, Optional
 
 import typer
 from pydantic import ValidationError
+from rich.console import Console
+from rich.markdown import Markdown
 from rich.markup import escape
+from rich.panel import Panel
 from rich.table import Table
 
 from totelegram.console import console
@@ -232,25 +236,163 @@ def _get_current_list_value(key: str, profile: Optional[str]) -> List:
         return [raw_val]
 
 
+def print_tip_exclude_files(console: Console):
+    help_text = """
+**Guía de Exclusión (Estilo Git)**
+
+- **Extensiones:** `*.jpg` ignora todos los archivos JPG.
+- **Carpetas:** `node_modules` ignora la carpeta y **todo su contenido**.
+- **Recursivo:** `**/temp` busca carpetas 'temp' en cualquier profundidad.
+    """
+    console.print(
+        Panel(
+            Markdown(help_text),
+            title="Información sobre Exclusiones",
+            border_style="blue",
+            expand=False,
+        )
+    )
+
+
+def print_warning_exclusion_files(console: Console):
+    # detectar si esta en windows
+    is_windows = os.name == "nt"
+    help_text = f"""
+
+Parece que usaste un asterisco al inicio de la exclusion, algo como `*.jpg` {'o `"*.jpg"` en Windows' if is_windows else ''}.
+
+Las terminales suelen expandir los asteriscos antes de que lleguen al programa.
+Para guardar el **patrón** y evitar que se agreguen archivos sueltos, usa comillas:
+
+- **Linux/Mac/PowerShell:** `"*.jpg"`
+- **Windows CMD:** `'*.jpg'` (Comillas simples)
+    """
+    console.print(
+        Panel(
+            Markdown(help_text),
+            title="Expansion de asterisco detectada",
+            border_style="yellow",
+            expand=False,
+        )
+    )
+
+
 @app.command("add")
 def add_to_list(
-    key: str, value: str, profile: Optional[str] = typer.Option(None, "--profile", "-p")
+    key: str = typer.Argument(..., help="Clave de la lista (ej: EXCLUDE_FILES)"),
+    values: List[str] = typer.Argument(
+        ..., help="Valores a agregar (separados por espacio)"
+    ),
+    profile: Optional[str] = typer.Option(None, "--profile", "-p"),
+    force: bool = typer.Option(
+        False, "--yes", "-y", help="Omitir confirmación interactiva"
+    ),
 ):
+    """
+    Agrega elementos a una lista de configuración.
+
+    Ejemplo: totelegram profile add EXCLUDE_FILES "*.jpg" "*.png" --yes
+    """
+
+    # Normalización y Limpieza
+    cleaned_values = []
+    for val in values:
+        # Soportar comas si el usuario las usó
+        if "," in val:
+            items = val.split(",")
+        else:
+            items = [val]
+
+        for item in items:
+            clean = item.strip()
+            clean = clean.strip("'").strip('"')
+
+            if clean:
+                cleaned_values.append(clean)
+
+    if not cleaned_values:
+        console.print("[yellow]No se proporcionaron valores válidos.[/yellow]")
+        raise typer.Exit()
+
+    # Tip educativo sobre como excluir
+    if key.upper() == "EXCLUDE_FILES" and not force:
+        print_tip_exclude_files(console)
+
+    if not force:
+        # Heurística: si hay muchos valores y ninguno tiene "*", puede ser expansión de shell
+        looks_like_expansion = len(cleaned_values) > 1 and all(
+            "*" not in v for v in cleaned_values
+        )
+
+        if looks_like_expansion:
+            print_warning_exclusion_files(console)
+
+        console.print()
+
+        table = Table(
+            title=f"Previsualización: Agregar a {key.upper()}",
+            expand=True,
+            title_style="bold magenta",
+        )
+        table.add_column("Valor Final", style="cyan")
+
+        MAX_PREVIEW = 5
+        total_items = len(cleaned_values)
+        for i, v in enumerate(cleaned_values):
+            if i >= MAX_PREVIEW:
+                remaining = total_items - i
+                table.add_row(
+                    f"[italic yellow]... y {remaining} elementos más ...[/italic yellow]",
+                )
+                break
+
+            table.add_row(v)
+
+        console.print(table)
+
+        if not typer.confirm("\n¿Confirmas agregar estos valores?"):
+            console.print("[red]Operación cancelada.[/red]")
+            raise typer.Exit(code=1)
+
     try:
-        new_list = pm.modify_list_setting("add", key, value, profile)
-        console.print(f"[green]✔ Agregado. Lista actual: {new_list}[/green]")
+        new_list = pm.modify_list_setting("add", key, cleaned_values, profile)
+        console.print(f"[green]✔ Agregados {len(cleaned_values)} elementos.[/green]")
+        console.print(f"Lista actual: {new_list}")
     except Exception as e:
-        console.print(f"[red]{e}[/red]")
+        console.print(f"[bold red]Error:[/bold red] {e}")
         raise typer.Exit(code=1)
 
 
 @app.command("remove")
 def remove_from_list(
-    key: str, value: str, profile: Optional[str] = typer.Option(None, "--profile", "-p")
+    key: str = typer.Argument(..., help="Clave de la lista"),
+    values: List[str] = typer.Argument(..., help="Valores a remover"),
+    profile: Optional[str] = typer.Option(None, "--profile", "-p"),
+    force: bool = typer.Option(False, "--yes", "-y", help="Omitir confirmación"),
 ):
+    """
+    Remueve elementos de una lista de configuración.
+    """
+    cleaned_values = []
+    for val in values:
+        if "," in val:
+            items = val.split(",")
+            cleaned_values.extend([item.strip() for item in items if item.strip()])
+        else:
+            cleaned_values.append(val.strip())
+
+    if not force:
+        console.print(f"Se removerán los siguientes valores de [bold]{key}[/bold]:")
+        for v in cleaned_values:
+            console.print(f" - [red]{v}[/red]")
+
+        if not typer.confirm("¿Continuar?"):
+            console.print("Operación cancelada.")
+            raise typer.Exit(code=1)
+
     try:
-        new_list = pm.modify_list_setting("remove", key, value, profile)
-        console.print(f"[green]✔ Removido. Lista actual: {new_list}[/green]")
+        new_list = pm.modify_list_setting("remove", key, cleaned_values, profile)
+        console.print(f"[green]✔ Removidos. Lista actual: {new_list}[/green]")
     except Exception as e:
-        console.print(f"[red]{e}[/red]")
+        console.print(f"[bold red]Error:[/bold red] {e}")
         raise typer.Exit(code=1)

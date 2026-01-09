@@ -1,7 +1,7 @@
 import json
 import logging
 from pathlib import Path
-from typing import Dict, List, Optional, get_origin
+from typing import Dict, List, Literal, Optional, get_origin
 
 from dotenv import dotenv_values, set_key, unset_key
 
@@ -157,23 +157,28 @@ class ProfileManager:
         return validated_val
 
     def modify_list_setting(
-        self, action: str, key: str, value: str, profile: Optional[str] = None
+        self,
+        action: Literal["add", "remove"],
+        key: str,
+        values: List[str],
+        profile: Optional[str] = None,
     ):
-        """
-        action: 'add' o 'remove'
-        """
         key = key.upper()
         current_raw = self.get_profile_values(profile).get(key)
-        current_list = json.loads(current_raw) if current_raw else []
+        try:
+            current_list = json.loads(current_raw) if current_raw else []
+        except json.JSONDecodeError:
+            current_list = [current_raw] if current_raw else []
 
         if action == "add":
-            if value in current_list:
-                raise ValueError(f"'{value}' ya existe en {key}")
-            current_list.append(value)
+            for val in values:
+                if val not in current_list:
+                    current_list.append(val)
+
         elif action == "remove":
-            if value not in current_list:
-                raise ValueError(f"'{value}' no existe en {key}")
-            current_list.remove(value)
+            for val in values:
+                if val in current_list:
+                    current_list.remove(val)
 
         Settings.validate_single_setting(key, current_list)  # type: ignore
         self.update_setting(key, json.dumps(current_list), profile_name=profile)

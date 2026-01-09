@@ -33,7 +33,10 @@ class Settings(BaseSettings):
     max_filesize_bytes: int = 2_097_152_000
     max_filename_length: int = 55
     upload_limit_rate_kbps: int = 0
-    exclude_files: List[str] = []
+    exclude_files: List[str] = Field(
+        default=[],
+        description="Patrones (glob). Ej: '*.log', 'node_modules' (ignora contenido), 'src/*.tmp'.",
+    )
 
     app_name: str = "toTelegram"
     database_name: str = f"{app_name}.sqlite"
@@ -41,6 +44,8 @@ class Settings(BaseSettings):
 
     worktable: Path = Path(get_user_config_dir(app_name)).resolve()
     log_path: str = str(worktable / f"app_name.log")
+
+    # TODO: agrega un default que impida subir archivo muy pequeños.
 
     # ClassVar asegura que Pydantic ignore esto al validar datos.
     INTERNAL_FIELDS: ClassVar[Set[str]] = {
@@ -59,8 +64,25 @@ class Settings(BaseSettings):
         return self.worktable / self.database_name
 
     def is_excluded(self, path: Path) -> bool:
-        """Devuelve True si el archivo coincide con algún patrón de exclusión."""
-        return any(path.match(pattern) for pattern in self.exclude_files)
+        """
+        Devuelve True si el archivo o alguna de sus carpetas padre
+        coincide con los patrones de exclusión.
+        """
+        if not self.exclude_files:
+            return False
+
+        for pattern in self.exclude_files:
+            # Para coincidencia directa (archivo o carpeta exacta)
+            if path.match(pattern):
+                return True
+
+            # Para coincidencia recursiva (si una carpeta padre está excluida)
+            for parent in path.parents:
+                if str(parent) == ".":
+                    break
+                if parent.match(pattern):
+                    return True
+        return False
 
     def is_excluded_default(self, path: Path) -> bool:
         """Devuelve True si el archivo coincide con algún patrón de exclusión."""
