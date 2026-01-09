@@ -20,6 +20,51 @@ app = typer.Typer(help="Gestión de perfiles de configuración.")
 pm = ProfileManager()
 
 
+def _normalize_input_values(values: List[str]) -> List[str]:
+    """
+    Convierte inputs sucios (con comas, comillas, espacios) en una lista limpia.
+    Ej: ['"a, b"', 'c'] -> ['a', 'b', 'c']
+    """
+    cleaned = []
+    for val in values:
+        # Soportar comas internas
+        items = val.split(",") if "," in val else [val]
+        for item in items:
+            # Quitar comillas de shell y espacios
+            clean = item.strip().strip("'").strip('"')
+            if clean:
+                cleaned.append(clean)
+    return cleaned
+
+
+def _check_shell_expansion(values: List[str], console: Console) -> bool:
+    """
+    Detecta si la shell expandió un asterisco y muestra advertencia.
+    Retorna True si parece haber expansión.
+    """
+    if len(values) > 1 and all("*" not in v for v in values):
+        print_warning_exclusion_files(console)
+        return True
+    return False
+
+
+def _render_preview_table(title: str, rows: List[str], style: str = "cyan"):
+    """Renderiza una tabla simple de previsualización."""
+    table = Table(title=title, expand=True, title_style="bold magenta")
+    table.add_column("Valor", style=style)
+
+    MAX_PREVIEW = 5
+    for i, v in enumerate(rows):
+        if i >= MAX_PREVIEW:
+            table.add_row(
+                f"[italic yellow]... y {len(rows) - i} más ...[/italic yellow]"
+            )
+            break
+        table.add_row(v)
+
+    console.print(table)
+
+
 def _render_profiles_table(active: str, profiles: dict):
     table = Table(title="Perfiles de toTelegram")
     table.add_column("Estado", style="cyan", no_wrap=True)
@@ -281,76 +326,25 @@ Para evitar que el patrón se interprete y termine afectando archivos individual
 @app.command("add")
 def add_to_list(
     key: str = typer.Argument(..., help="Clave de la lista (ej: EXCLUDE_FILES)"),
-    values: List[str] = typer.Argument(
-        ..., help="Valores a agregar (separados por espacio)"
-    ),
+    values: List[str] = typer.Argument(..., help="Valores a agregar"),
     profile: Optional[str] = typer.Option(None, "--profile", "-p"),
-    force: bool = typer.Option(
-        False, "--yes", "-y", help="Omitir confirmación interactiva"
-    ),
+    force: bool = typer.Option(False, "--yes", "-y", help="Omitir confirmación"),
 ):
-    """
-    Agrega elementos a una lista de configuración.
+    """Agrega elementos a una lista de configuración."""
 
-    Ejemplo: totelegram profile add EXCLUDE_FILES "*.jpg" "*.png" --yes
-    """
-
-    # Normalización y Limpieza
-    cleaned_values = []
-    for val in values:
-        # Soportar comas si el usuario las usó
-        if "," in val:
-            items = val.split(",")
-        else:
-            items = [val]
-
-        for item in items:
-            clean = item.strip()
-            clean = clean.strip("'").strip('"')
-
-            if clean:
-                cleaned_values.append(clean)
-
+    cleaned_values = _normalize_input_values(values)
     if not cleaned_values:
         console.print("[yellow]No se proporcionaron valores válidos.[/yellow]")
         raise typer.Exit()
 
-    # Tip educativo sobre como excluir
     if key.upper() == "EXCLUDE_FILES" and not force:
         print_tip_exclude_files(console)
+        _check_shell_expansion(cleaned_values, console)
 
     if not force:
-        # Heurística: si hay muchos valores y ninguno tiene "*", puede ser expansión de shell
-        looks_like_expansion = len(cleaned_values) > 1 and all(
-            "*" not in v for v in cleaned_values
+        _render_preview_table(
+            f"Previsualización: Agregar a {key.upper()}", cleaned_values
         )
-
-        if looks_like_expansion:
-            print_warning_exclusion_files(console)
-
-        console.print()
-
-        table = Table(
-            title=f"Previsualización: Agregar a {key.upper()}",
-            expand=True,
-            title_style="bold magenta",
-        )
-        table.add_column("Valor Final", style="cyan")
-
-        MAX_PREVIEW = 5
-        total_items = len(cleaned_values)
-        for i, v in enumerate(cleaned_values):
-            if i >= MAX_PREVIEW:
-                remaining = total_items - i
-                table.add_row(
-                    f"[italic yellow]... y {remaining} elementos más ...[/italic yellow]",
-                )
-                break
-
-            table.add_row(v)
-
-        console.print(table)
-
         if not typer.confirm("\n¿Confirmas agregar estos valores?"):
             console.print("[red]Operación cancelada.[/red]")
             raise typer.Exit(code=1)
@@ -371,105 +365,59 @@ def remove_from_list(
     profile: Optional[str] = typer.Option(None, "--profile", "-p"),
     force: bool = typer.Option(False, "--yes", "-y", help="Omitir confirmación"),
 ):
-    """
-    Remueve elementos de una lista de configuración.
-    """
-    looks_like_expansion = False
-    cleaned_values = []
-    for val in values:
-        if "," in val:
-            items = val.split(",")
-        else:
-            items = [val]
+    """Remueve elementos de una lista de configuración."""
 
-        for item in items:
-            clean = item.strip().strip("'").strip('"')
-            if clean:
-                cleaned_values.append(clean)
-
+    cleaned_values = _normalize_input_values(values)
     if not cleaned_values:
         console.print("[yellow]No se proporcionaron valores válidos.[/yellow]")
         raise typer.Exit()
-
-    if not force:
-        looks_like_expansion = len(cleaned_values) > 1 and all(
-            "*" not in v for v in cleaned_values
-        )
-        if looks_like_expansion:
-            print_warning_exclusion_files(console)
-            console.print(
-                "[yellow]Nota: Si la terminal expandió el asterisco, es probable que "
-                "los archivos resultantes no coincidan con la regla guardada en la configuración.[/yellow]\n"
-            )
 
     try:
         current_list = _get_current_list_value(key.upper(), profile)
     except Exception:
         current_list = []
 
-    to_remove = []
-    not_found = []
-
-    for val in cleaned_values:
-        # TODO: ADVERTENCIA, si el usuario tiene *.JPG y especifica *.jpg, no lo va a encontrar
-        if val in current_list:
-            to_remove.append(val)
-        else:
-            not_found.append(val)
+    to_remove = [v for v in cleaned_values if v in current_list]
+    not_found = [v for v in cleaned_values if v not in current_list]
 
     if not force:
-        console.print(Rule(style="white"))
+        looks_like_expansion = _check_shell_expansion(cleaned_values, console)
 
-        # Mostrar lo que NO se encontró (útil para confirmar la expansión errónea)
-        title = f"Previsualización: Eliminar de {key.upper()}"
         if not_found:
-            table_missing = Table(
-                title=title,
-                title_style="bold magenta",
-                expand=True,
+            console.print(Rule(style="white"))
+            _render_preview_table(
+                "No encontrados (No se eliminarán)", not_found, style="dim white"
             )
-            table_missing.add_column(
-                "Ninguno de estos a eliminar coincide con la configuración actual",
-                justify="center",
-                header_style="bold red",
-            )
-            for val in not_found:
-                table_missing.add_row(val)
-            console.print(table_missing)
-            console.print()
 
         if not to_remove:
-            console.print(f"Lista de la configuración actual: {current_list}\n")
-
+            console.print(
+                f"\n[yellow]Ninguno de los valores coincide con la configuración actual.[/yellow]"
+            )
+            console.print(f"Lista actual: {current_list}")
             if looks_like_expansion:
                 is_windows = os.name == "nt"
-                solution = "'*.log'" if is_windows else '"*.log"'
+                tip = "'*.log'" if is_windows else '"*.log"'
                 console.print(
-                    f"\n[bold yellow]Posible solución:[/bold yellow] Intenta poner el valor entre comillas, ej: [green]{solution}[/green]"
+                    f"\n[bold yellow]Tip:[/bold yellow] Intenta usar comillas: {tip}"
                 )
-
             raise typer.Exit(code=1)
 
-        table_remove = Table(title=title, title_style="bold magenta", expand=True)
-        table_remove.add_column(
-            "Valores a eliminar", justify="center", header_style="bold red"
+        _render_preview_table(
+            f"Encontrados (Se eliminarán) de {key.upper()}", to_remove, style="red"
         )
-        for val in to_remove:
-            table_remove.add_row(val)
-        console.print(table_remove)
 
         if not typer.confirm("\n¿Confirmas eliminar estos valores?"):
             console.print("[red]Operación cancelada.[/red]")
             raise typer.Exit(code=1)
 
-    if to_remove:
-        try:
+    try:
+        if to_remove:
             new_list = pm.modify_list_setting("remove", key, to_remove, profile)
             console.print(f"[green]✔ Removidos {len(to_remove)} elementos.[/green]")
             console.print(f"Lista actual: {new_list}")
-        except Exception as e:
-            console.print(f"[bold red]Error:[/bold red] {e}")
-            raise typer.Exit(code=1)
-    else:
-        # Caso raro donde force=True pero no coinciden valores
-        console.print("[yellow]No se encontraron coincidencias para eliminar.[/yellow]")
+        else:
+            console.print("[yellow]Nada que eliminar.[/yellow]")
+
+    except Exception as e:
+        console.print(f"[bold red]Error:[/bold red] {e}")
+        raise typer.Exit(code=1)
