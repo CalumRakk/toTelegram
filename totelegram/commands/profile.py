@@ -411,7 +411,7 @@ def remove_from_list(
     not_found = []
 
     for val in cleaned_values:
-        # TODO: ADVERTENCIA comporacion exacta, si el usuario tiene *.JP y especifica *.jpg, no lo va a encontrar
+        # TODO: ADVERTENCIA, si el usuario tiene *.JPG y especifica *.jpg, no lo va a encontrar
         if val in current_list:
             to_remove.append(val)
         else:
