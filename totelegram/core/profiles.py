@@ -164,24 +164,8 @@ class ProfileManager:
         profile: Optional[str] = None,
     ):
         key = key.upper()
-        current_raw = self.get_profile_values(profile).get(key)
 
-        current_list = []
-        if current_raw:
-            try:
-                current_list = json.loads(current_raw)
-                if not isinstance(current_list, list):
-                    current_list = [str(current_list)]
-
-            except json.JSONDecodeError:
-                # Asume formato CSV manual (ej: a,b,c)
-                if "," in current_raw:
-                    current_list = [
-                        x.strip() for x in current_raw.split(",") if x.strip()
-                    ]
-                else:
-                    # es un solo valor string sin formato
-                    current_list = [current_raw.strip()]
+        current_list = self.get_setting_as_list(key, profile)
 
         if action == "add":
             for val in values:
@@ -196,3 +180,25 @@ class ProfileManager:
         Settings.validate_single_setting(key, current_list)  # type: ignore
         self.update_setting(key, json.dumps(current_list), profile_name=profile)
         return current_list
+
+    def get_setting_as_list(
+        self, key: str, profile_name: Optional[str] = None
+    ) -> List[str]:
+        """
+        Obtiene un valor y garantiza devolver una lista,
+        soportando JSON, CSV o valor único.
+        """
+        raw_val = self.get_profile_values(profile_name).get(key.upper())
+
+        if not raw_val:
+            return []
+
+        try:
+            val = json.loads(raw_val)
+            if not isinstance(val, list):
+                return [str(val)]
+            return val
+        except json.JSONDecodeError:
+            if "," in raw_val:
+                return [x.strip() for x in raw_val.split(",") if x.strip()]
+            return [raw_val.strip()]

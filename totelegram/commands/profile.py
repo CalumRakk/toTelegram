@@ -1,4 +1,3 @@
-import json
 import os
 from typing import List, Optional
 
@@ -266,25 +265,6 @@ def list_options():
     )
 
 
-def _get_current_list_value(key: str, profile: Optional[str]) -> List:
-    """Helper para obtener y parsear el valor actual de una lista desde el .env"""
-
-    raw_values = pm.get_profile_values(profile)
-    raw_val = raw_values.get(key)
-    if not raw_val:
-        return []
-
-    try:
-        val = json.loads(raw_val)
-        if not isinstance(val, list):
-            return [str(val)]
-        return val
-    except json.JSONDecodeError:
-        if "," in raw_val:
-            return [x.strip() for x in raw_val.split(",") if x.strip()]
-        return [raw_val.strip()]
-
-
 def print_tip_exclude_files(console: Console):
     help_text = """
 **Guía de Exclusión (Estilo Git)**
@@ -376,7 +356,7 @@ def remove_from_list(
         raise typer.Exit()
 
     try:
-        current_list = _get_current_list_value(key.upper(), profile)
+        current_list = pm.get_setting_as_list(key.upper(), profile)
     except Exception:
         current_list = []
 
