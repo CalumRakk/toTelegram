@@ -165,10 +165,23 @@ class ProfileManager:
     ):
         key = key.upper()
         current_raw = self.get_profile_values(profile).get(key)
-        try:
-            current_list = json.loads(current_raw) if current_raw else []
-        except json.JSONDecodeError:
-            current_list = [current_raw] if current_raw else []
+
+        current_list = []
+        if current_raw:
+            try:
+                current_list = json.loads(current_raw)
+                if not isinstance(current_list, list):
+                    current_list = [str(current_list)]
+
+            except json.JSONDecodeError:
+                # Asume formato CSV manual (ej: a,b,c)
+                if "," in current_raw:
+                    current_list = [
+                        x.strip() for x in current_raw.split(",") if x.strip()
+                    ]
+                else:
+                    # es un solo valor string sin formato
+                    current_list = [current_raw.strip()]
 
         if action == "add":
             for val in values:

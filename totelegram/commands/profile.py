@@ -8,6 +8,7 @@ from rich.console import Console
 from rich.markdown import Markdown
 from rich.markup import escape
 from rich.panel import Panel
+from rich.rule import Rule
 from rich.table import Table
 
 from totelegram.console import console
@@ -261,8 +262,8 @@ def print_warning_exclusion_files(console: Console):
 
 Parece que usaste un asterisco al inicio de la exclusion, algo como `*.jpg` {'o `"*.jpg"` en Windows' if is_windows else ''}.
 
-Las terminales suelen expandir los asteriscos antes de que lleguen al programa.
-Para guardar el **patrón** y evitar que se agreguen archivos sueltos, usa comillas:
+Las terminales expanden los asteriscos (*) automáticamente antes de pasar los argumentos al programa.
+Para evitar que el patrón se interprete y termine afectando archivos individuales (por ejemplo, agregándolos o eliminándolos por error), encierra el patrón entre comillas:
 
 - **Linux/Mac/PowerShell:** `"*.jpg"`
 - **Windows CMD:** `'*.jpg'` (Comillas simples)
@@ -373,26 +374,102 @@ def remove_from_list(
     """
     Remueve elementos de una lista de configuración.
     """
+    looks_like_expansion = False
     cleaned_values = []
     for val in values:
         if "," in val:
             items = val.split(",")
-            cleaned_values.extend([item.strip() for item in items if item.strip()])
         else:
-            cleaned_values.append(val.strip())
+            items = [val]
+
+        for item in items:
+            clean = item.strip().strip("'").strip('"')
+            if clean:
+                cleaned_values.append(clean)
+
+    if not cleaned_values:
+        console.print("[yellow]No se proporcionaron valores válidos.[/yellow]")
+        raise typer.Exit()
 
     if not force:
-        console.print(f"Se removerán los siguientes valores de [bold]{key}[/bold]:")
-        for v in cleaned_values:
-            console.print(f" - [red]{v}[/red]")
-
-        if not typer.confirm("¿Continuar?"):
-            console.print("Operación cancelada.")
-            raise typer.Exit(code=1)
+        looks_like_expansion = len(cleaned_values) > 1 and all(
+            "*" not in v for v in cleaned_values
+        )
+        if looks_like_expansion:
+            print_warning_exclusion_files(console)
+            console.print(
+                "[yellow]Nota: Si la terminal expandió el asterisco, es probable que "
+                "los archivos resultantes no coincidan con la regla guardada en la configuración.[/yellow]\n"
+            )
 
     try:
-        new_list = pm.modify_list_setting("remove", key, cleaned_values, profile)
-        console.print(f"[green]✔ Removidos. Lista actual: {new_list}[/green]")
-    except Exception as e:
-        console.print(f"[bold red]Error:[/bold red] {e}")
-        raise typer.Exit(code=1)
+        current_list = _get_current_list_value(key.upper(), profile)
+    except Exception:
+        current_list = []
+
+    to_remove = []
+    not_found = []
+
+    for val in cleaned_values:
+        # TODO: ADVERTENCIA comporacion exacta, si el usuario tiene *.JP y especifica *.jpg, no lo va a encontrar
+        if val in current_list:
+            to_remove.append(val)
+        else:
+            not_found.append(val)
+
+    if not force:
+        console.print(Rule(style="white"))
+
+        # Mostrar lo que NO se encontró (útil para confirmar la expansión errónea)
+        title = f"Previsualización: Eliminar de {key.upper()}"
+        if not_found:
+            table_missing = Table(
+                title=title,
+                title_style="bold magenta",
+                expand=True,
+            )
+            table_missing.add_column(
+                "Ninguno de estos a eliminar coincide con la configuración actual",
+                justify="center",
+                header_style="bold red",
+            )
+            for val in not_found:
+                table_missing.add_row(val)
+            console.print(table_missing)
+            console.print()
+
+        if not to_remove:
+            console.print(f"Lista de la configuración actual: {current_list}\n")
+
+            if looks_like_expansion:
+                is_windows = os.name == "nt"
+                solution = "'*.log'" if is_windows else '"*.log"'
+                console.print(
+                    f"\n[bold yellow]Posible solución:[/bold yellow] Intenta poner el valor entre comillas, ej: [green]{solution}[/green]"
+                )
+
+            raise typer.Exit(code=1)
+
+        table_remove = Table(title=title, title_style="bold magenta", expand=True)
+        table_remove.add_column(
+            "Valores a eliminar", justify="center", header_style="bold red"
+        )
+        for val in to_remove:
+            table_remove.add_row(val)
+        console.print(table_remove)
+
+        if not typer.confirm("\n¿Confirmas eliminar estos valores?"):
+            console.print("[red]Operación cancelada.[/red]")
+            raise typer.Exit(code=1)
+
+    if to_remove:
+        try:
+            new_list = pm.modify_list_setting("remove", key, to_remove, profile)
+            console.print(f"[green]✔ Removidos {len(to_remove)} elementos.[/green]")
+            console.print(f"Lista actual: {new_list}")
+        except Exception as e:
+            console.print(f"[bold red]Error:[/bold red] {e}")
+            raise typer.Exit(code=1)
+    else:
+        # Caso raro donde force=True pero no coinciden valores
+        console.print("[yellow]No se encontraron coincidencias para eliminar.[/yellow]")
