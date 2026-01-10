@@ -356,7 +356,7 @@ def remove_from_list(
         raise typer.Exit()
 
     try:
-        current_list = pm.get_setting_as_list(key.upper(), profile)
+        current_list = pm._parse_string_to_list(key.upper(), profile)
     except Exception:
         current_list = []
 

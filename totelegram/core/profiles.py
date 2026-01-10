@@ -165,7 +165,7 @@ class ProfileManager:
     ):
         key = key.upper()
 
-        current_list = self.get_setting_as_list(key, profile)
+        current_list = self._parse_string_to_list(key, profile)
 
         if action == "add":
             for val in values:
@@ -181,7 +181,7 @@ class ProfileManager:
         self.update_setting(key, json.dumps(current_list), profile_name=profile)
         return current_list
 
-    def get_setting_as_list(
+    def _parse_string_to_list(
         self, key: str, profile_name: Optional[str] = None
     ) -> List[str]:
         """
