@@ -1,7 +1,7 @@
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from typer.testing import CliRunner
 
@@ -41,16 +41,16 @@ class TestCliProfile(unittest.TestCase):
     @patch("totelegram.commands.profile.ValidationService")
     def test_create_profile_happy_path(self, MockValidationService):
         """
-        Prueba CRÍTICA: Crear un perfil válido.
+        Crear un perfil válido.
         Simulamos que ValidationService devuelve True (Telegram validó OK).
         """
         instance = MockValidationService.return_value
         instance.validate_setup.return_value = True
 
         # inputs del usuario: Nombre, API_ID, API_HASH, CHAT_ID, Confirmar activación
-        inputs = "12345\nabcdef\n-100123\ny\n"
+        inputs = "test_user\n12345\nabcdef\n-100123\ny\n"
 
-        result = runner.invoke(app, ["create", "test_user"], input=inputs)
+        result = runner.invoke(app, ["create"], input=inputs)
 
         # Verificar que el comando terminó bien
         self.assertEqual(result.exit_code, 0)
@@ -67,21 +67,26 @@ class TestCliProfile(unittest.TestCase):
     @patch("totelegram.commands.profile.ValidationService")
     def test_create_profile_validation_failed_aborted(self, MockValidationService):
         """
-        Prueba CRÍTICA: Si Telegram rechaza las credenciales, el usuario debe poder cancelar.
+        Prueba CRÍTICA: Simula que el Login es válido, pero el CHAT_ID es inválido.
+        El usuario decide NO guardar el perfil.
         """
         instance = MockValidationService.return_value
-        instance.validate_setup.return_value = False  # Simula fallo de login
 
-        # inputs API_ID \n API_HASH \n CHAT_ID \n CONFIRMACION (n)
-        inputs = "12345\nfake_hash\n-100123\nn\n"
+        mock_client = MagicMock()
+        instance.validate_session.return_value.__enter__.return_value = mock_client
 
-        result = runner.invoke(app, ["create", "bad_user"], input=inputs)
+        # Simular que la validación del CHAT_ID falla (devuelve False)
+        instance.validate_chat_id.return_value = False
+
+
+        inputs = "bad_user\n12345\nfake_hash\n-100123\nn\n"
+        result = runner.invoke(app, ["create"], input=inputs)
 
         # Verificar que NO se creó el archivo
         env_path = self.mock_profiles_dir / "bad_user.env"
         self.assertFalse(env_path.exists())
 
-        # Verificar que el comando terminó bien
+        # Verificar que el comando terminó bien (cancelación voluntaria es exit 0)
         self.assertEqual(result.exit_code, 0)
         self.assertIn("Operación cancelada", result.stdout)
 

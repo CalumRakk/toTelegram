@@ -3,6 +3,7 @@ from typing import List, Optional
 
 import typer
 from pydantic import ValidationError
+from pyrogram.errors import ApiIdInvalid
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.markup import escape
@@ -91,7 +92,7 @@ def list_profiles():
 
 @app.command("create")
 def create_profile(
-    profile_name: str = typer.Argument(..., help="Nombre del perfil (ej. personal)"),
+    profile_name: str = typer.Option(..., help="Nombre del perfil (ej. personal)", prompt=True),
     api_id: int = typer.Option(..., help="API ID", prompt=True),
     api_hash: str = typer.Option(..., help="API Hash", prompt=True),
     chat_id: str = typer.Option(
@@ -114,38 +115,42 @@ def create_profile(
                 return
 
         validator = ValidationService(console)
-        is_valid = validator.validate_setup(profile_name, api_id, api_hash, chat_id)
-        if not is_valid:
-            console.print("\n[bold red]La validación falló.[/bold red]")
-            if not typer.confirm("¿Guardar de todos modos?"):
-                console.print("Operación cancelada.")
-                return
 
-        path = pm.create_profile(
-            profile_name=profile_name,
-            api_id=api_id,
-            api_hash=api_hash,
-            chat_id=chat_id,
-        )
+        with validator.validate_session(profile_name, api_id, api_hash) as client:
+            is_valid = validator.validate_chat_id(client, chat_id)
+            if not is_valid:
+                console.print("\n[bold red]La validación falló.[/bold red]")
+                if not typer.confirm("¿Guardar de todos modos?"):
+                    console.print("Operación cancelada.")
+                    return
 
-        console.print(
-            f"\n[bold green]✔ Perfil '{profile_name}' guardado exitosamente![/bold green]"
-        )
-        console.print(f"Ruta: {path}")
+            path = pm.create_profile(
+                profile_name=profile_name,
+                api_id=api_id,
+                api_hash=api_hash,
+                chat_id=chat_id,
+            )
 
-        config = pm.list_profiles()
-        if config.active is None:
-            pm.set_active(profile_name)
-            console.print(f"[green]Perfil '{profile_name}' activado.[/green]")
-        elif config.active != profile_name:
-            if typer.confirm("¿Deseas activar este perfil ahora?"):
+            console.print(
+                f"\n[bold green]✔ Perfil '{profile_name}' guardado exitosamente![/bold green]"
+            )
+            console.print(f"Ruta: {path}")
+
+            config = pm.list_profiles()
+            if config.active is None:
                 pm.set_active(profile_name)
                 console.print(f"[green]Perfil '{profile_name}' activado.[/green]")
-        else:
-            console.print(f"[green]Perfil '{profile_name}' activo.[/green]")
-
+            elif config.active != profile_name:
+                if typer.confirm("¿Deseas activar este perfil ahora?"):
+                    pm.set_active(profile_name)
+                    console.print(f"[green]Perfil '{profile_name}' activado.[/green]")
+            else:
+                console.print(f"[green]Perfil '{profile_name}' activo.[/green]")
+    except ApiIdInvalid as e:
+        console.print("[bold red]Error creando perfil:[/bold red] API ID o Hash inválidos.")
+        raise typer.Exit(code=1)
     except Exception as e:
-        console.print(f"[bold red]Error creando perfil:[/bold red] {e}")
+        console.print(f"[bold red]Error creando perfil: {e}[/bold red]")
         raise typer.Exit(code=1)
 
 
@@ -404,3 +409,6 @@ def remove_from_list(
     except Exception as e:
         console.print(f"[bold red]Error:[/bold red] {e}")
         raise typer.Exit(code=1)
+
+if __name__ == "__main__":
+    create_profile("leo", 123456, "dfggdfdfhghfg", "your_chat_id")

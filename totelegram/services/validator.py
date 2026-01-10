@@ -1,9 +1,9 @@
 import logging
-from typing import Optional, Union, cast
+from contextlib import contextmanager
+from typing import Generator, Optional, Union, cast
 
 from pyrogram import Client, enums  # type: ignore
 from pyrogram.errors import (
-    AccessTokenInvalid,
     ApiIdInvalid,
     ApiIdPublishedFlood,
     ChannelPrivate,
@@ -28,11 +28,8 @@ class ValidationService:
     def __init__(self, console: Console):
         self.console = console
 
-    def validate_setup(
-        self, profile_name: str, api_id: int, api_hash: str, target_chat_id: str
-    ) -> bool:
-        """Flujo principal de validación."""
-
+    @contextmanager
+    def validate_session(self, profile_name: str, api_id: int, api_hash: str)-> Generator[Client, None, None]:
         workdir = get_user_config_dir("toTelegram") / "profiles"
         workdir.mkdir(parents=True, exist_ok=True)
 
@@ -49,46 +46,45 @@ class ValidationService:
         )
 
         try:
-            self.console.print("[yellow]Conectando con Telegram...[/yellow]")
-            client.start()  # type: ignore
-
-            # Validar Login
+            client.start() # type: ignore
             me = cast(Chat, client.get_me())
             self.console.print(
                 f"[green]✔ Login exitoso como:[/green] {me.first_name} (@{me.username})"
             )
+            yield client
 
-            # Resolver Chat
-            chat = self._resolve_target_chat(client, target_chat_id)
-            if not chat:
-                return False
-
-            # Validar Permisos de Escritura
-            if not self._verify_permissions(client, chat):
-                self.console.print(
-                    "[bold red]✘ Error de Permisos:[/bold red] No puedes enviar archivos a este chat."
-                )
-                return False
-
-            self.console.print(
-                f"[bold green]✔ Validación completada. Todo listo.[/bold green]"
+        except ApiIdInvalid as e:
+            logger.debug("Error: API ID o Hash inválidos.")
+            raise e
+        except ApiIdPublishedFlood as e:
+            logger.debug(
+                "Error: API ID baneado públicamente."
             )
-            return True
-
-        except (ApiIdInvalid, AccessTokenInvalid):
-            self.console.print("[bold red]✘ Error:[/bold red] API ID o Hash inválidos.")
-        except ApiIdPublishedFlood:
-            self.console.print(
-                "[bold red]✘ Error:[/bold red] API ID baneado públicamente."
-            )
+            raise e
         except Exception as e:
-            self.console.print(f"[bold red]✘ Error inesperado:[/bold red] {e}")
-            logger.exception("Error en validación")
+            logger.debug(f"Error: inesperado: {e}")
+            raise e
         finally:
             if client.is_connected:
                 client.stop()  # type: ignore
+    def validate_chat_id(self, client: Client, target_chat_id: str) -> bool:
+        """Valida que el chat ID o username sea accesible."""
+        self.console.print(f"[yellow]Buscando chat '{target_chat_id}'...[/yellow]")
 
-        return False
+        chat = self._resolve_target_chat(client, target_chat_id)
+        if not chat:
+            return False
+
+        if not self._verify_permissions(client, chat):
+            self.console.print(
+                "[bold red]✘ Error de Permisos:[/bold red] No puedes enviar archivos a este chat."
+            )
+            return False
+
+        self.console.print(
+            f"[bold green]✔ Validación completada. Todo listo.[/bold green]"
+        )
+        return True
 
     def _resolve_target_chat(self, client, chat_id: Union[str, int]) -> Optional[Chat]:
         """Intenta obtener el chat, refrescando peers si es necesario."""
