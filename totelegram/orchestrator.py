@@ -1,8 +1,6 @@
 import logging
 from pathlib import Path
-from typing import Generator
 
-from build.lib.totelegram.utils import is_excluded
 from totelegram.core.enums import JobStatus
 from totelegram.core.setting import Settings
 from totelegram.services.chunking import ChunkingService
@@ -27,7 +25,7 @@ def upload(target: Path, settings: Settings):
     snapshots = []
     with telegram_client_context(settings) as client:
         for path in paths:
-            if is_excluded(path, settings):
+            if settings.is_excluded(path):
                 continue
             uploader = UploadService(client, settings)
             try:

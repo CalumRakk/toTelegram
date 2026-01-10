@@ -62,6 +62,9 @@ class Settings(BaseSettings):
     @property
     def database_path(self) -> Path:
         return self.worktable / self.database_name
+    @property
+    def profile_path(self):
+        return self.worktable / "profiles"
 
     def is_excluded(self, path: Path) -> bool:
         """

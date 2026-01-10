@@ -48,7 +48,7 @@ def init_telegram_client(settings: Settings):
         settings.profile_name,
         api_id=settings.api_id,
         api_hash=settings.api_hash,
-        workdir=str(settings.worktable),
+        workdir=str(settings.profile_path),
         lang_code=iso639,
     )
     client.start()  # type: ignore
