@@ -20,6 +20,40 @@ class ProfileManager:
     def __init__(self):
         self._ensure_structure()
 
+    def _ensure_registry_integrity(self) -> ProfileRegistry:
+        """
+        Carga la configuración, verifica que los archivos .env existan físicamente,
+        purga los inválidos y guarda cambios si es necesario.
+        Retorna siempre una configuración válida y sincronizada.
+        """
+        config = self._load_config()
+        dirty = False
+        valid_profiles = {}
+
+        for name, path_str in config.profiles.items():
+            path = Path(path_str)
+            if path.exists():
+                valid_profiles[name] = path_str
+            else:
+                logger.warning(
+                    f"Detectado perfil roto (archivo faltante): '{name}'. Eliminando del registro."
+                )
+                dirty = True
+
+        if dirty:
+            config.profiles = valid_profiles
+
+            # Si el perfil activo fue uno de los eliminados, lo reseteamos
+            if config.active and config.active not in valid_profiles:
+                logger.warning(
+                    f"El perfil activo '{config.active}' ha sido eliminado. Se requiere activar otro."
+                )
+                config.active = None
+
+            self._save_config(config)
+
+        return config
+
     def _ensure_structure(self):
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
         PROFILES_DIR.mkdir(parents=True, exist_ok=True)
@@ -71,23 +105,26 @@ class ProfileManager:
         self._save_config(config)
 
     def get_profile_path(self, profile_name: Optional[str] = None) -> Path:
-        config = self._load_config()
+        config = self._ensure_registry_integrity()
 
         target = profile_name if profile_name else config.active
 
         if not target:
             raise ValueError(
-                "No hay ningún perfil activo ni especificado. Ejecuta 'totelegram init'."
+                "No hay ningún perfil activo ni especificado. Ejecuta 'totelegram profile create'."
             )
 
         if target not in config.profiles:
-            raise ValueError(f"El perfil '{target}' no existe.")
+            raise ValueError(
+                f"El perfil '{target}' no existe. "
+                "(Si existía antes, es posible que su archivo .env haya sido borrado manualmente)."
+            )
 
         return Path(config.profiles[target])
 
     def list_profiles(self) -> ProfileRegistry:
         """Devuelve el objeto tipado en lugar de un dict."""
-        return self._load_config()
+        return self._ensure_registry_integrity()
 
     def profile_exists(self, profile_name: str) -> bool:
         config = self._load_config()
