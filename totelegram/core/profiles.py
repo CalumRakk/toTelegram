@@ -1,3 +1,4 @@
+import glob
 import json
 import logging
 from pathlib import Path
@@ -30,6 +31,7 @@ class ProfileManager:
         dirty = False
         valid_profiles = {}
 
+        # Limpieza
         for name, path_str in config.profiles.items():
             path = Path(path_str)
             if path.exists():
@@ -40,6 +42,19 @@ class ProfileManager:
                 )
                 dirty = True
 
+        # Descubrimiento
+        existing_env_files = glob.glob(str(PROFILES_DIR / "*.env"))
+        for env_path in existing_env_files:
+            profile_name = Path(env_path).stem
+
+            if profile_name not in valid_profiles:
+                valid_profiles[profile_name] = str(env_path)
+                dirty = True
+                logger.info(
+                    f"Perfil huérfano encontrado y restaurado: '{profile_name}'"
+                )
+
+        # Actualización
         if dirty:
             config.profiles = valid_profiles
 
@@ -51,7 +66,6 @@ class ProfileManager:
                 config.active = None
 
             self._save_config(config)
-
         return config
 
     def _ensure_structure(self):
