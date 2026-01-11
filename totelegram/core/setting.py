@@ -2,7 +2,7 @@ import os
 import sys
 from os import getenv
 from pathlib import Path
-from typing import Any, ClassVar, Dict, List, Set, Union, cast, get_origin
+from typing import Any, ClassVar, Dict, List, Optional, Set, Union, cast, get_origin
 
 from pydantic import Field, TypeAdapter, ValidationError, field_validator
 from pydantic_settings import BaseSettings
@@ -30,9 +30,10 @@ class Settings(BaseSettings):
     )
     api_id: int = Field(description="Telegram API ID", default=611335)
 
-    max_filesize_bytes: int = 2_097_152_000
-    max_filename_length: int = 55
-    upload_limit_rate_kbps: int = 0
+    max_filesize_bytes: int = Field(default=2_097_152_000, description="Tamaño máximo de archivo a subir a telegram (en bytes)")
+    upload_limit_rate_kbps: int = Field(
+        default=0,description="Límite de velocidad de subida en KB/s. 0 = sin límite"
+    )
     exclude_files: List[str] = Field(
         default=[],
         description="Patrones (glob). Ej: '*.log', 'node_modules' (ignora contenido), 'src/*.tmp'.",
@@ -41,9 +42,14 @@ class Settings(BaseSettings):
     app_name: str = "toTelegram"
     database_name: str = f"{app_name}.sqlite"
     exclude_files_default: List[str] = ["*.log", "*.json", "*.json.xz"]
+    max_filename_length: int = 55
 
-    worktable: Path = Path(get_user_config_dir(app_name)).resolve()
-    log_path: str = str(worktable / f"app_name.log")
+    worktable: Path = Field(default=Path(get_user_config_dir(app_name)).resolve(), description="Carpeta de trabajo para la aplicación, donde se almacena la db y perfiles")
+    log_path: Optional[Path] = Field(default=None, description="Ruta del archivo de log. Si está vacío, se usa la ruta por defecto en la carpeta de trabajo.")
+
+    def model_post_init(self, __context):
+        if self.log_path is None:
+            self.log_path = self.worktable / "app_name.log"
 
     # TODO: agrega un default que impida subir archivo muy pequeños.
 
@@ -56,6 +62,8 @@ class Settings(BaseSettings):
         "PROFILE_NAME",
         "API_HASH",
         "API_ID",
+        "MAX_FILENAME_LENGTH",
+        "MAX_FILESIZE_BYTES"
     }
     SENSITIVE_FIELDS: ClassVar[Set[str]] = {"API_HASH", "API_ID"}
 

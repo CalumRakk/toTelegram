@@ -206,6 +206,7 @@ def list_options():
         registry = pm.list_profiles()
         active_profile_name = registry.active or "Desconocido"
     except (ValueError, FileNotFoundError):
+        console.print(f"\n[yellow]Ningún perfil activo. Mostrando valores por defecto.[/yellow]")
         pass
 
     # Configurar Tabla
