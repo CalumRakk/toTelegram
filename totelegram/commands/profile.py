@@ -90,20 +90,29 @@ def list_profiles():
     _render_profiles_table(registry.active, registry.profiles)
 
 
+def normalize_string(value: str):
+    if not isinstance(value, str):
+        return value
+    return value.strip()
+
+def validate_profile_name(value: str):
+    cleaned = normalize_string(value)
+    if not cleaned.isidentifier():
+         raise typer.BadParameter("El nombre del perfil solo puede contener letras, números y guiones bajos, y no puede comenzar con un número.")
+    # TODO: un nombre como `mi-perfil` no es válido en isidentifier ¿es un error?
+    return cleaned
+
 @app.command("create")
 def create_profile(
-    profile_name: str = typer.Option(..., help="Nombre del perfil (ej. personal)", prompt=True),
+    profile_name: str = typer.Option(..., help="Nombre del perfil (ej. personal)", prompt=True, callback=validate_profile_name),
     api_id: int = typer.Option(..., help="API ID", prompt=True),
-    api_hash: str = typer.Option(..., help="API Hash", prompt=True),
+    api_hash: str = typer.Option(..., help="API Hash", prompt=True, callback=normalize_string),
     chat_id: str = typer.Option(
-        ..., help="Chat ID o Usersession_name destino", prompt=True
+        ..., help="Chat ID o Usersession_name destino", prompt=True, callback=normalize_string
     ),
 ):
     """Crea un nuevo perfil de configuración interactivamente."""
     try:
-        if profile_name is None:
-            profile_name = typer.prompt("Nombre del perfil (ej. personal)", type=str)
-
         if pm.profile_exists(profile_name):
             console.print(f"[bold red]El perfil '{profile_name}' ya existe.[/bold red]")
             if typer.confirm("¿Deseas sobreescribirlo?"):
@@ -115,8 +124,7 @@ def create_profile(
                 return
 
         validator = ValidationService(console)
-
-        with validator.validate_session(profile_name, api_id, api_hash) as client:
+        with validator.validate_session(profile_name.strip(), api_id, api_hash.strip()) as client:
             is_valid = validator.validate_chat_id(client, chat_id)
             if not is_valid:
                 console.print("\n[bold red]La validación falló.[/bold red]")
