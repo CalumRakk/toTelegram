@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from typing import List
 
-from totelegram.core.profiles import ProfileManager
+from totelegram.core.registry import ProfileManager
 
 sys.path.append(os.getcwd())
 
@@ -37,13 +37,13 @@ class TestSendFile(unittest.TestCase):
 
         self.media_folder = TemporaryDirectory()
 
-        profile_name= "demo"
+        profile_name = "demo"
         if profile_name is None:
             raise RuntimeError("No hay perfil activo para ejecutar las pruebas.")
 
         path = self.pm.get_profile_path(profile_name)
         self.settings = get_settings(path)
-        self.settings.database_name= "test.sqlite"
+        self.settings.database_name = "test.sqlite"
         init_database(self.settings)
 
     def tearDown(self):

@@ -6,7 +6,7 @@ from filelock import FileLock, Timeout
 
 from totelegram.console import console
 from totelegram.core.enums import JobStatus
-from totelegram.core.profiles import ProfileManager
+from totelegram.core.registry import ProfileManager
 from totelegram.core.setting import get_settings
 from totelegram.services.chunking import ChunkingService
 from totelegram.services.snapshot import SnapshotService
@@ -37,12 +37,12 @@ def upload_file(
     try:
         try:
             if profile_name:
-                if not pm.exists_profile(profile_name):
+                if not pm.exists(profile_name):
                     raise ValueError("profile_not_found")
             else:
-                profile_name = pm.get_name_active_profile()
+                profile_name = pm.active_name
 
-            env_path = pm.get_profile_path(profile_name)
+            env_path = pm.get_path(profile_name)
         except ValueError:
             if profile_name:
                 console.print(

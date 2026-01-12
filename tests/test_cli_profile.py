@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 from typer.testing import CliRunner
 
 from totelegram.commands.profile import app
-from totelegram.core.profiles import ProfileManager
+from totelegram.core.registry import ProfileManager
 
 runner = CliRunner()
 
@@ -19,15 +19,15 @@ class TestCliProfile(unittest.TestCase):
         fake_profiles_dir = self.test_dir / "profiles"
 
         self.patcher_config_dir = patch(
-            "totelegram.core.profiles.CONFIG_DIR", self.test_dir
+            "totelegram.core.registry.CONFIG_DIR", self.test_dir
         )
         self.patcher_config_file = patch(
-            "totelegram.core.profiles.ProfileManager.CONFIG_FILE",
+            "totelegram.core.registry.ProfileManager.CONFIG_FILE",
             self.test_dir / "config.json",
         )
 
         self.patcher_profiles = patch(
-            "totelegram.core.profiles.ProfileManager.PROFILES_DIR", fake_profiles_dir
+            "totelegram.core.registry.ProfileManager.PROFILES_DIR", fake_profiles_dir
         )
 
         self.mock_config_dir = self.patcher_config_dir.start()
@@ -98,7 +98,7 @@ class TestCliProfile(unittest.TestCase):
         self.assertTrue(final_env.exists(), "No se creó el archivo .env")
 
         # El perfil debe estar activo
-        registry = self.pm.list_profiles()
+        registry = self.pm.get_registry()
         self.assertEqual(registry.active, "test_user")
 
     def test_create_profile_prevents_overwrite(self):
@@ -106,7 +106,7 @@ class TestCliProfile(unittest.TestCase):
         Verifica que no se puede crear un perfil si ya existe (Inmutabilidad).
         """
         # Crear un perfil previo
-        self.pm.create_profile("dummy", 1, "h", "c")
+        self.pm.create("dummy", 1, "h", "c")
 
         # Intentar crear uno con el mismo nombre
         args = [
@@ -158,8 +158,8 @@ class TestCliProfile(unittest.TestCase):
         Intentar meter un string en un campo numérico debe fallar.
         """
 
-        self.pm.create_profile("dummy", 1, "hash", "chat")
-        self.pm.set_active("dummy")
+        self.pm.create("dummy", 1, "hash", "chat")
+        self.pm.activate("dummy")
 
         # Intentamos asignar texto a un campo entero (MAX_FILESIZE_BYTES)
         result = runner.invoke(
@@ -172,7 +172,7 @@ class TestCliProfile(unittest.TestCase):
         self.assertIn("Error", result.stdout)
 
         # Verificar que el valor NO cambió en el archivo
-        values = self.pm.get_profile_values("dummy")
+        values = self.pm.get_config_values("dummy")
         # El valor por defecto no es ese string
         self.assertNotEqual(values.get("MAX_FILESIZE_BYTES"), "esto_no_es_un_numero")
 
@@ -180,11 +180,11 @@ class TestCliProfile(unittest.TestCase):
         """
         Prueba funcional: Verificar que podemos cambiar entre perfiles.
         """
-        self.pm.create_profile("perfil_A", 1, "h", "c")
-        self.pm.create_profile("perfil_B", 2, "h", "c")
+        self.pm.create("perfil_A", 1, "h", "c")
+        self.pm.create("perfil_B", 2, "h", "c")
 
         result = runner.invoke(app, ["use", "perfil_B"])
 
         self.assertEqual(result.exit_code, 0)
-        self.assertEqual(self.pm.get_name_active_profile(), "perfil_B")
+        self.assertEqual(self.pm.active_name, "perfil_B")
         self.assertIn("Ahora usando el perfil: perfil_B", result.stdout)

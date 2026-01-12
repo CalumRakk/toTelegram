@@ -13,7 +13,7 @@ from rich.rule import Rule
 from rich.table import Table
 
 from totelegram.console import console
-from totelegram.core.profiles import ProfileManager
+from totelegram.core.registry import ProfileManager
 from totelegram.core.setting import Settings, get_settings
 from totelegram.services.validator import ValidationService
 
@@ -83,7 +83,7 @@ def _render_profiles_table(active: str, profiles: dict):
 
 @app.command("list")
 def list_profiles():
-    registry = pm.list_profiles()
+    registry = pm.get_registry()
     if not registry.profiles:
         console.print("[yellow]No hay perfiles.[/yellow]")
         return
@@ -107,7 +107,7 @@ def validate_profile_name(profile_name: str):
         )
     profile_name = cleaned
 
-    if not pm.exists_profile(cleaned):
+    if not pm.exists(cleaned):
         return profile_name
 
     console.print(
@@ -252,8 +252,8 @@ def _commit_profile_creation(
     temp_session_file.rename(final_session_file)
 
     try:
-        path = pm.create_profile(
-            profile_name=profile_name,
+        path = pm.create(
+            name=profile_name,
             api_id=api_id,
             api_hash=api_hash,
             chat_id=chat_id,
@@ -269,17 +269,17 @@ def _commit_profile_creation(
 def _suggest_profile_activation(profile_name: str):
     """Lógica de UI para activar el perfil recién creado."""
     try:
-        config = pm.list_profiles()
+        config = pm.get_registry()
 
         if config.active is None:
-            pm.set_active(profile_name)
+            pm.activate(profile_name)
             console.print(
                 f"[green]Perfil '{profile_name}' activado automáticamente.[/green]"
             )
 
         elif config.active != profile_name:
             if typer.confirm("¿Deseas activar este perfil ahora?"):
-                pm.set_active(profile_name)
+                pm.activate(profile_name)
                 console.print(f"[green]Perfil '{profile_name}' activado.[/green]")
 
     except Exception as e:
@@ -292,7 +292,7 @@ def _suggest_profile_activation(profile_name: str):
 def use_profile(profile_name: str):
     """Cambia el perfil activo."""
     try:
-        pm.set_active(profile_name)
+        pm.activate(profile_name)
         console.print(
             f"[bold green]✔ Ahora usando el perfil: {profile_name}[/bold green]"
         )
@@ -308,13 +308,13 @@ def set_config(
     profile: Optional[str] = typer.Option(None, "--profile", "-p"),
 ):
     """Edita una configuración."""
-    profile_name = profile or pm.get_name_active_profile()
+    profile_name = profile or pm.active_name
     if not profile_name:
         console.print("[bold red]No hay perfil activo ni seleccionado.[/bold red]")
         return
 
     try:
-        pm.smart_update_setting(key, value, profile_name=profile_name)
+        pm.update_config(key, value, profile_name=profile_name)
 
         console.print(
             f"[bold green]✔[/bold green] {key.upper()} actualizado en '[cyan]{profile_name}[/cyan]'."
@@ -334,10 +334,10 @@ def list_options():
     current_settings = None
     active_profile_name = None
     try:
-        path = pm.get_profile_path()
+        path = pm.get_path()
         current_settings = get_settings(path)
 
-        registry = pm.list_profiles()
+        registry = pm.get_registry()
         active_profile_name = registry.active or "Desconocido"
     except (ValueError, FileNotFoundError):
         console.print(
@@ -475,7 +475,7 @@ def add_to_list(
             raise typer.Exit(code=1)
 
     try:
-        new_list = pm.modify_list_setting("add", key, cleaned_values, profile)
+        new_list = pm.update_config_list("add", key, cleaned_values, profile)
         console.print(f"[green]✔ Agregados {len(cleaned_values)} elementos.[/green]")
         console.print(f"Lista actual: {new_list}")
     except Exception as e:
@@ -498,7 +498,7 @@ def remove_from_list(
         raise typer.Exit()
 
     try:
-        current_list = pm._parse_string_to_list(key.upper(), profile)
+        current_list = pm._parse_env_list(key.upper(), profile)
     except Exception:
         current_list = []
 
@@ -537,7 +537,7 @@ def remove_from_list(
 
     try:
         if to_remove:
-            new_list = pm.modify_list_setting("remove", key, to_remove, profile)
+            new_list = pm.update_config_list("remove", key, to_remove, profile)
             console.print(f"[green]✔ Removidos {len(to_remove)} elementos.[/green]")
             console.print(f"Lista actual: {new_list}")
         else:

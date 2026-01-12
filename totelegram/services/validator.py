@@ -14,7 +14,7 @@ from pyrogram.errors import (
 from pyrogram.types import Chat
 from rich.console import Console
 
-from totelegram.core.profiles import ProfileManager
+from totelegram.core.registry import ProfileManager
 
 logger = logging.getLogger(__name__)
 
