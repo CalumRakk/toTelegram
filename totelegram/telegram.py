@@ -50,6 +50,7 @@ class TelegramSession:
 
     def __enter__(self) -> Client:
         logger.info(f"Iniciando sesión de Telegram: {self.name}")
+        from pyrogram import Client  # type: ignore
 
         lang, encoding = locale.getdefaultlocale()
         iso639 = lang.split("_")[0] if lang else "en"

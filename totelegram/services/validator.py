@@ -39,6 +39,8 @@ class ValidationService:
     def validate_session(
         self, profile_name: str, api_id: int, api_hash: str
     ) -> Generator[Client, None, None]:
+        from pyrogram.errors import ApiIdInvalid, ApiIdPublishedFlood
+
         ProfileManager.PROFILES_DIR.mkdir(parents=True, exist_ok=True)
 
         self.console.print(
@@ -89,6 +91,9 @@ class ValidationService:
 
     def _resolve_target_chat(self, client, chat_id: Union[str, int]) -> Optional[Chat]:
         """Intenta obtener el chat, refrescando peers si es necesario."""
+        from pyrogram.errors import ChannelPrivate, PeerIdInvalid, UsernameInvalid
+        from pyrogram.types import Chat
+
         self.console.print(f"[yellow]Buscando chat '{chat_id}'...[/yellow]")
 
         try:
@@ -125,6 +130,9 @@ class ValidationService:
         """
         Verifica si 'me' tiene permisos para enviar media en el chat.
         """
+        from pyrogram import enums
+        from pyrogram.errors import ChatWriteForbidden
+
         self.console.print(
             f"[dim]Verificando permisos de escritura en {chat.type.value}...[/dim]"
         )

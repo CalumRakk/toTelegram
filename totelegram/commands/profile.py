@@ -133,7 +133,7 @@ def create_profile(
     ),
     api_id: int = typer.Option(..., help="API ID", prompt=True),
     api_hash: str = typer.Option(
-        ..., help="API Hash", prompt=True, callback=normalize_string
+        ..., help="API Hash", prompt=True, callback=normalize_string, hide_input=True
     ),
     chat_id: str = typer.Option(
         ...,
