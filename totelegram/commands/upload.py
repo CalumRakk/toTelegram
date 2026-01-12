@@ -13,7 +13,7 @@ from totelegram.services.snapshot import SnapshotService
 from totelegram.services.uploader import UploadService
 from totelegram.store.database import db_proxy, init_database
 from totelegram.store.models import Job, SourceFile
-from totelegram.telegram import telegram_client_context
+from totelegram.telegram import TelegramSession
 
 app = typer.Typer(
     help="Sube archivos a Telegram usando la configuración activa.",
@@ -71,7 +71,7 @@ def upload_file(
                     )
                     return []
 
-                with telegram_client_context(settings) as client:
+                with TelegramSession(settings) as client:
                     for path in paths:
                         if settings.is_excluded(path):
                             continue

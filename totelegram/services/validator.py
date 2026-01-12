@@ -15,6 +15,7 @@ from pyrogram.types import Chat
 from rich.console import Console
 
 from totelegram.core.registry import ProfileManager
+from totelegram.telegram import TelegramSession
 
 logger = logging.getLogger(__name__)
 
@@ -38,23 +39,19 @@ class ValidationService:
         self.console.print(
             f"\n[bold blue]Iniciando validación para '{profile_name}'...[/bold blue]"
         )
-
-        # TODO: TENGO LA INSTANCIA DE CLIENTE DUPLICADA EN VARIOS LADOS DEL CÓDIGO. PELIGRO!
-        client = Client(
-            name=profile_name,
-            api_id=api_id,
-            api_hash=api_hash,
-            workdir=str(ProfileManager.PROFILES_DIR),
-            in_memory=False,
-        )
-
         try:
-            client.start()  # type: ignore
-            me = cast(Chat, client.get_me())
-            self.console.print(
-                f"[green]✔ Login exitoso como:[/green] {me.first_name} (@{me.username})"
-            )
-            yield client
+            with TelegramSession(
+                session_name=profile_name,
+                api_id=api_id,
+                api_hash=api_hash,
+                workdir=ProfileManager.PROFILES_DIR,
+            ) as client:
+
+                me = cast(Chat, client.get_me())
+                self.console.print(
+                    f"[green]✔ Login exitoso como:[/green] {me.first_name} (@{me.username})"
+                )
+                yield client
 
         except ApiIdInvalid as e:
             logger.debug("Error: API ID o Hash inválidos.")
@@ -65,9 +62,6 @@ class ValidationService:
         except Exception as e:
             logger.debug(f"Error: inesperado: {e}")
             raise e
-        finally:
-            if client.is_connected:
-                client.stop()  # type: ignore
 
     def validate_chat_id(self, client: Client, target_chat_id: str) -> bool:
         """Valida que el chat ID o username sea accesible."""
