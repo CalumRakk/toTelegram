@@ -11,7 +11,7 @@ from totelegram.core.setting import get_settings
 from totelegram.services.chunking import ChunkingService
 from totelegram.services.snapshot import SnapshotService
 from totelegram.services.uploader import UploadService
-from totelegram.store.database import db_proxy, init_database
+from totelegram.store.database import DatabaseSession
 from totelegram.store.models import Job, SourceFile
 from totelegram.telegram import TelegramSession
 
@@ -61,45 +61,39 @@ def upload_file(
             console.print(
                 f"Iniciando subida usando configuración de: [bold]{settings.chat_id}[/bold]"
             )
-            try:
-                init_database(settings)
-                chunker = ChunkingService(settings)
-                paths = list(target.glob("*")) if target.is_dir() else [target]
-                if not paths:
-                    console.print(
-                        "[yellow]No se encontraron archivos para subir.[/yellow]"
-                    )
-                    return []
 
-                with TelegramSession(settings) as client:
-                    for path in paths:
-                        if settings.is_excluded(path):
-                            continue
-                        uploader = UploadService(client, settings)
-                        try:
-                            source = SourceFile.get_or_create_from_path(path)
-                            job = Job.get_or_create_from_source(source, settings)
-                            if job.status == JobStatus.UPLOADED:
-                                console.print(
-                                    f"Job {job.id} ya completado. Verificando snapshot..."
-                                )
-                                SnapshotService.generate_snapshot(job)
-                                continue
+            chunker = ChunkingService(settings)
+            paths = list(target.glob("*")) if target.is_dir() else [target]
+            if not paths:
+                console.print("[yellow]No se encontraron archivos para subir.[/yellow]")
+                return []
 
-                            payloads = chunker.process_job(job)
-                            for payload in payloads:
-                                uploader.upload_payload(payload)
-
-                            job.set_uploaded()
-                            console.print(f"Job {job.id} finalizado con éxito.")
+            with DatabaseSession(settings), TelegramSession(settings) as client:
+                for path in paths:
+                    if settings.is_excluded(path):
+                        continue
+                    uploader = UploadService(client, settings)
+                    try:
+                        source = SourceFile.get_or_create_from_path(path)
+                        job = Job.get_or_create_from_source(source, settings)
+                        if job.status == JobStatus.UPLOADED:
+                            console.print(
+                                f"Job {job.id} ya completado. Verificando snapshot..."
+                            )
                             SnapshotService.generate_snapshot(job)
-
-                        except Exception as e:
-                            console.print(f"Error procesando ruta {path}: {e}")
                             continue
-            finally:
-                if not db_proxy.is_closed():
-                    db_proxy.close()
+
+                        payloads = chunker.process_job(job)
+                        for payload in payloads:
+                            uploader.upload_payload(payload)
+
+                        job.set_uploaded()
+                        console.print(f"Job {job.id} finalizado con éxito.")
+                        SnapshotService.generate_snapshot(job)
+
+                    except Exception as e:
+                        console.print(f"Error procesando ruta {path}: {e}")
+                        continue
     except Timeout:
         console.print(
             f"[bold yellow]El perfil '{profile_name}' ya está en uso.[/bold yellow]"

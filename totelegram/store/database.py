@@ -8,18 +8,40 @@ logger = logging.getLogger(__name__)
 db_proxy = peewee.Proxy()
 
 
-def init_database(settings: Settings):
-    from totelegram.store.models import Job, Payload, RemotePayload, SourceFile
+class DatabaseSession:
+    """
+    Administrador de contexto para la base de datos SQLite.
+    Se encarga de inicializar, conectar, crear tablas si no existen
+    y cerrar la conexión de forma segura al finalizar.
+    """
 
-    logger.info(f"Iniciando base de datos en {settings.database_path}")
-    database = peewee.SqliteDatabase(
-        str(settings.database_path),
-        pragmas={"journal_mode": "wal", "cache_size": -1024 * 64},
-        timeout=10,
-    )
-    # `"cache_size": -1024 * 64` = Usa hasta 64 MB de memoria RAM para la caché
-    db_proxy.initialize(database)
+    def __init__(self, settings: Settings):
+        self.settings = settings
+        self.db = None
 
-    db_proxy.create_tables([SourceFile, Job, Payload, RemotePayload], safe=True)
-    logger.info("Base de datos inicializada correctamente")
-    db_proxy.close()
+    def __enter__(self):
+        if db_proxy.obj is not None:
+            return db_proxy
+
+        logger.info(f"Iniciando base de datos en {self.settings.database_path}")
+
+        self.db = peewee.SqliteDatabase(
+            str(self.settings.database_path),
+            pragmas={"journal_mode": "wal", "cache_size": -1024 * 64},
+            timeout=10,
+        )
+
+        db_proxy.initialize(self.db)
+
+        self.db.connect()
+
+        from totelegram.store.models import Job, Payload, RemotePayload, SourceFile
+
+        db_proxy.create_tables([SourceFile, Job, Payload, RemotePayload], safe=True)
+        return self.db
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self.db and not self.db.is_closed():
+            logger.debug("Cerrando conexión a base de datos...")
+            self.db.close()
+            logger.info("Base de datos cerrada correctamente.")
