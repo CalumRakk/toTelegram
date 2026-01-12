@@ -1,13 +1,16 @@
+from __future__ import annotations
+
 import locale
 import logging
 from pathlib import Path
-from typing import Optional
-
-from pyrogram import Client  # type: ignore
-from pyrogram.enums import MessageMediaType
-from pyrogram.types import Chat, Message
+from typing import TYPE_CHECKING, Optional
 
 from totelegram.core.setting import Settings
+
+if TYPE_CHECKING:
+    from pyrogram import Client  # type: ignore
+    from pyrogram.enums import MessageMediaType
+    from pyrogram.types import Chat, Message
 
 logger = logging.getLogger(__name__)
 

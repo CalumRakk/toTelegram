@@ -1,21 +1,26 @@
+from __future__ import annotations
+
 import logging
 from contextlib import contextmanager
-from typing import Generator, Optional, Union, cast
+from typing import TYPE_CHECKING, Generator, Optional, Union, cast
 
-from pyrogram import Client, enums  # type: ignore
-from pyrogram.errors import (
-    ApiIdInvalid,
-    ApiIdPublishedFlood,
-    ChannelPrivate,
-    ChatWriteForbidden,
-    PeerIdInvalid,
-    UsernameInvalid,
-)
-from pyrogram.types import Chat
 from rich.console import Console
 
 from totelegram.core.registry import ProfileManager
 from totelegram.telegram import TelegramSession
+
+if TYPE_CHECKING:
+    from pyrogram import Client  # type: ignore
+    from pyrogram import enums
+    from pyrogram.errors import (
+        ApiIdInvalid,
+        ApiIdPublishedFlood,
+        ChannelPrivate,
+        ChatWriteForbidden,
+        PeerIdInvalid,
+        UsernameInvalid,
+    )
+    from pyrogram.types import Chat
 
 logger = logging.getLogger(__name__)
 
