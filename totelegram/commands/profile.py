@@ -95,25 +95,39 @@ def normalize_string(value: str):
         return value
     return value.strip()
 
+
 def validate_profile_name(value: str):
     cleaned = normalize_string(value)
     if not cleaned.isidentifier():
-         raise typer.BadParameter("El nombre del perfil solo puede contener letras, números y guiones bajos, y no puede comenzar con un número.")
+        raise typer.BadParameter(
+            "El nombre del perfil solo puede contener letras, números y guiones bajos, y no puede comenzar con un número."
+        )
     # TODO: un nombre como `mi-perfil` no es válido en isidentifier ¿es un error?
     return cleaned
 
+
 @app.command("create")
 def create_profile(
-    profile_name: str = typer.Option(..., help="Nombre del perfil (ej. personal)", prompt=True, callback=validate_profile_name),
+    profile_name: str = typer.Option(
+        ...,
+        help="Nombre del perfil (ej. personal)",
+        prompt=True,
+        callback=validate_profile_name,
+    ),
     api_id: int = typer.Option(..., help="API ID", prompt=True),
-    api_hash: str = typer.Option(..., help="API Hash", prompt=True, callback=normalize_string),
+    api_hash: str = typer.Option(
+        ..., help="API Hash", prompt=True, callback=normalize_string
+    ),
     chat_id: str = typer.Option(
-        ..., help="Chat ID o Usersession_name destino", prompt=True, callback=normalize_string
+        ...,
+        help="Chat ID o Usersession_name destino",
+        prompt=True,
+        callback=normalize_string,
     ),
 ):
     """Crea un nuevo perfil de configuración interactivamente."""
     try:
-        if pm.profile_exists(profile_name):
+        if pm.exists_profile(profile_name):
             console.print(f"[bold red]El perfil '{profile_name}' ya existe.[/bold red]")
             if typer.confirm("¿Deseas sobreescribirlo?"):
                 console.print(
@@ -124,7 +138,9 @@ def create_profile(
                 return
 
         validator = ValidationService(console)
-        with validator.validate_session(profile_name.strip(), api_id, api_hash.strip()) as client:
+        with validator.validate_session(
+            profile_name.strip(), api_id, api_hash.strip()
+        ) as client:
             is_valid = validator.validate_chat_id(client, chat_id)
             if not is_valid:
                 console.print("\n[bold red]La validación falló.[/bold red]")
@@ -155,7 +171,9 @@ def create_profile(
             else:
                 console.print(f"[green]Perfil '{profile_name}' activo.[/green]")
     except ApiIdInvalid as e:
-        console.print("[bold red]Error creando perfil:[/bold red] API ID o Hash inválidos.")
+        console.print(
+            "[bold red]Error creando perfil:[/bold red] API ID o Hash inválidos."
+        )
         raise typer.Exit(code=1)
     except Exception as e:
         console.print(f"[bold red]Error creando perfil: {e}[/bold red]")
@@ -214,7 +232,9 @@ def list_options():
         registry = pm.list_profiles()
         active_profile_name = registry.active or "Desconocido"
     except (ValueError, FileNotFoundError):
-        console.print(f"\n[yellow]Ningún perfil activo. Mostrando valores por defecto.[/yellow]")
+        console.print(
+            f"\n[yellow]Ningún perfil activo. Mostrando valores por defecto.[/yellow]"
+        )
         pass
 
     # Configurar Tabla
@@ -418,6 +438,7 @@ def remove_from_list(
     except Exception as e:
         console.print(f"[bold red]Error:[/bold red] {e}")
         raise typer.Exit(code=1)
+
 
 if __name__ == "__main__":
     create_profile("leo", 123456, "dfggdfdfhghfg", "your_chat_id")

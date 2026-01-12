@@ -1,6 +1,6 @@
 import typer
 
-from totelegram.commands import profile
+from totelegram.commands import profile, upload
 from totelegram.console import console
 
 app = typer.Typer(
@@ -10,6 +10,7 @@ app = typer.Typer(
 )
 
 app.add_typer(profile.app, name="profile")
+app.add_typer(upload.app, name="upload")
 
 
 @app.callback()

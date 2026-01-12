@@ -119,6 +119,7 @@ class ProfileManager:
         self._save_config(config)
 
     def get_profile_path(self, profile_name: Optional[str] = None) -> Path:
+        """Devuelve el path al archivo .env del perfil activo o el especificado."""
         config = self._ensure_registry_integrity()
 
         target = profile_name if profile_name else config.active
@@ -139,10 +140,6 @@ class ProfileManager:
     def list_profiles(self) -> ProfileRegistry:
         """Devuelve el objeto tipado en lugar de un dict."""
         return self._ensure_registry_integrity()
-
-    def profile_exists(self, profile_name: str) -> bool:
-        config = self._load_config()
-        return profile_name in config.profiles
 
     def get_profile_values(
         self, profile_name: Optional[str] = None
@@ -253,3 +250,7 @@ class ProfileManager:
             if "," in raw_val:
                 return [x.strip() for x in raw_val.split(",") if x.strip()]
             return [raw_val.strip()]
+
+    def exists_profile(self, profile_name: str) -> bool:
+        config = self._load_config()
+        return profile_name in config.profiles
