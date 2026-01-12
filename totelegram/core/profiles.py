@@ -11,15 +11,25 @@ from totelegram.core.setting import Settings, get_user_config_dir
 
 APP_session_name = "toTelegram"
 CONFIG_DIR = Path(get_user_config_dir(APP_session_name))
-PROFILES_DIR = CONFIG_DIR / "profiles"
-CONFIG_FILE = CONFIG_DIR / "config.json"
-
 logger = logging.getLogger(__name__)
 
 
 class ProfileManager:
+    PROFILES_DIR = CONFIG_DIR / "profiles"
+    CONFIG_FILE = CONFIG_DIR / "config.json"
+
     def __init__(self):
         self._ensure_structure()
+
+    @property
+    def has_active_profile(self) -> bool:
+        config = self._load_config()
+        return config.active is not None
+
+    @property
+    def active_profile_name(self) -> Optional[str]:
+        config = self._load_config()
+        return config.active
 
     def _ensure_registry_integrity(self) -> ProfileRegistry:
         """
@@ -43,7 +53,7 @@ class ProfileManager:
                 dirty = True
 
         # Descubrimiento
-        existing_env_files = glob.glob(str(PROFILES_DIR / "*.env"))
+        existing_env_files = glob.glob(str(ProfileManager.PROFILES_DIR / "*.env"))
         for env_path in existing_env_files:
             profile_name = Path(env_path).stem
 
@@ -70,17 +80,17 @@ class ProfileManager:
 
     def _ensure_structure(self):
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-        PROFILES_DIR.mkdir(parents=True, exist_ok=True)
-        if not CONFIG_FILE.exists():
+        ProfileManager.PROFILES_DIR.mkdir(parents=True, exist_ok=True)
+        if not ProfileManager.CONFIG_FILE.exists():
             self._save_config(ProfileRegistry())
 
     def _load_config(self) -> ProfileRegistry:
         """Carga la configuración y la devuelve como objeto Pydantic validado."""
-        if not CONFIG_FILE.exists():
+        if not ProfileManager.CONFIG_FILE.exists():
             return ProfileRegistry()
 
         try:
-            with open(CONFIG_FILE, "r") as f:
+            with open(ProfileManager.CONFIG_FILE, "r") as f:
                 data = json.load(f)
             return ProfileRegistry(**data)
         except (json.JSONDecodeError, ValueError):
@@ -88,7 +98,7 @@ class ProfileManager:
 
     def _save_config(self, config: ProfileRegistry):
         """Guarda el objeto Pydantic en disco."""
-        with open(CONFIG_FILE, "w") as f:
+        with open(ProfileManager.CONFIG_FILE, "w") as f:
             f.write(config.model_dump_json(indent=4))
 
     def create_profile(self, profile_name: str, api_id, api_hash, chat_id) -> Path:
@@ -100,7 +110,7 @@ class ProfileManager:
             f"profile_name={profile_name}\n"
         )
 
-        file_path = PROFILES_DIR / f"{profile_name}.env"
+        file_path = ProfileManager.PROFILES_DIR / f"{profile_name}.env"
         with open(file_path, "w") as f:
             f.write(env_content)
 
@@ -139,6 +149,7 @@ class ProfileManager:
 
     def list_profiles(self) -> ProfileRegistry:
         """Devuelve el objeto tipado en lugar de un dict."""
+        # TODO: devuelve un objeto en vez de algo logico segun su nombre de método.
         return self._ensure_registry_integrity()
 
     def get_profile_values(

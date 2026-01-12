@@ -1,4 +1,5 @@
 import unittest
+from contextlib import contextmanager
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import MagicMock, patch
@@ -15,59 +16,121 @@ class TestCliProfile(unittest.TestCase):
     def setUp(self):
         self.test_dir_obj = TemporaryDirectory()
         self.test_dir = Path(self.test_dir_obj.name)
+        fake_profiles_dir = self.test_dir / "profiles"
 
-        self.patcher_config = patch(
+        self.patcher_config_dir = patch(
             "totelegram.core.profiles.CONFIG_DIR", self.test_dir
         )
+        self.patcher_config_file = patch(
+            "totelegram.core.profiles.ProfileManager.CONFIG_FILE",
+            self.test_dir / "config.json",
+        )
+
         self.patcher_profiles = patch(
-            "totelegram.core.profiles.PROFILES_DIR", self.test_dir / "profiles"
-        )
-        self.patcher_file = patch(
-            "totelegram.core.profiles.CONFIG_FILE", self.test_dir / "config.json"
+            "totelegram.core.profiles.ProfileManager.PROFILES_DIR", fake_profiles_dir
         )
 
-        self.mock_config_dir = self.patcher_config.start()
+        self.mock_config_dir = self.patcher_config_dir.start()
+        self.mock_config_file = self.patcher_config_file.start()
         self.mock_profiles_dir = self.patcher_profiles.start()
-        self.mock_config_file = self.patcher_file.start()
 
+        self.mock_profiles_dir.mkdir(parents=True, exist_ok=True)
         self.pm = ProfileManager()
 
     def tearDown(self):
-        self.patcher_config.stop()
         self.patcher_profiles.stop()
-        self.patcher_file.stop()
         self.test_dir_obj.cleanup()
 
+    @patch("totelegram.commands.profile.uuid")
     @patch("totelegram.commands.profile.ValidationService")
-    def test_create_profile_happy_path(self, MockValidationService):
+    def test_create_profile_happy_path(self, MockValidationService, mock_uuid):
         """
-        Crear un perfil válido.
-        Simulamos que ValidationService devuelve True (Telegram validó OK).
+        Prueba el flujo completo exitoso:
+        1. Genera nombre temporal.
+        2. Simula creación de sesión física (Pyrogram).
+        3. Valida chat OK.
+        4. Renombra archivo y crea .env.
         """
+
+        # El temp será "temp_12345678.session"
+        mock_uuid.uuid4.return_value.hex = "12345678"
         instance = MockValidationService.return_value
-        instance.validate_setup.return_value = True
 
-        # inputs del usuario: Nombre, API_ID, API_HASH, CHAT_ID, Confirmar activación
-        inputs = "test_user\n12345\nabcdef\n-100123\ny\n"
+        # Simulamos el context manager de validate_session
+        @contextmanager
+        def side_effect_validate_session(session_name, api_id, api_hash):
+            fake_session_path = self.mock_profiles_dir / f"{session_name}.session"
+            fake_session_path.touch()
+            yield MagicMock()
 
-        result = runner.invoke(app, ["create"], input=inputs)
+        instance.validate_session.side_effect = side_effect_validate_session
+        instance.validate_chat_id.return_value = True
 
-        # Verificar que el comando terminó bien
-        self.assertEqual(result.exit_code, 0)
-        self.assertIn("Perfil 'test_user' guardado exitosamente", result.stdout)
+        args = [
+            "create",
+            "--profile-name",
+            "test_user",
+            "--api-id",
+            "11111",
+            "--api-hash",
+            "fake_hash_123",
+            "--chat-id",
+            "-100123",
+        ]
+        result = runner.invoke(app, args)
 
-        # Verificar que el archivo .env existe físicamente
-        env_path = self.mock_profiles_dir / "test_user.env"
-        self.assertTrue(env_path.exists())
+        # El comando terminó bien
+        self.assertEqual(result.exit_code, 0, f"Salida inesperada: {result.stdout}")
+        self.assertIn("guardado exitosamente", result.stdout)
 
-        # Verificar que se marcó como activo
+        # El archivo temporal YA NO debe existir (fue renombrado)
+        temp_path = self.mock_profiles_dir / "temp_12345678.session"
+        self.assertFalse(
+            temp_path.exists(), "El archivo temporal no se eliminó/renombró"
+        )
+
+        # El archivo final .session SI debe existir
+        final_session = self.mock_profiles_dir / "test_user.session"
+        self.assertTrue(final_session.exists(), "No se creó el archivo de sesión final")
+
+        # El archivo .env SI debe existir
+        final_env = self.mock_profiles_dir / "test_user.env"
+        self.assertTrue(final_env.exists(), "No se creó el archivo .env")
+
+        # El perfil debe estar activo
         registry = self.pm.list_profiles()
         self.assertEqual(registry.active, "test_user")
+
+    def test_create_profile_prevents_overwrite(self):
+        """
+        Verifica que no se puede crear un perfil si ya existe (Inmutabilidad).
+        """
+        # Crear un perfil previo
+        self.pm.create_profile("dummy", 1, "h", "c")
+
+        # Intentar crear uno con el mismo nombre
+        args = [
+            "create",
+            "--profile-name",
+            "dummy",
+            "--api-id",
+            "999",
+            "--api-hash",
+            "new_hash",
+            "--chat-id",
+            "new_chat",
+        ]
+
+        # La entrada "dummy" al prompt debería fallar inmediatamente o el callback
+        result = runner.invoke(app, args)
+
+        self.assertNotEqual(result.exit_code, 0)
+        self.assertIn("ya existe", result.stdout)
 
     @patch("totelegram.commands.profile.ValidationService")
     def test_create_profile_validation_failed_aborted(self, MockValidationService):
         """
-        Prueba CRÍTICA: Simula que el Login es válido, pero el CHAT_ID es inválido.
+        Simula que el Login es válido, pero el CHAT_ID es inválido.
         El usuario decide NO guardar el perfil.
         """
         instance = MockValidationService.return_value
@@ -78,13 +141,12 @@ class TestCliProfile(unittest.TestCase):
         # Simular que la validación del CHAT_ID falla (devuelve False)
         instance.validate_chat_id.return_value = False
 
-
         inputs = "bad_user\n12345\nfake_hash\n-100123\nn\n"
         result = runner.invoke(app, ["create"], input=inputs)
 
         # Verificar que NO se creó el archivo
         env_path = self.mock_profiles_dir / "bad_user.env"
-        self.assertFalse(env_path.exists())
+        self.assertFalse(env_path.exists(), "El archivo .env no debería haberse creado")
 
         # Verificar que el comando terminó bien (cancelación voluntaria es exit 0)
         self.assertEqual(result.exit_code, 0)

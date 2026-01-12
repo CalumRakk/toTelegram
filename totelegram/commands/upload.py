@@ -6,7 +6,7 @@ from filelock import FileLock, Timeout
 
 from totelegram.console import console
 from totelegram.core.enums import JobStatus
-from totelegram.core.profiles import PROFILES_DIR, ProfileManager
+from totelegram.core.profiles import ProfileManager
 from totelegram.core.setting import get_settings
 from totelegram.services.chunking import ChunkingService
 from totelegram.services.snapshot import SnapshotService
@@ -35,30 +35,26 @@ def upload_file(
     """Sube archivos a Telegram usando la configuración activa."""
 
     try:
-        if profile_name:
-            try:
+        try:
+            if profile_name:
                 if not pm.exists_profile(profile_name):
-                    console.print(
-                        f"[bold red]El perfil '{profile_name}' no existe.[/bold red]"
-                    )
-                    raise typer.Exit(code=1)
-                env_path = pm.get_profile_path(profile_name)
-            except ValueError:
+                    raise ValueError("profile_not_found")
+            else:
+                profile_name = pm.get_name_active_profile()
+
+            env_path = pm.get_profile_path(profile_name)
+        except ValueError:
+            if profile_name:
                 console.print(
                     f"[bold red]El perfil '{profile_name}' no existe.[/bold red]"
                 )
-                raise typer.Exit(code=1)
-        else:
-            try:
-                profile_name = pm.get_name_active_profile()
-                env_path = pm.get_profile_path(profile_name)
-            except ValueError:
+            else:
                 console.print("[bold red]No hay perfil activo.[/bold red]")
                 console.print("Ejecuta 'totelegram profile create' primero.")
-                raise typer.Exit(code=1)
+            raise typer.Exit(code=1)
 
         console.print(f"[blue]Usando perfil: {profile_name}[/blue]")
-        lock_path = PROFILES_DIR / f"{profile_name}.lock"
+        lock_path = ProfileManager.PROFILES_DIR / f"{profile_name}.lock"
         lock = FileLock(lock_path, timeout=0)
         with lock:
             settings = get_settings(env_path)
@@ -111,7 +107,4 @@ def upload_file(
         console.print(
             "Hay otra instancia de toTelegram subiendo archivos con este perfil."
         )
-        raise typer.Exit(code=1)
-    except Exception as e:
-        console.print(f"[bold red]Fallo crítico:[/bold red] {e}")
         raise typer.Exit(code=1)

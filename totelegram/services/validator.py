@@ -14,11 +14,12 @@ from pyrogram.errors import (
 from pyrogram.types import Chat
 from rich.console import Console
 
-from totelegram.core.setting import get_user_config_dir
+from totelegram.core.profiles import ProfileManager
 
 logger = logging.getLogger(__name__)
 
 
+# TODO: nombre de clase demasiado generico, deberia incluir "Telegram" o algo similar.
 class ValidationService:
     """
     Servicio dedicado exclusivamente a validar credenciales y permisos
@@ -29,24 +30,26 @@ class ValidationService:
         self.console = console
 
     @contextmanager
-    def validate_session(self, profile_name: str, api_id: int, api_hash: str)-> Generator[Client, None, None]:
-        workdir = get_user_config_dir("toTelegram") / "profiles"
-        workdir.mkdir(parents=True, exist_ok=True)
+    def validate_session(
+        self, profile_name: str, api_id: int, api_hash: str
+    ) -> Generator[Client, None, None]:
+        ProfileManager.PROFILES_DIR.mkdir(parents=True, exist_ok=True)
 
         self.console.print(
             f"\n[bold blue]Iniciando validación para '{profile_name}'...[/bold blue]"
         )
 
+        # TODO: TENGO LA INSTANCIA DE CLIENTE DUPLICADA EN VARIOS LADOS DEL CÓDIGO. PELIGRO!
         client = Client(
             name=profile_name,
             api_id=api_id,
             api_hash=api_hash,
-            workdir=str(workdir),
+            workdir=str(ProfileManager.PROFILES_DIR),
             in_memory=False,
         )
 
         try:
-            client.start() # type: ignore
+            client.start()  # type: ignore
             me = cast(Chat, client.get_me())
             self.console.print(
                 f"[green]✔ Login exitoso como:[/green] {me.first_name} (@{me.username})"
@@ -57,9 +60,7 @@ class ValidationService:
             logger.debug("Error: API ID o Hash inválidos.")
             raise e
         except ApiIdPublishedFlood as e:
-            logger.debug(
-                "Error: API ID baneado públicamente."
-            )
+            logger.debug("Error: API ID baneado públicamente.")
             raise e
         except Exception as e:
             logger.debug(f"Error: inesperado: {e}")
@@ -67,6 +68,7 @@ class ValidationService:
         finally:
             if client.is_connected:
                 client.stop()  # type: ignore
+
     def validate_chat_id(self, client: Client, target_chat_id: str) -> bool:
         """Valida que el chat ID o username sea accesible."""
         self.console.print(f"[yellow]Buscando chat '{target_chat_id}'...[/yellow]")

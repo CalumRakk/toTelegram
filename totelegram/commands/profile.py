@@ -1,9 +1,10 @@
 import os
+import uuid
+from pathlib import Path
 from typing import List, Optional
 
 import typer
 from pydantic import ValidationError
-from pyrogram.errors import ApiIdInvalid
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.markup import escape
@@ -96,14 +97,30 @@ def normalize_string(value: str):
     return value.strip()
 
 
-def validate_profile_name(value: str):
-    cleaned = normalize_string(value)
+def validate_profile_name(profile_name: str):
+    cleaned = normalize_string(profile_name)
+    # TODO: un nombre como `mi-perfil` no es válido en isidentifier ¿es un error?
+
     if not cleaned.isidentifier():
         raise typer.BadParameter(
             "El nombre del perfil solo puede contener letras, números y guiones bajos, y no puede comenzar con un número."
         )
-    # TODO: un nombre como `mi-perfil` no es válido en isidentifier ¿es un error?
-    return cleaned
+    profile_name = cleaned
+
+    if not pm.exists_profile(cleaned):
+        return profile_name
+
+    console.print(
+        Panel(
+            f"[bold red]El perfil '{profile_name}' ya existe.[/bold red]\n\n"
+            "Por seguridad y consistencia de datos (ADR-001), los perfiles son inmutables.\n"
+            f"Si deseas reutilizar este nombre, primero debes eliminar el perfil existente:\n\n"
+            f"   [yellow]totelegram profile remove {profile_name}[/yellow]",
+            title="Operación no permitida",
+            border_style="red",
+        )
+    )
+    raise typer.Exit(code=1)
 
 
 @app.command("create")
@@ -120,64 +137,155 @@ def create_profile(
     ),
     chat_id: str = typer.Option(
         ...,
-        help="Chat ID o Usersession_name destino",
+        help="Chat ID o Username destino",
         prompt=True,
         callback=normalize_string,
     ),
 ):
     """Crea un nuevo perfil de configuración interactivamente."""
+
+    final_session_file = ProfileManager.PROFILES_DIR / f"{profile_name}.session"
+    temp_session_name = f"temp_{uuid.uuid4().hex[:8]}"
+    temp_session_file = ProfileManager.PROFILES_DIR / f"{temp_session_name}.session"
+
+    should_save = _run_interactive_validation(
+        temp_session_name=temp_session_name,
+        api_id=api_id,
+        api_hash=api_hash,
+        chat_id=chat_id,
+    )
+
+    if not should_save:
+        raise typer.Exit(code=0)
+
     try:
-        if pm.exists_profile(profile_name):
-            console.print(f"[bold red]El perfil '{profile_name}' ya existe.[/bold red]")
-            if typer.confirm("¿Deseas sobreescribirlo?"):
-                console.print(
-                    f"[yellow]Sobrescribiendo el perfil '{profile_name}'...[/yellow]"
-                )
-            else:
-                console.print("Operación cancelada.")
-                return
+        _commit_profile_creation(
+            profile_name=profile_name,
+            temp_session_file=temp_session_file,
+            final_session_file=final_session_file,
+            api_id=api_id,
+            api_hash=api_hash,
+            chat_id=chat_id,
+        )
+    except Exception as e:
+        console.print(f"[bold red]Error fatal guardando el perfil: {e}[/bold red]")
 
-        validator = ValidationService(console)
-        with validator.validate_session(
-            profile_name.strip(), api_id, api_hash.strip()
-        ) as client:
-            is_valid = validator.validate_chat_id(client, chat_id)
-            if not is_valid:
-                console.print("\n[bold red]La validación falló.[/bold red]")
-                if not typer.confirm("¿Guardar de todos modos?"):
-                    console.print("Operación cancelada.")
-                    return
+        if final_session_file.exists():
+            final_session_file.unlink()
+        if temp_session_file.exists():
+            temp_session_file.unlink()
 
-            path = pm.create_profile(
-                profile_name=profile_name,
-                api_id=api_id,
-                api_hash=api_hash,
-                chat_id=chat_id,
-            )
+        possible_env = ProfileManager.PROFILES_DIR / f"{profile_name}.env"
+        if possible_env.exists():
+            possible_env.unlink()
+
+        raise e
+
+    _suggest_profile_activation(profile_name)
+
+
+def _run_interactive_validation(
+    temp_session_name: str, api_id: int, api_hash: str, chat_id: str
+) -> bool:
+    """
+    Maneja la lógica de validación con Pyrogram y la interacción con el usuario.
+    Retorna True si el usuario quiere/puede guardar, False si cancela o falla login crítico.
+    """
+    validator = ValidationService(console)
+    temp_session_file = ProfileManager.PROFILES_DIR / f"{temp_session_name}.session"
+
+    try:
+        with validator.validate_session(temp_session_name, api_id, api_hash) as client:
+            is_chat_valid = validator.validate_chat_id(client, chat_id)
+
+            if is_chat_valid:
+                return True
 
             console.print(
-                f"\n[bold green]✔ Perfil '{profile_name}' guardado exitosamente![/bold green]"
+                Panel(
+                    f"[yellow]⚠ Atención:[/yellow] La sesión de Telegram se inició correctamente, "
+                    f"pero hubo un problema con el CHAT_ID '{chat_id}'.\n\n"
+                    "Puedes guardar el perfil ahora para no perder el inicio de sesión "
+                    "y corregir el chat más tarde usando:\n"
+                    "[cyan]totelegram profile set CHAT_ID <nuevo_valor>[/cyan]",
+                    title="Chat no accesible",
+                    border_style="yellow",
+                )
             )
-            console.print(f"Ruta: {path}")
 
-            config = pm.list_profiles()
-            if config.active is None:
+            if typer.confirm("¿Deseas guardar el perfil de todos modos?", default=True):
+                console.print("[dim]Continuando con el guardado...[/dim]")
+                return True
+
+            console.print("[red]Operación cancelada por el usuario.[/red]")
+            return False
+
+    except Exception as e:
+        console.print(
+            f"[bold red]Error durante la validación de credenciales: {e}[/bold red]"
+        )
+        if temp_session_file.exists():
+            temp_session_file.unlink()
+        return False
+
+
+def _commit_profile_creation(
+    profile_name: str,
+    temp_session_file: Path,
+    final_session_file: Path,
+    api_id: int,
+    api_hash: str,
+    chat_id: str,
+):
+    """
+    Realiza las operaciones de escritura en disco.
+    Asume que la validación ya pasó. Lanza excepciones si algo falla.
+    """
+    if not temp_session_file.exists():
+        raise FileNotFoundError("Se perdió el archivo de sesión temporal.")
+
+    if final_session_file.exists():
+        raise FileExistsError(
+            f"El perfil '{profile_name}' ya existe (colisión detectada)."
+        )
+
+    temp_session_file.rename(final_session_file)
+
+    try:
+        path = pm.create_profile(
+            profile_name=profile_name,
+            api_id=api_id,
+            api_hash=api_hash,
+            chat_id=chat_id,
+        )
+        console.print(
+            f"\n[bold green]✔ Perfil '{profile_name}' guardado exitosamente![/bold green]"
+        )
+        console.print(f"Ruta: {path}")
+    except Exception:
+        raise
+
+
+def _suggest_profile_activation(profile_name: str):
+    """Lógica de UI para activar el perfil recién creado."""
+    try:
+        config = pm.list_profiles()
+
+        if config.active is None:
+            pm.set_active(profile_name)
+            console.print(
+                f"[green]Perfil '{profile_name}' activado automáticamente.[/green]"
+            )
+
+        elif config.active != profile_name:
+            if typer.confirm("¿Deseas activar este perfil ahora?"):
                 pm.set_active(profile_name)
                 console.print(f"[green]Perfil '{profile_name}' activado.[/green]")
-            elif config.active != profile_name:
-                if typer.confirm("¿Deseas activar este perfil ahora?"):
-                    pm.set_active(profile_name)
-                    console.print(f"[green]Perfil '{profile_name}' activado.[/green]")
-            else:
-                console.print(f"[green]Perfil '{profile_name}' activo.[/green]")
-    except ApiIdInvalid as e:
-        console.print(
-            "[bold red]Error creando perfil:[/bold red] API ID o Hash inválidos."
-        )
-        raise typer.Exit(code=1)
+
     except Exception as e:
-        console.print(f"[bold red]Error creando perfil: {e}[/bold red]")
-        raise typer.Exit(code=1)
+        console.print(
+            f"[yellow]No se pudo activar el perfil automáticamente: {e}[/yellow]"
+        )
 
 
 @app.command("use")

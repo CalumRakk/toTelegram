@@ -29,7 +29,11 @@ def main(
 
 def run_script():
     """Entrada para setup.py"""
-    app()
+    try:
+        app()
+    except Exception as e:
+        console.print(f"[bold red]Error:[/bold red] {e}")
+        raise e
 
 
 if __name__ == "__main__":
