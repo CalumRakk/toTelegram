@@ -48,7 +48,11 @@ class TelegramSession:
             self.api_hash = api_hash
             self.workdir = workdir
 
-    def __enter__(self) -> Client:
+    def start(self) -> Client:
+        """Inicia la conexión manualmente."""
+        if self.client and self.client.is_connected:
+            return self.client
+
         logger.info(f"Iniciando sesión de Telegram: {self.name}")
         from pyrogram import Client  # type: ignore
 
@@ -72,7 +76,8 @@ class TelegramSession:
             logger.error(f"Error iniciando cliente Telegram: {e}")
             raise e
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def stop(self):
+        """Detiene la conexión manualmente."""
         if self.client and self.client.is_connected:
             logger.info("Cerrando sesión de Telegram...")
             try:
@@ -81,9 +86,20 @@ class TelegramSession:
                 logger.warning(f"Error al cerrar cliente (ignorable): {e}")
         self.client = None
 
+    def __enter__(self) -> Client:
+        """Soporte para Context Manager (with)."""
+        return self.start()
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Soporte para Context Manager (with)."""
+        self.stop()
+
 
 def parse_message_json_data(json_data: dict) -> Message:
     """Utilidad para reconstruir objetos Message desde JSON almacenado en BD."""
+    from pyrogram.enums import MessageMediaType
+    from pyrogram.types import Chat, Message
+
     data = json_data.copy()
     if "_" in data:
         data.pop("_")

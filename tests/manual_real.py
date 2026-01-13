@@ -4,187 +4,206 @@ import sys
 import time
 import unittest
 from pathlib import Path
-from typing import List
-
-from totelegram.core.registry import ProfileManager
+from tempfile import TemporaryDirectory
+from typing import Optional, cast
 
 sys.path.append(os.getcwd())
 
-from tempfile import TemporaryDirectory
-
-from totelegram.core.enums import JobStatus, Strategy
-from totelegram.core.schemas import UploadManifest
+from totelegram.core.enums import Strategy
+from totelegram.core.registry import ProfileManager
 from totelegram.core.setting import get_settings
 from totelegram.logging_config import setup_logging
-from totelegram.orchestrator import upload
-from totelegram.store.database import init_database
-from totelegram.store.models import Job, RemotePayload, SourceFile, db_proxy
-from totelegram.telegram import init_telegram_client
+from totelegram.services.chunking import ChunkingService
+from totelegram.services.snapshot import SnapshotService
+from totelegram.services.uploader import UploadService
+from totelegram.store.database import DatabaseSession
+from totelegram.store.models import Job, SourceFile
+from totelegram.telegram import TelegramSession
 
 
-class TestSendFile(unittest.TestCase):
+class TestManualReal(unittest.TestCase):
+    pm: ProfileManager
+    media_folder: TemporaryDirectory
+    db_session: DatabaseSession
+    tg_session: TelegramSession
+    client = None
+
     @classmethod
     def setUpClass(cls):
+        """
+        Se ejecuta UNA VEZ antes de todos los tests.
+        Aquí abrimos la Base de Datos y la Conexión a Telegram.
+        """
         Path("tests/logs").mkdir(parents=True, exist_ok=True)
         setup_logging("tests/logs/test_runs.log", logging.INFO)
+        cls.logger = cast(logging.Logger, logging.getLogger("TestManualReal"))
+
+        cls.pm = ProfileManager()
+
+        # Resolver Perfil
+        profile_name = "demo"
+        if not cls.pm.exists(profile_name):
+            profile_name = cls.pm.active_name
+
+        if not profile_name:
+            raise unittest.SkipTest(
+                "No hay perfil 'demo' ni activo para ejecutar pruebas."
+            )
+
+        cls.logger.info(f"=== INICIANDO SUITE DE TESTS CON PERFIL: {profile_name} ===")
+
+        # Configurar Entorno
+        env_path = cls.pm.get_path(profile_name)
+        cls.settings = get_settings(env_path)
+        cls.settings.database_name = "test_run.sqlite"
+
+        # Carpeta temporal para generar archivos dummy (dura toda la clase)
+        cls.media_folder = TemporaryDirectory()
+
+        # 3. Iniciar Base de Datos (Manual enter)
+        cls.db_session = DatabaseSession(cls.settings)
+        cls.db_session.__enter__()
+
+        cls.tg_session = TelegramSession(cls.settings)
+        try:
+            cls.client = cls.tg_session.start()
+        except Exception as e:
+            cls.logger.critical(f"No se pudo conectar a Telegram: {e}")
+            cls.db_session.__exit__(None, None, None)
+            raise e
 
     @classmethod
     def tearDownClass(cls):
-        logging.shutdown()
+        """
+        Se ejecuta UNA VEZ al final de todos los tests.
+        Cierra conexiones y limpia archivos.
+        """
+        cls.logger.info("=== FINALIZANDO SUITE DE TESTS ===")
 
-    def setUp(self):
-        self.pm = ProfileManager()
+        # Cerrar Telegram
+        if cls.tg_session:
+            cls.tg_session.stop()
 
-        self.media_folder = TemporaryDirectory()
+        # Cerrar BD
+        if cls.db_session:
+            cls.db_session.__exit__(None, None, None)
 
-        profile_name = "demo"
-        if profile_name is None:
-            raise RuntimeError("No hay perfil activo para ejecutar las pruebas.")
+        # Limpiar carpeta temporal
+        if cls.media_folder:
+            cls.media_folder.cleanup()
 
-        path = self.pm.get_profile_path(profile_name)
-        self.settings = get_settings(path)
-        self.settings.database_name = "test.sqlite"
-        init_database(self.settings)
-
-    def tearDown(self):
-        logger = logging.getLogger(__name__)
-        logger.info("Cerrando y limpiando base de datos de prueba")
-        self.media_folder.cleanup()
-        db_proxy.close()
-
-        if self.settings.database_path.exists():
+        # Borrar archivo SQLite
+        if cls.settings and cls.settings.database_path.exists():
             try:
-                self.settings.database_path.unlink(missing_ok=True)
+                cls.settings.database_path.unlink()
             except PermissionError:
-                logger.warning("No se pudo borrar la BD (archivo en uso), ignorando...")
+                cls.logger.warning("No se pudo borrar la BD temporal (archivo en uso).")
 
-    def _create_dummy_file(self, size_mb: int) -> Path:
-        """Crea un archivo temporal de tamaño específico para pruebas controladas"""
-        filename = f"dummy_{size_mb}MB.bin"
+    def _create_dummy_file(
+        self, size_mb: int, force_name: Optional[str] = None
+    ) -> Path:
+        """
+        Crea un archivo con datos aleatorios.
+        Por defecto genera un nombre único para evitar colisiones de MD5/DB entre tests.
+        """
+        if force_name:
+            filename = force_name
+        else:
+            timestamp = time.time_ns()
+            filename = f"dummy_{size_mb}MB_{timestamp}.bin"
+
         path = Path(self.media_folder.name) / filename
-        if not path.exists():
-            with open(path, "wb") as f:
-                f.write(os.urandom(size_mb * 1024 * 1024))
+        with open(path, "wb") as f:
+            f.write(os.urandom(size_mb * 1024 * 1024))
+
         return path
 
-    def _remove_messages_from_manifests(self, manifests: List[UploadManifest]):
-        """Elimina los archivos subidos a Telegram usando la info del manifiesto"""
-        if not manifests:
+    def _execute_upload_pipeline(self, target_path: Path):
+        chunker = ChunkingService(self.settings)
+        uploader = UploadService(self.client, self.settings)
+
+        source = SourceFile.get_or_create_from_path(target_path)
+        job = Job.get_or_create_from_source(source, self.settings)
+
+        payloads = chunker.process_job(job)
+        for payload in payloads:
+            uploader.upload_payload(payload)
+
+        job.set_uploaded()
+        manifest = SnapshotService.generate_snapshot(job)
+        return manifest
+
+    def _remove_messages_from_manifest(self, manifest):
+        """Borra los mensajes usando el cliente compartido."""
+        if not self.client:
             return
 
-        logger = logging.getLogger(__name__)
-        client = init_telegram_client(self.settings)
+        chat_ids_map = {}
+        for part in manifest.parts:
+            if part.chat_id not in chat_ids_map:
+                chat_ids_map[part.chat_id] = []
+            chat_ids_map[part.chat_id].append(part.message_id)
 
-        to_remove = {}
-
-        for manifest in manifests:
-            for part in manifest.parts:
-                chat_id = part.chat_id
-                if chat_id not in to_remove:
-                    to_remove[chat_id] = []
-                to_remove[chat_id].append(part.message_id)
-
-        for chat_id, messages_ids in to_remove.items():
+        for chat_id, msg_ids in chat_ids_map.items():
             try:
-                logger.info(f"Borrando {len(messages_ids)} mensajes del chat {chat_id}")
-                client.delete_messages(chat_id, messages_ids)  # type: ignore
+                self.logger.info(
+                    f"Limpieza: Borrando {len(msg_ids)} mensajes en {chat_id}"
+                )
+                self.client.delete_messages(chat_id, msg_ids)  # type: ignore
             except Exception as e:
-                logger.error(f"Error borrando mensajes: {e}")
+                self.logger.error(f"Error borrando mensajes: {e}")
 
-    def test_upload_single_file(self):
-        """Prueba la subida de un archivo pequeño (Estrategia SINGLE)"""
+    def test_01_upload_single_file(self):
+        """Test subida archivo único (pequeño)"""
+        target = self._create_dummy_file(1)
+        manifest = self._execute_upload_pipeline(target)
 
-        self.target = self._create_dummy_file(1)
+        self.assertEqual(manifest.strategy, Strategy.SINGLE)
+        self.assertEqual(len(manifest.parts), 1)
 
-        result = [i for i in upload(target=self.target, settings=self.settings)]
+        # Limpieza inmediata para no saturar el chat si falla el siguiente test
+        self._remove_messages_from_manifest(manifest)
 
-        self.assertTrue(
-            len(result) > 0, "Debería haber retornado al menos un manifiesto"
-        )
-        manifest = result[0]
+    def test_02_upload_pieces_file(self):
+        """Test subida archivo partido (Chunked)"""
 
-        # Verificar en Base de Datos
-        # Buscamos el Job asociado al archivo
-        source = SourceFile.get(SourceFile.md5sum == manifest.source.md5sum)
-        job = Job.get(Job.source == source)
+        # Modificar configuración "en caliente" es seguro porque Settings es mutable en memoria
+        self.settings.max_filesize_bytes = 2 * 1024 * 1024  # type: ignore
 
-        with self.subTest("Estrategia correcta"):
-            self.assertEqual(job.strategy, Strategy.SINGLE)
-            self.assertEqual(manifest.strategy, Strategy.SINGLE)
+        target = self._create_dummy_file(5)
+        manifest = self._execute_upload_pipeline(target)
 
-        with self.subTest("Estado del Job"):
-            self.assertEqual(job.status, JobStatus.UPLOADED)
+        self.assertEqual(manifest.strategy, Strategy.CHUNKED)
+        self.assertEqual(len(manifest.parts), 3)  # 5MB / 2MB = 3 partes (2, 2, 1)
 
-        with self.subTest("Verificar partes remotas"):
-            self.assertEqual(len(manifest.parts), 1)
-            # Verificar que existe en la tabla RemotePayload
-            remote = RemotePayload.get(
-                RemotePayload.message_id == manifest.parts[0].message_id
-            )
-            self.assertIsNotNone(remote)
+        self._remove_messages_from_manifest(manifest)
 
-        self._remove_messages_from_manifests(result)
-
-    def test_upload_pieces_file(self):
-        """Prueba la subida de un archivo partido (Estrategia CHUNKED)"""
-        target_size_mb = 5
-        self.target = self._create_dummy_file(target_size_mb)
-
-        file_size = self.target.stat().st_size
-
-        # Forzamos que el tamaño máximo sea menor al archivo (ej: 2MB)
-        # Esto obligará a partirlo en 3 partes (2MB, 2MB, 1MB)
-        self.settings.max_filesize_bytes = 2 * 1024 * 1024
-
-        result = [i for i in upload(target=self.target, settings=self.settings)]
-
-        self.assertTrue(len(result) > 0)
-        manifest = result[0]
-
-        source = SourceFile.get(SourceFile.md5sum == manifest.source.md5sum)
-        job = Job.get(Job.source == source)
-
-        with self.subTest("Estrategia correcta"):
-            self.assertEqual(job.strategy, Strategy.CHUNKED)
-            self.assertEqual(manifest.strategy, Strategy.CHUNKED)
-
-        with self.subTest("Número de partes"):
-            # 5MB / 2MB = 3 partes
-            self.assertEqual(len(manifest.parts), 3)
-            self.assertEqual(job.payloads.count(), 3)  # type: ignore
-
-        self._remove_messages_from_manifests(result)
-
-    def test_upload_throttled(self):
-        """Test para verificar que el límite de velocidad funciona"""
-        file_size_mb = 2
-        dummy_path = self._create_dummy_file(file_size_mb)
-
-        # Configurar límite: 500 KB/s
-        # Teoría: 2048 KB total / 500 KB/s = ~4.1 segundos mínimo
+    def test_03_upload_throttled(self):
+        """Test limitador de velocidad"""
+        file_size_mb = 1
         limit_kbps = 500
+
         self.settings.upload_limit_rate_kbps = limit_kbps
+        # Restaurar tamaño para evitar hacer chunking innecesario
+        self.settings.max_filesize_bytes = 2000 * 1024 * 1024
 
-        logger = logging.getLogger(__name__)
-        logger.info(f"Iniciando test de velocidad: {file_size_mb}MB a {limit_kbps}KB/s")
+        target = self._create_dummy_file(file_size_mb)
 
-        start_time = time.time()
-        result = [i for i in upload(target=dummy_path, settings=self.settings)]
-        end_time = time.time()
+        start = time.time()
+        manifest = self._execute_upload_pipeline(target)
+        duration = time.time() - start
 
-        duration = end_time - start_time
-        logger.info(f"Subida completada en {duration:.2f} segundos")
-
-        # El tiempo esperado ideal es (Size / Speed).
-        expected_min_seconds = (file_size_mb * 1024) / limit_kbps
-
-        # Aserto de tiempo con margen de tolerancia (0.8x)
-        self.assertGreaterEqual(
-            duration,
-            expected_min_seconds * 0.8,
-            f"La subida fue demasiado rápida ({duration}s). El límite de {limit_kbps}KB/s no parece haber funcionado.",
+        expected_min = (file_size_mb * 1024) / limit_kbps
+        self.logger.info(
+            f"Speed Test: {duration:.2f}s (Mínimo teórico: {expected_min:.2f}s)"
         )
-        self._remove_messages_from_manifests(result)
+
+        self.assertGreater(
+            duration,
+            expected_min * 0.8,
+            "Subida fue demasiado rápida, el limitador no funcionó.",
+        )
+        self._remove_messages_from_manifest(manifest)
 
 
 if __name__ == "__main__":

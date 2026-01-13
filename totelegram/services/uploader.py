@@ -59,6 +59,7 @@ class UploadService:
 
         logger.info(f"Subiendo {payload.sequence_index=} de {payload.job.id=}...")
 
+        remote = None
         with open_upload_source(
             payload.path, self.settings.upload_limit_rate_kbps
         ) as document_stream:
@@ -74,16 +75,17 @@ class UploadService:
                 )
 
                 remote = RemotePayload.register_upload(payload, tg_message)
-
-                if payload.job.strategy == Strategy.SINGLE:
-                    logger.debug(f"Borrando trozo temporal: {payload.path}")
-                    payload.path.unlink(missing_ok=True)
-
-                return remote
-
             except Exception as e:
                 logger.error(f"Error subiendo payload {payload.id}: {e}")
                 raise e
+
+        if payload.job.strategy == Strategy.CHUNKED:
+            logger.debug(f"Borrando trozo temporal: {payload.path}")
+            try:
+                payload.path.unlink(missing_ok=True)
+            except OSError as e:
+                logger.warning(f"No se pudo borrar el temporal {payload.path}: {e}")
+        return remote
 
     def _build_names(self, path: Path, payload: Payload) -> Tuple[str, Optional[str]]:
         """Determina el nombre del archivo y el caption para Telegram."""
