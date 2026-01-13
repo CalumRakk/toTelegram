@@ -10,7 +10,7 @@ app = typer.Typer(
 )
 
 app.add_typer(profile.app, name="profile")
-app.add_typer(upload.app, name="upload")
+app.command(name="upload")(upload.upload_file)
 
 
 @app.callback()

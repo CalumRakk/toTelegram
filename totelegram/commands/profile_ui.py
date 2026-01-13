@@ -12,8 +12,21 @@ class ProfileUI:
     def __init__(self, console: Console):
         self.console = console
 
-    def render_profiles_table(self, active: Optional[str], profiles: Dict[str, str]):
-        table = Table(title="Perfiles de toTelegram")
+    def render_profiles_table(
+        self, active: Optional[str], profiles: Dict[str, str], quiet: bool = False
+    ):
+        self.console.print()
+        if quiet:
+            self.console.print("Perfiles disponibles de toTelegram:")
+            for name in profiles.keys():
+                self.console.print(" - " + name)
+            return
+
+        table = Table(
+            title="Perfiles disponibles de toTelegram",
+            expand=True,
+            title_style="bold magenta",
+        )
         table.add_column("Estado", style="cyan", no_wrap=True)
         table.add_column("Nombre", style="magenta")
         table.add_column("Ruta Configuración", style="green")
@@ -58,7 +71,10 @@ class ProfileUI:
 
             if key in Settings.SENSITIVE_FIELDS and val != "-":
                 val_str = str(val)
-                display_val = val_str[:3] + "•" * (len(val_str) - 4) + val_str[-3:]
+                if len(val_str) <= 6:
+                    display_val = "•" * len(val_str)
+                else:
+                    display_val = val_str[:3] + "•" * (len(val_str) - 4) + val_str[-3:]
             else:
                 display_val = str(val)
 
@@ -109,4 +125,9 @@ Encierra el patrón entre comillas:
         )
         self.console.print(
             "Usa [yellow]totelegram profile add/remove[/yellow] para listas (ej: EXCLUDE_FILES)."
+        )
+
+    def announce_profile_used(self, profile_name: str):
+        self.console.print(
+            f"\n[bold green]Usando perfil:[/bold green] [green]{profile_name}[/green]\n"
         )

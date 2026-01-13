@@ -6,6 +6,7 @@ from pydantic import ValidationError
 
 from totelegram.commands.profile_ui import ProfileUI
 from totelegram.commands.profile_utils import (
+    UseOption,
     _finalize_profile,
     _handle_list_operation,
     _suggest_profile_activation,
@@ -55,9 +56,20 @@ def create_profile(
     _suggest_profile_activation(profile_name)
 
 
-@app.command("use")
-def use_profile(profile_name: str):
+@app.command("switch")
+def use_profile(
+    profile_name: str = typer.Argument(
+        None, help="Nombre del perfil a activar globalmente", metavar="PERFIL"
+    )
+):
     """Cambia el perfil activo."""
+    pm.get_registry()  # se usa para invocar a `_sync_registry_with_filesystem` y tener todo actualizado.
+
+    if not profile_name:
+        raise typer.BadParameter(
+            "Debes indicar un perfil. Ejemplo: totelegram profile switch <PROFILE-NAME>"
+        )
+
     try:
         pm.activate(profile_name)
         console.print(
@@ -65,26 +77,30 @@ def use_profile(profile_name: str):
         )
     except ValueError as e:
         console.print(f"[bold red]Error:[/bold red] {e}")
-        list_profiles()
+        list_profiles(quiet=True)
 
 
 @app.command("set")
 def set_config(
     key: str = typer.Argument(..., help="Clave a modificar"),
     value: str = typer.Argument(..., help="Nuevo valor"),
-    profile: Optional[str] = typer.Option(None, "--profile", "-p"),
+    use: Optional[str] = UseOption,
 ):
     """Edita una configuración."""
-    profile_name = profile or pm.active_name
-    if not profile_name:
-        console.print("[bold red]No hay perfil activo ni seleccionado.[/bold red]")
-        return
+    try:
+        profile_name = pm.resolve_name(use)
+    except ValueError as e:
+        console.print(f"[bold red]Error:[/bold red] {e}")
+        list_profiles(quiet=True)
+        raise typer.Exit(code=1)
 
     try:
         pm.update_config(key, value, profile_name=profile_name)
+        ui.announce_profile_used(profile_name)
+        checkmark_text = "[bold green]✔[/bold green]"
 
         console.print(
-            f"[bold green]✔[/bold green] {key.upper()} actualizado en '[cyan]{profile_name}[/cyan]'."
+            f"{checkmark_text} La configuracion [bold]{key.upper()}[/bold] se establecio en: '{value}'."
         )
 
     except (ValidationError, ValueError) as e:
@@ -94,39 +110,61 @@ def set_config(
 
 @app.command("add")
 def add_to_list(
-    key: str, values: List[str], profile: Optional[str] = None, force: bool = False
+    key: str, values: List[str], use: Optional[str] = UseOption, force: bool = False
 ):
-    _handle_list_operation("add", key, values, profile, force)
+    """Agrega valores a una configuración de lista."""
+    try:
+        profile_name = pm.resolve_name(use)
+    except ValueError as e:
+        console.print(f"[bold red]Error:[/bold red] {e}")
+        list_profiles(quiet=True)
+        raise typer.Exit(code=1)
+    ui.announce_profile_used(profile_name)
+    _handle_list_operation("add", key, values, profile_name, force)
 
 
 @app.command("remove")
 def remove_from_list(
-    key: str, values: List[str], profile: Optional[str] = None, force: bool = False
+    key: str, values: List[str], use: Optional[str] = UseOption, force: bool = False
 ):
-    _handle_list_operation("remove", key, values, profile, force)
+    """Elimina valores de una configuración de lista."""
+    try:
+        profile_name = pm.resolve_name(use)
+    except ValueError as e:
+        console.print(f"[bold red]Error:[/bold red] {e}")
+        list_profiles(quiet=True)
+        raise typer.Exit(code=1)
+
+    ui.announce_profile_used(profile_name)
+    _handle_list_operation("remove", key, values, profile_name, force)
 
 
 @app.command("list")
-def list_profiles():
+def list_profiles(
+    quiet: bool = typer.Option(False, "--quiet", "-q", help="Salida silenciosa")
+):
     """Enumera todos los perfiles registrados."""
     registry = pm.get_registry()
     if not registry.profiles:
         console.print("[yellow]No hay perfiles registrados.[/yellow]")
+        console.print(
+            "Usa [yellow]'totelegram profile create'[/yellow] para crear uno nuevo."
+        )
         return
-    ui.render_profiles_table(registry.active, registry.profiles)
+    ui.render_profiles_table(registry.active, registry.profiles, quiet)
 
 
 @app.command("options")
-def list_options():
+def list_options(use: Optional[str] = UseOption):
     """Lista las opciones de configuración y sus valores actuales."""
     schema = Settings.get_schema_info()
     current_settings = None
     active_name = None
 
     try:
-        path = pm.get_path()
+        active_name = pm.resolve_name(use)
+        path = pm.get_path(active_name)
         current_settings = get_settings(path)
-        active_name = pm.active_name
     except (ValueError, FileNotFoundError):
         console.print(
             "\n[yellow]Ningún perfil activo. Mostrando valores por defecto.[/yellow]"
@@ -138,6 +176,23 @@ def list_options():
 
     ui.render_options_table(title, schema, current_settings)
     ui.print_options_help_footer()
+
+
+@app.command("delete")
+def delete_profile(name: str):
+    """Borra un perfil (archivo .env y .session)."""
+    try:
+        pm.resolve_name(name)
+    except ValueError as e:
+        console.print(f"[bold red]Error:[/bold red] {e}")
+        list_profiles(quiet=True)
+        raise typer.Exit(code=1)
+
+    if typer.confirm(
+        f"¿Estás seguro de que deseas borrar el perfil '{name}' y su configuración?"
+    ):
+        pm.delete_profile(name)
+        console.print(f"[green]Perfil '{name}' eliminado.[/green]")
 
 
 if __name__ == "__main__":

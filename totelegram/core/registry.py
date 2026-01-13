@@ -45,6 +45,33 @@ class ProfileManager:
 
         return file_path
 
+    def resolve_name(self, override_name: Optional[str] = None) -> str:
+        """
+        Resuelve el nombre del perfil con lógica estricta:
+        1. Si se especifica override_name, se usa ese o falla (no hay fallback).
+        2. Si no hay override_name, se usa el activo o falla.
+        """
+        if override_name is not None:
+            if not self.exists(override_name):
+                raise ValueError(
+                    f"El perfil especificado con --use '{override_name}' no existe."
+                )
+            return override_name
+
+        active = self.active_name
+        if not active:
+            raise ValueError(
+                "No hay un perfil activo globalmente. "
+                "Usa 'totelegram profile switch <nombre>' para activar uno o "
+                "especifica uno temporal con '--use <nombre>'."
+            )
+
+        if not self.exists(active):
+            # Caso de borde: el registro dice que hay uno activo pero el archivo no existe
+            raise ValueError(f"El perfil activo '{active}' no existe físicamente.")
+
+        return active
+
     def activate(self, name: str):
         """Establece un perfil como activo."""
         registry = self._load_registry()
@@ -59,6 +86,7 @@ class ProfileManager:
         return self._sync_registry_with_filesystem()
 
     def exists(self, name: str) -> bool:
+        """Verifica si un perfil existe en el registro."""
         registry = self._load_registry()
         return name in registry.profiles
 
@@ -217,3 +245,20 @@ class ProfileManager:
             return val if isinstance(val, list) else [str(val)]
         except json.JSONDecodeError:
             return [x.strip() for x in raw.split(",") if x.strip()]
+
+    def delete_profile(self, name: str):
+        """Elimina un perfil del registro y borra su archivo físico."""
+        registry = self._load_registry()
+        if name not in registry.profiles:
+            raise ValueError(f"El perfil '{name}' no existe.")
+
+        path_str = registry.profiles.pop(name)
+        self._save_registry(registry)
+
+        path = Path(path_str)
+        if path.exists():
+            path.unlink()
+
+        session_path = self.PROFILES_DIR / f"{name}.session"
+        if session_path.exists():
+            session_path.unlink()

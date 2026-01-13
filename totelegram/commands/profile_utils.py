@@ -10,6 +10,13 @@ from totelegram.core.registry import ProfileManager
 pm = ProfileManager()
 ui = ProfileUI(console)
 
+UseOption = typer.Option(
+    None,
+    "--use",
+    "-u",
+    help="Perfil a utilizar para esta operación (ignora el perfil activo)",
+)
+
 
 def _handle_list_operation(
     action: Literal["add", "remove"],
@@ -91,7 +98,7 @@ def validate_profile_name(profile_name: str):
             f"[bold red]El perfil '{profile_name}' ya existe.[/bold red]\n\n"
             "Por seguridad y consistencia de datos (ADR-001), los perfiles son inmutables.\n"
             f"Si deseas reutilizar este nombre, primero debes eliminar el perfil existente:\n\n"
-            f"   [yellow]totelegram profile remove {profile_name}[/yellow]",
+            f"   [yellow]totelegram profile delete {profile_name}[/yellow]",
             title="Operación no permitida",
             border_style="red",
         )

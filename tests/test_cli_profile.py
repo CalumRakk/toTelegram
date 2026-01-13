@@ -183,7 +183,7 @@ class TestCliProfile(unittest.TestCase):
         self.pm.create("perfil_A", 1, "h", "c")
         self.pm.create("perfil_B", 2, "h", "c")
 
-        result = runner.invoke(app, ["use", "perfil_B"])
+        result = runner.invoke(app, ["switch", "perfil_B"])
 
         self.assertEqual(result.exit_code, 0)
         self.assertEqual(self.pm.active_name, "perfil_B")

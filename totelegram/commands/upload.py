@@ -4,6 +4,8 @@ from typing import Optional
 import typer
 from filelock import FileLock, Timeout
 
+from totelegram.commands.profile import list_profiles
+from totelegram.commands.profile_utils import UseOption
 from totelegram.console import console
 from totelegram.core.enums import JobStatus
 from totelegram.core.registry import ProfileManager
@@ -15,62 +17,41 @@ from totelegram.store.database import DatabaseSession
 from totelegram.store.models import Job, SourceFile
 from totelegram.telegram import TelegramSession
 
-app = typer.Typer(
-    help="Sube archivos a Telegram usando la configuración activa.",
-    add_completion=False,
-    no_args_is_help=True,
-)
 pm = ProfileManager()
 
 
-@app.command("upload")
 def upload_file(
     target: Path = typer.Argument(
         ..., exists=True, help="Archivo o directorio a subir"
     ),
-    profile_name: Optional[str] = typer.Option(
-        None, "--profile", "-p", help="Usar un perfil específico temporalmente"
-    ),
+    user: Optional[str] = UseOption,
 ):
     """Sube archivos a Telegram usando la configuración activa."""
+    try:
+        profile_name = pm.resolve_name(user)
+    except ValueError as e:
+        console.print(f"[bold red]Error:[/bold red] {e}")
+        list_profiles(quiet=True)
+        raise typer.Exit(code=1)
 
     try:
-        try:
-            if profile_name:
-                if not pm.exists(profile_name):
-                    raise ValueError("profile_not_found")
-            else:
-                profile_name = pm.active_name
-
-            env_path = pm.get_path(profile_name)
-        except ValueError:
-            if profile_name:
-                console.print(
-                    f"[bold red]El perfil '{profile_name}' no existe.[/bold red]"
-                )
-            else:
-                console.print("[bold red]No hay perfil activo.[/bold red]")
-                console.print("Ejecuta 'totelegram profile create' primero.")
-            raise typer.Exit(code=1)
-
-        console.print(f"[blue]Usando perfil: {profile_name}[/blue]")
+        env_path = pm.get_path(profile_name)
         lock_path = ProfileManager.PROFILES_DIR / f"{profile_name}.lock"
         lock = FileLock(lock_path, timeout=0)
+
         with lock:
             settings = get_settings(env_path)
-            console.print(
-                f"Iniciando subida usando configuración de: [bold]{settings.chat_id}[/bold]"
-            )
-
             chunker = ChunkingService(settings)
             paths = list(target.glob("*")) if target.is_dir() else [target]
             if not paths:
                 console.print("[yellow]No se encontraron archivos para subir.[/yellow]")
                 return []
 
+            console.print(f"Iniciando subida para el perfil: [green]{target}[/green]")
             with DatabaseSession(settings), TelegramSession(settings) as client:
                 for path in paths:
                     if settings.is_excluded(path):
+                        console.print(f"[dim yellow]Excluido:[/dim yellow] {path.name}")
                         continue
                     uploader = UploadService(client, settings)
                     try:
