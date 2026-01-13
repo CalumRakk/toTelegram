@@ -81,7 +81,7 @@ class TestCliProfile(unittest.TestCase):
 
         # El comando terminó bien
         self.assertEqual(result.exit_code, 0, f"Salida inesperada: {result.stdout}")
-        self.assertIn("guardado exitosamente", result.stdout)
+        self.assertIn("Perfil 'test_user' creado en", result.stdout)
 
         # El archivo temporal YA NO debe existir (fue renombrado)
         temp_path = self.mock_profiles_dir / "temp_12345678.session"
@@ -150,7 +150,7 @@ class TestCliProfile(unittest.TestCase):
 
         # Verificar que el comando terminó bien (cancelación voluntaria es exit 0)
         self.assertEqual(result.exit_code, 0)
-        self.assertIn("Operación cancelada", result.stdout)
+        self.assertIn("Operación cancelada por el usuario", result.stdout)
 
     def test_set_config_type_safety(self):
         """
