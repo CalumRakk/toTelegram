@@ -30,10 +30,15 @@ class Settings(BaseSettings):
     )
     api_id: int = Field(description="Telegram API ID", default=611335)
 
-    max_filesize_bytes: int = Field(default=2_097_152_000, description="Tamaño máximo de archivo a subir a telegram (en bytes)")
-    upload_limit_rate_kbps: int = Field(
-        default=0,description="Límite de velocidad de subida en KB/s. 0 = sin límite"
+    max_filesize_bytes: int = Field(
+        default=80 * 1024 * 1024 * 1024,
+        description="Filtro de seguridad: No procesar archivos que superen este tamaño.",
     )
+    upload_limit_rate_kbps: int = Field(
+        default=0, description="Límite de velocidad de subida en KB/s. 0 = sin límite"
+    )
+    # FIX: QUITAR LA CAPACIDAD DE IGNORAR CARPETAS, NO FUNCIONA CON LA LOGICA DEL PROGRAMA.
+    # TODO: agrega un default que impida subir archivo muy pequeños.
     exclude_files: List[str] = Field(
         default=[],
         description="Patrones (glob). Ej: '*.log', 'node_modules' (ignora contenido), 'src/*.tmp'.",
@@ -44,14 +49,22 @@ class Settings(BaseSettings):
     exclude_files_default: List[str] = ["*.log", "*.json", "*.json.xz"]
     max_filename_length: int = 55
 
-    worktable: Path = Field(default=Path(get_user_config_dir(app_name)).resolve(), description="Carpeta de trabajo para la aplicación, donde se almacena la db y perfiles")
-    log_path: Optional[Path] = Field(default=None, description="Ruta del archivo de log. Si está vacío, se usa la ruta por defecto en la carpeta de trabajo.")
+    worktable: Path = Field(
+        default=Path(get_user_config_dir(app_name)).resolve(),
+        description="Carpeta de trabajo para la aplicación, donde se almacena la db y perfiles",
+    )
+    log_path: Optional[Path] = Field(
+        default=None,
+        description="Ruta del archivo de log. Si está vacío, se usa la ruta por defecto en la carpeta de trabajo.",
+    )
+
+    TG_MAX_SIZE_NORMAL: int = 2_097_152_000  # ~2GB
+    # ~4GB TODO : confirmar si el valor funciona
+    TG_MAX_SIZE_PREMIUM: int = 4000 * 1024 * 1024
 
     def model_post_init(self, __context):
         if self.log_path is None:
             self.log_path = self.worktable / "app_name.log"
-
-    # TODO: agrega un default que impida subir archivo muy pequeños.
 
     # ClassVar asegura que Pydantic ignore esto al validar datos.
     INTERNAL_FIELDS: ClassVar[Set[str]] = {
@@ -63,13 +76,15 @@ class Settings(BaseSettings):
         "API_HASH",
         "API_ID",
         "MAX_FILENAME_LENGTH",
-        "MAX_FILESIZE_BYTES"
+        "TG_MAX_SIZE_NORMAL",
+        "TG_MAX_SIZE_PREMIUM",
     }
     SENSITIVE_FIELDS: ClassVar[Set[str]] = {"API_HASH", "API_ID"}
 
     @property
     def database_path(self) -> Path:
         return self.worktable / self.database_name
+
     @property
     def profile_path(self):
         return self.worktable / "profiles"

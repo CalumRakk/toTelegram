@@ -1,3 +1,6 @@
+from decimal import __version__
+from typing import Optional
+
 import typer
 
 from totelegram.commands import profile, upload
@@ -13,10 +16,24 @@ app.add_typer(profile.app, name="profile")
 app.command(name="upload")(upload.upload_file)
 
 
+def version_callback(value: bool):
+    if value:
+        console.print(f"toTelegram [bold cyan]v{__version__}[/bold cyan]")
+        raise typer.Exit()
+
+
 @app.callback()
 def main(
     verbose: bool = typer.Option(
         False, "--verbose", "-v", help="Mostrar logs detallados"
+    ),
+    version: Optional[bool] = typer.Option(
+        None,
+        "--version",
+        "-V",
+        callback=version_callback,
+        is_eager=True,
+        help="Muestra la versión de la aplicación.",
     ),
 ):
     """

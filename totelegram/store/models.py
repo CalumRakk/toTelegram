@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Generator, cast
 import peewee
 from playhouse.sqlite_ext import JSONField
 
+from totelegram import __version__
 from totelegram.core.enums import JobStatus, Strategy
 
 if TYPE_CHECKING:
@@ -135,23 +136,27 @@ class Job(BaseModel):
 
     @classmethod
     def get_or_create_from_source(
-        cls, source: SourceFile, settings: "Settings"
+        cls,
+        source: SourceFile,
+        chat_id: str | int,
+        tg_max_size: int,
+        user_id: int,
     ) -> "Job":
         """
         Determina la estrategia basada en la configuración y
         crea o recupera el Job adecuado.
         """
         strategy = Strategy.SINGLE
-        if source.size > settings.max_filesize_bytes:
+        if source.size > tg_max_size:
             strategy = Strategy.CHUNKED
 
         job_config = StrategyConfig(
-            max_filesize_bytes=settings.max_filesize_bytes,
-            upload_limit_rate_kbps=settings.upload_limit_rate_kbps,
-            chat_id=str(settings.chat_id),
+            tg_max_size=tg_max_size,
+            chat_id=chat_id,
+            user_id=user_id,
+            app_version=__version__,
         )
 
-        # Consulta (get_or_create de Peewee)
         job, created = cls.get_or_create(
             source=source,
             strategy=strategy,

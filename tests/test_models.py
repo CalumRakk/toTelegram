@@ -22,6 +22,9 @@ class TestJobLogic(unittest.TestCase):
 
     def test_job_strategy_selection_chunked(self):
         """Si el archivo es mayor al límite, debe ser CHUNKED"""
+        chat_id = 123
+        user_id = 456
+        tg_max_size = 149  # debe ser un valor menor que `size`
         source = SourceFile.create(
             path_str="big_file.dat",
             md5sum="abc",
@@ -30,12 +33,20 @@ class TestJobLogic(unittest.TestCase):
             mimetype="application/octet-stream",
         )
 
-        job = Job.get_or_create_from_source(source, self.settings)
+        job = Job.get_or_create_from_source(
+            source,
+            chat_id,
+            tg_max_size,
+            user_id,
+        )
         self.assertEqual(job.strategy, Strategy.CHUNKED)
         self.assertEqual(job.status, JobStatus.PENDING)
 
     def test_job_strategy_selection_single(self):
         """Si el archivo es menor al límite, debe ser SINGLE"""
+        chat_id = 123
+        user_id = 456
+        tg_max_size = self.settings.TG_MAX_SIZE_NORMAL
         source = SourceFile.create(
             path_str="small_file.dat",
             md5sum="def",
@@ -44,5 +55,5 @@ class TestJobLogic(unittest.TestCase):
             mimetype="text/plain",
         )
 
-        job = Job.get_or_create_from_source(source, self.settings)
+        job = Job.get_or_create_from_source(source, chat_id, tg_max_size, user_id)
         self.assertEqual(job.strategy, Strategy.SINGLE)

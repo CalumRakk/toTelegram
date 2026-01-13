@@ -3,6 +3,7 @@ from typing import Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
+from totelegram import __version__
 from totelegram.core.enums import Strategy
 
 MANIFEST_VERSION = "4.0"
@@ -26,6 +27,7 @@ class RemotePart(BaseModel):
 
 class UploadManifest(BaseModel):
     version: str = MANIFEST_VERSION
+    app_version: str = __version__
     created_at: datetime = Field(default_factory=datetime.now)
     strategy: Strategy
     source: SourceMetadata
@@ -33,9 +35,10 @@ class UploadManifest(BaseModel):
 
 
 class StrategyConfig(BaseModel):
-    max_filesize_bytes: int
-    upload_limit_rate_kbps: int
-    chat_id: str
+    tg_max_size: int
+    chat_id: str | int
+    user_id: int
+    app_version: str
 
 
 class ProfileRegistry(BaseModel):

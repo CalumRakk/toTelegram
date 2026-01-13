@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Optional
+from typing import Optional, cast
 
 import typer
 from filelock import FileLock, Timeout
@@ -27,6 +27,8 @@ def upload_file(
     user: Optional[str] = UseOption,
 ):
     """Sube archivos a Telegram usando la configuración activa."""
+    from pyrogram.types import User
+
     try:
         profile_name = pm.resolve_name(user)
     except ValueError as e:
@@ -49,14 +51,31 @@ def upload_file(
 
             console.print(f"Iniciando subida para el perfil: [green]{target}[/green]")
             with DatabaseSession(settings), TelegramSession(settings) as client:
+                me = cast(User, client.get_me())
+                current_tg_limit = (
+                    settings.TG_MAX_SIZE_PREMIUM
+                    if me.is_premium
+                    else settings.TG_MAX_SIZE_NORMAL
+                )
+                chat_id = settings.chat_id
+                user_id = me.id
+
                 for path in paths:
                     if settings.is_excluded(path):
                         console.print(f"[dim yellow]Excluido:[/dim yellow] {path.name}")
                         continue
+                    if path.stat().st_size > settings.max_filesize_bytes:
+                        console.print(
+                            f"[red]Saltando {path.name}: Excede el límite de seguridad del usuario.[/red]"
+                        )
+                        continue
+
                     uploader = UploadService(client, settings)
                     try:
                         source = SourceFile.get_or_create_from_path(path)
-                        job = Job.get_or_create_from_source(source, settings)
+                        job = Job.get_or_create_from_source(
+                            source, chat_id, current_tg_limit, user_id
+                        )
                         if job.status == JobStatus.UPLOADED:
                             console.print(
                                 f"Job {job.id} ya completado. Verificando snapshot..."
