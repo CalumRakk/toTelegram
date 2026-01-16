@@ -35,9 +35,12 @@ class UploadManifest(BaseModel):
 
 
 class StrategyConfig(BaseModel):
+    # "Contrato de Partición".
     tg_max_size: int
-    chat_id: str | int
-    user_id: int
+
+    # Nos dice si el Job nació bajo el privilegio de una cuenta Premium.
+    user_is_premium: bool
+
     app_version: str
 
 
