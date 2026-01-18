@@ -43,6 +43,10 @@ class Settings(BaseSettings):
         default=[],
         description="Patrones (glob). Ej: '*.log', 'node_modules' (ignora contenido), 'src/*.tmp'.",
     )
+    duplicate_policy: str = Field(
+        default="strict",
+        description="Politica de Duplicados: 'smart' (preguntar), 'strict' (omitir), 'force' (sube/reenvia).",
+    )
 
     app_name: str = "toTelegram"
     database_name: str = f"{app_name}.sqlite"

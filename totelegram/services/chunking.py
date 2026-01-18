@@ -140,6 +140,7 @@ class ChunkingService:
         Returns:
             List[Payload]: Lista de payloads listos para ser subidos.
         """
+
         # Si ya existen payloads en base de datos, no re-procesamos, solo recuperamos.
         if job.payloads.count() > 0:  # type: ignore
             logger.debug(f"Job {job.id} ya tiene payloads generados. Recuperando...")
@@ -154,7 +155,6 @@ class ChunkingService:
 
             chunks_folder = self.settings.worktable / "chunks"
 
-            # Delegamos el trabajo sucio de I/O a FileChunker (misma unidad de código)
             chunks_paths = FileChunker.split_file(
                 file_path=job.path,
                 chunk_size=self.settings.max_filesize_bytes,
@@ -162,7 +162,6 @@ class ChunkingService:
             )
 
             payloads = Payload.create_payloads(job, chunks_paths)
-            job.set_splitted()
             return payloads
 
         return []

@@ -3,6 +3,7 @@ import logging
 import time
 from contextlib import contextmanager
 from pathlib import Path
+from typing import BinaryIO, cast
 
 logger = logging.getLogger(__name__)
 
@@ -13,7 +14,7 @@ def open_upload_source(path: Path, limit_rate_kbps: int):
     if limit_rate_kbps > 0:
         limit_bytes = limit_rate_kbps * 1024
         with ThrottledFile(path, limit_bytes) as throttled_file:
-            yield throttled_file
+            yield cast(BinaryIO, throttled_file)
     else:
         # Se devuelve un string si el usuario no especifica un limite.
         yield str(path)
