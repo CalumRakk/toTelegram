@@ -120,9 +120,10 @@ class TestManualReal(unittest.TestCase):
 
     def _execute_upload_pipeline(self, target_path: Path):
         chunker = ChunkingService(self.settings)
-        uploader = UploadService(self.client, self.settings)
+        uploader = UploadService(self.client, self.settings)  # type: ignore
 
         source = SourceFile.get_or_create_from_path(target_path)
+
         job = Job.get_or_create_from_source(source, self.settings)
 
         payloads = chunker.process_job(job)

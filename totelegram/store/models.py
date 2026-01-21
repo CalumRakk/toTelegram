@@ -2,7 +2,7 @@ import json
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Generator, Optional, cast
+from typing import TYPE_CHECKING, Generator, cast
 
 import peewee
 from playhouse.sqlite_ext import JSONField
@@ -13,6 +13,7 @@ from totelegram.core.enums import JobStatus, Strategy
 if TYPE_CHECKING:
     from totelegram.core.setting import Settings
     from pyrogram.types import Chat as TgChat
+    from pyrogram.types import Message
 
 from totelegram.core.schemas import StrategyConfig
 from totelegram.store.database import db_proxy
@@ -178,6 +179,7 @@ class Job(BaseModel):
     """Representa la intención de disponibilizar un SourceFile en un Chat específico."""
 
     id: int
+    payloads: peewee.ModelSelect  # type: ignore
 
     source = cast(SourceFile, peewee.ForeignKeyField(SourceFile, backref="jobs"))
     chat = peewee.ForeignKeyField(TelegramChat, backref="jobs")
@@ -284,9 +286,10 @@ class RemotePayload(BaseModel):
         dict, JSONField()
     )  # Backup completo del objeto Message de Pyrogram
 
-    # Para caso de reenvio
-    source_message_id = cast(Optional[int], peewee.IntegerField(null=True))
-    is_forward = cast(bool, peewee.BooleanField(default=False))
+    # TODO: Se ha elimiano los campos source_message_id y is_forward, porque
+    # es dificil se seguir cuando se hace un reenvio masivo.
+    # source_message_id = cast(Optional[int], peewee.IntegerField(null=True))
+    # is_forward = cast(bool, peewee.BooleanField(default=False))
 
     @staticmethod
     def register_upload(
@@ -301,17 +304,17 @@ class RemotePayload(BaseModel):
             json_metadata=json.loads(str(tg_message)),
         )
 
-    @staticmethod
-    def register_forward(
-        payload: Payload, tg_message, source_msg_id: int, owner: TelegramUser
-    ):
-        """Registra un reenvío como una nueva entrada de acceso."""
-        return RemotePayload.create(
-            payload=payload,
-            message_id=tg_message.id,
-            chat_id=tg_message.chat.id,
-            owner=owner,
-            source_message_id=source_msg_id,
-            is_forward=True,
-            json_metadata=json.loads(str(tg_message)),
-        )
+    # @staticmethod
+    # def register_forward(
+    #     payload: Payload, tg_message: "Message", source_msg_id: int, owner: TelegramUser
+    # ):
+    #     """Registra un reenvío como una nueva entrada de acceso."""
+    #     return RemotePayload.create(
+    #         payload=payload,
+    #         message_id=tg_message.id,
+    #         chat_id=tg_message.chat.id,
+    #         owner=owner,
+    #         source_message_id=source_msg_id,
+    #         is_forward=True,
+    #         json_metadata=json.loads(str(tg_message)),
+    #     )

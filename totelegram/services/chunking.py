@@ -126,9 +126,11 @@ class ChunkingService:
     def __init__(self, settings: Settings):
         self.settings = settings
 
+    # TODO: analizar si deberiamos de pasar settings al método en vez del init. Es para darle una connotación más de peso.
+    # porque ahora da la sensacion de que crea el Job de forma magica.
     def process_job(self, job: Job) -> List[Payload]:
         """
-        Prepara los Payloads (unidades de subida) para un Job específico.
+        Procesa un Job y devuelve una lista de Payloads listos para ser subidos.
 
         - Si Strategy.SINGLE: Crea un Payload único apuntando al archivo original.
         - Si Strategy.CHUNKED: Utiliza FileChunker para dividir el archivo físico y
@@ -141,10 +143,8 @@ class ChunkingService:
             List[Payload]: Lista de payloads listos para ser subidos.
         """
 
-        # Si ya existen payloads en base de datos, no re-procesamos, solo recuperamos.
-        if job.payloads.count() > 0:  # type: ignore
-            logger.debug(f"Job {job.id} ya tiene payloads generados. Recuperando...")
-            return list(job.payloads.order_by(Payload.sequence_index))  # type: ignore
+        if job.payloads.count() > 0:
+            raise Exception("Ya existen payloads para este job.")
 
         if job.strategy == Strategy.SINGLE:
             logger.info(f"Job {job.id}: Estrategia SINGLE. Creando payload único.")

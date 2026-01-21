@@ -1,24 +1,23 @@
 import logging
-import time
+from collections import defaultdict
 from pathlib import Path
-from typing import TYPE_CHECKING, List, Optional, Tuple, cast
+from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, cast
+
+from totelegram.store.database import db_proxy
+from totelegram.utils import batched
 
 if TYPE_CHECKING:
     from pyrogram import Client  # type: ignore
-    from pyrogram.types import User
+    from pyrogram.types import User, Message
 
 from rich.console import Console
-from typer import confirm, prompt
 
 from totelegram.core.enums import (
-    AvailabilityState,
-    DuplicatePolicy,
     Strategy,
 )
 from totelegram.core.setting import Settings
 from totelegram.services.chunking import ChunkingService
 from totelegram.services.discovery import DiscoveryService
-from totelegram.store.database import db_proxy
 from totelegram.store.models import Job, Payload, RemotePayload, TelegramUser
 from totelegram.streams import open_upload_source
 
@@ -52,114 +51,164 @@ class UploadService:
         me = cast("User", client.get_me())
         self.current_user = TelegramUser.get_or_create_from_tg(me)
 
-    def process_job(self, job: Job, policy_override: Optional[DuplicatePolicy] = None):
-        """Orquestador principal del ciclo de vida de una subida."""
-        policy = policy_override or self.settings.duplicate_policy
+    # def process_job(self, job: Job, policy_override: Optional[DuplicatePolicy] = None):
+    #     """Orquestador principal del ciclo de vida de una subida."""
+    #     policy = policy_override or self.settings.duplicate_policy
 
-        # Fase de Descubrimiento
-        state, source_remotes = self.discovery.investigate(job)
+    #     # Fase de Descubrimiento
+    #     state, source_remotes = self.discovery.investigate(job)
 
-        # Toma la decisión final según Estado y Política
-        if state == AvailabilityState.FULFILLED:
-            console.print(
-                f"[dim]✔ [bold]{job.source.path_str}[/bold] ya está disponible en el destino.[/dim]"
-            )
-            job.set_uploaded()
-            return
+    #     # Toma la decisión final según Estado y Política
+    #     if state == AvailabilityState.FULFILLED:
+    #         console.print(
+    #             f"[dim]✔ [bold]{job.source.path_str}[/bold] ya está disponible en el destino.[/dim]"
+    #         )
+    #         job.set_uploaded()
+    #         return
 
-        if state == AvailabilityState.RECOVERABLE and source_remotes:
-            if policy == DuplicatePolicy.STRICT:
-                console.print(
-                    f"[yellow]STRICT:[/yellow] Archivo omitido (ya existe en el ecosistema)."
-                )
-                return
+    #     if state == AvailabilityState.SYSTEM_NEW and source_remotes:
+    #         if policy == DuplicatePolicy.STRICT:
+    #             console.print(
+    #                 f"[yellow]STRICT:[/yellow] Archivo omitido (ya existe en el ecosistema)."
+    #             )
+    #             return
 
-            if policy == DuplicatePolicy.SMART:
-                console.print(
-                    f"\n[bold blue]INFO:[/bold blue] El archivo ya está en el ecosistema (Chat: {source_remotes[0].chat_id})."
-                )
-                choice = prompt(
-                    "¿Qué deseas hacer? [f] Reenviar / [u] Subir de nuevo / [s] Saltar",
-                    default="f",
-                ).lower()
+    #         if policy == DuplicatePolicy.SMART:
+    #             console.print(
+    #                 f"\n[bold blue]INFO:[/bold blue] El archivo ya está en el ecosistema (Chat: {source_remotes[0].chat_id})."
+    #             )
+    #             choice = prompt(
+    #                 "¿Qué deseas hacer? [f] Reenviar / [u] Subir de nuevo / [s] Saltar",
+    #                 default="f",
+    #             ).lower()
 
-                if choice == "f":
-                    return self._execute_smart_forward(job, source_remotes)
-                elif choice == "s":
-                    console.print("[dim]Operación saltada.[/dim]")
-                    return
-            else:  # policy == OVERWRITE
-                pass
+    #             if choice == "f":
+    #                 return self.execute_smart_forward(job, source_remotes)
+    #             elif choice == "s":
+    #                 console.print("[dim]Operación saltada.[/dim]")
+    #                 return
+    #         else:  # policy == OVERWRITE
+    #             pass
 
-        if (
-            state == AvailabilityState.RESTRICTED
-            and policy != DuplicatePolicy.OVERWRITE
-        ):
-            console.print(
-                f"[yellow]AVISO:[/yellow] El archivo existe en otros perfiles pero tú no tienes acceso."
-            )
-            if not confirm("¿Deseas realizar una subida física propia?", default=True):
-                return
+    #     if (
+    #         state == AvailabilityState.REMOTE_RESTRICTED
+    #         and policy != DuplicatePolicy.OVERWRITE
+    #     ):
+    #         console.print(
+    #             f"[yellow]AVISO:[/yellow] El archivo existe en otros perfiles pero tú no tienes acceso."
+    #         )
+    #         if not confirm("¿Deseas realizar una subida física propia?", default=True):
+    #             return
 
-        # Ejecución: Subida Física
-        return self._execute_physical_upload(job)
+    #     # Ejecución: Subida Física
+    #     return self.execute_physical_upload(job)
 
-    def _execute_smart_forward(self, job: Job, source_remotes: List[RemotePayload]):
-        """Realiza un Smart Forward de los mensajes existentes en lugar de subir bytes.
-
-        Si el reenvío falla, cae en subida física como fallback.
-        Args:
-            job: El trabajo (Job) a procesar.
-            source_remotes: Lista de RemotePayloads fuente para el reenvío.
-        Returns:
-            None
-        raises:
-            Exception: Si el reenvío falla.
+    def execute_smart_forward(self, job: Job, source_remotes: List[RemotePayload]):
         """
-        msg_ids = [r.message_id for r in source_remotes]
-        from_chat_id = source_remotes[0].chat_id
+        Reenvia de forma atomica los RemotePayloads específicados al chat de destino que contiene el job.
 
-        payloads = self.chunker.process_job(job)
+        Args:
+            job (Job): El job a subir.
+            source_remotes (List[RemotePayload]): Los RemotePayloads de origen. pueden venir de múltiples chats.
+
+        Raises:
+            Exception: Si ocurre un error durante el proceso, se realiza un rollback.
+
+        La tarea de esta funcion es recolectar piezas dispersas y reenviarlas al chat destino de forma atomica.
+        """
+        if job.payloads.count() < 1:
+            # Si no hay payloads, es la primera vez que estrucutramos este job para forward
+            # Debemos crearlos para tener el mapeo MD5 -> secuencia en este chain
+            self.chunker.process_job(job)
+
+        # Supongo que el limite de forward_messages es ~200, pero uso 100 por seguridad.
+        API_CHUNK_LIMIT = 100
+
+        # Esto asegura que el mensaje 1 sea la parte 1.
+        target_payloads: List[Payload] = list(
+            job.payloads.order_by(Payload.sequence_index)
+        )
+
+        groups: Dict[int, List[RemotePayload]] = defaultdict(list)
+        for r in source_remotes:
+            groups[r.chat_id].append(r)
+
+        forwarded_history = []  # Para el Rollback: guardamos dict chat:list[message_id]
+        registrations = []
+
+        # TODO: documenta las siguientes garantias de seguridad:
+        # 1. lOS Payloads del Job se crean en orden secuelcial (0, 1, 2...)
+        # 2. La lista de target_payloads se obtiene directamente de la relación job.payloads asegurando el orden secuencial.
+        # La lista del batch tambén se obtiene en orden secuencial.
+
         try:
-            forwarded_msgs = self.client.forward_messages(
-                chat_id=job.chat.id, from_chat_id=from_chat_id, message_ids=msg_ids
-            )
+            for from_chat_id, remote_payloads in groups.items():
+                # Ordena los remotes por sequence_index
+                # para que el forward mantenga el orden del archivo original.
+                remote_payloads.sort(key=lambda x: x.payload.sequence_index)
 
-            messages = (
-                forwarded_msgs if isinstance(forwarded_msgs, list) else [forwarded_msgs]
-            )
+                for batch in batched(remote_payloads, API_CHUNK_LIMIT):
+                    batch: List[RemotePayload]
+                    batch_ids = [r.message_id for r in batch]
+
+                    # Ejecutar Reenvío
+                    # Confiamos que la API de Telegram, los mensajes se reenvían y devuelven
+                    # siguiendo el orden de la lista de IDs especificada.
+                    res = self.client.forward_messages(
+                        chat_id=job.chat.id,
+                        from_chat_id=from_chat_id,
+                        message_ids=batch_ids,
+                    )
+
+                    # Guardamos el ID de los mensajes reenviados
+                    new_msgs: List[Message] = res if isinstance(res, list) else [res]  # type: ignore
+                    msg_ids = [m.id for m in new_msgs]
+
+                    forwarded_history.append(msg_ids)
+
+                    for index, msg in enumerate(new_msgs):
+                        # Mapeo por posición: Confio que Telegram y la creacion de payloads garantizan el mismo orden.
+                        original_seq = batch[index].payload.sequence_index
+
+                        # Buscamos el payload correspondiente en NUESTRO job
+                        target_payload = next(
+                            p
+                            for p in target_payloads
+                            if p.sequence_index == original_seq
+                        )
+                        registrations.append((target_payload, msg))
 
             with db_proxy.atomic():
-                for i, msg in enumerate(messages):
-                    RemotePayload.register_forward(
-                        payload=payloads[i],
-                        tg_message=msg,
-                        source_msg_id=msg_ids[i],
-                        owner=self.current_user,
+                for payload, msg in registrations:
+                    RemotePayload.register_upload(
+                        payload=payload, tg_message=msg, owner=self.current_user
                     )
-                    time.sleep(0.5)
                 job.set_uploaded()
 
             console.print(
-                f"[bold green]✔ Smart Forward completado[/bold green] ({len(messages)} partes)."
+                f"[bold green]✔ Smart Forward completado con éxito.[/bold green]"
             )
-
         except Exception as e:
-            logger.error(f"Fallo en Smart Forward: {e}")
-            console.print(
-                "[red]Error en reenvío. Intentando subida física fallback...[/red]"
-            )
-            return self._execute_physical_upload(job)
+            logger.error(f"Error en reenvío inteligente: {e}. Limpiando destino...")
+            for batch_ids in forwarded_history:
+                for sub_batch in batched(batch_ids, 100):
+                    try:
+                        self.client.delete_messages(job.chat.id, sub_batch)  # type: ignore
+                    except:
+                        pass
+            raise e
 
-    def _execute_physical_upload(self, job: Job):
-        """Maneja la transferencia real de bytes a Telegram."""
+    def execute_physical_upload(self, job: Job):
+        """Realiza la subida fisica de un Job."""
+
         # Esto genera los archivos .bin temporales si el job es CHUNKED
         payloads = self.chunker.process_job(job)
         console.print(
-            f"Iniciando subida física: [bold]{job.source.path_str}[/bold] ({len(payloads)} partes)"
+            f"Subida física: [bold]{job.source.path_str}[/bold] ({len(payloads)} partes)"
         )
 
         for payload in payloads:
+            # Verificar si esta parte ya se subió (por si el job se interrumpió a la mitad)
             if RemotePayload.select().where(RemotePayload.payload == payload).exists():
                 logger.debug(f"Parte {payload.sequence_index} ya subida. Saltando.")
                 continue
@@ -167,7 +216,6 @@ class UploadService:
             self._upload_single_payload(payload)
 
         job.set_uploaded()
-        console.print(f"[bold green]✔ Subida finalizada con éxito.[/bold green]")
 
     def _upload_single_payload(self, payload: Payload):
         """Sube un archivo individual (trozo o archivo único) a Telegram."""

@@ -1,9 +1,10 @@
 import hashlib
 import logging
 import re
+import sys
 from pathlib import Path
 from time import sleep
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from totelegram.core.setting import Settings
@@ -11,6 +12,18 @@ if TYPE_CHECKING:
 import filetype
 
 logger = logging.getLogger(__name__)
+
+if sys.version_info >= (3, 12):
+    from itertools import batched
+else:
+
+    def batched(iterable: list[Any], n):
+        """Fallback para Python < 3.12"""
+        import itertools
+
+        it = iter(iterable)
+        while batch := list(itertools.islice(it, n)):
+            yield batch
 
 
 def is_excluded(path: Path, settings: "Settings") -> bool:

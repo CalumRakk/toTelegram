@@ -7,9 +7,10 @@ from rich.table import Table
 from totelegram.commands.profile import list_profiles
 from totelegram.commands.profile_utils import UseOption
 from totelegram.console import console
-from totelegram.core.enums import DuplicatePolicy, JobStatus
+from totelegram.core.enums import AvailabilityState, DuplicatePolicy
 from totelegram.core.registry import ProfileManager
 from totelegram.core.setting import get_settings
+from totelegram.services.discovery import DiscoveryService
 from totelegram.services.snapshot import SnapshotService
 from totelegram.services.uploader import UploadService
 from totelegram.store.database import DatabaseSession
@@ -68,8 +69,8 @@ def upload_file(
         from pyrogram.types import User
 
         uploader = UploadService(client, settings)
+        discovery = DiscoveryService(client)
         me = cast(User, client.get_me())
-
         tg_limit = (
             settings.TG_MAX_SIZE_PREMIUM
             if me.is_premium
@@ -80,27 +81,50 @@ def upload_file(
             console.print(f"\n[bold]Procesando:[/bold] [blue]{path.name}[/blue]")
 
             try:
-                with console.status(
-                    "[dim]Calculando MD5 e identificando origen...[/dim]"
-                ):
-                    source = SourceFile.get_or_create_from_path(path)
+                source = SourceFile.get_or_create_from_path(path)
+                job = Job.get_or_create_from_source(
+                    source=source, user_is_premium=me.is_premium, tg_max_size=tg_limit
+                )
 
-                    # El Job define la intención única (Archivo + Chat)
-                    job = Job.get_or_create_from_source(
-                        source=source,
-                        user_is_premium=me.is_premium,
-                        tg_max_size=tg_limit,
-                    )
+                state, remotes = discovery.investigate(job)
 
-                # Si el Job ya estaba subido en este chat según DB, solo actualizamos snapshot
-                if job.status == JobStatus.UPLOADED:
-                    console.print(
-                        "[dim]✔ Job ya completado anteriormente. Validando Snapshot...[/dim]"
-                    )
-                    SnapshotService.generate_snapshot(job)
-                    continue
+                if state == AvailabilityState.FULFILLED:
+                    console.print("[dim]✔ Ya disponible en el destino.[/dim]")
+                    job.set_uploaded()
 
-                uploader.process_job(job, policy_override=policy)
+                elif state in [
+                    AvailabilityState.REMOTE_MIRROR,
+                    AvailabilityState.REMOTE_PUZZLE,
+                ]:
+                    if policy == DuplicatePolicy.STRICT:
+                        console.print(
+                            "[yellow]Omitido (STRICT): ya existe en el ecosistema.[/yellow]"
+                        )
+                        continue
+
+                    action = "f"  # Default smart forward
+                    if policy == DuplicatePolicy.SMART:
+                        console.print(
+                            f"[blue]💡 Encontrado en otro chat ({len(remotes)} partes).[/blue]"
+                        )
+                        action = typer.prompt(
+                            "¿Acción? [f] Forward / [u] Upload / [s] Skip", default="f"
+                        ).lower()
+
+                    if action == "f":
+                        uploader.execute_smart_forward(job, remotes)
+                    elif action == "u":
+                        uploader.execute_physical_upload(job)
+                    else:
+                        console.print("[dim]Saltado por el usuario.[/dim]")
+                elif state == AvailabilityState.REMOTE_RESTRICTED:
+                    if policy == DuplicatePolicy.OVERWRITE or typer.confirm(
+                        "Existe pero no tienes acceso. ¿Subir de nuevo?"
+                    ):
+                        uploader.execute_physical_upload(job)
+                else:  # SYSTEM_NEW
+                    uploader.execute_physical_upload(job)
+
                 SnapshotService.generate_snapshot(job)
 
             except Exception as e:
