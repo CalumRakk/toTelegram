@@ -10,13 +10,6 @@ from totelegram.core.registry import ProfileManager
 pm = ProfileManager()
 ui = ProfileUI(console)
 
-UseOption = typer.Option(
-    None,
-    "--use",
-    "-u",
-    help="Perfil a utilizar para esta operación (ignora el perfil activo)",
-)
-
 
 def _handle_list_operation(
     action: Literal["add", "remove"],

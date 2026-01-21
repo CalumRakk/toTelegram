@@ -5,6 +5,7 @@ import typer
 
 from totelegram.commands import profile, upload
 from totelegram.console import console
+from totelegram.core.registry import ProfileManager
 
 app = typer.Typer(
     help="Herramienta para subir archivos a Telegram sin límite de tamaño.",
@@ -24,8 +25,15 @@ def version_callback(value: bool):
 
 @app.callback()
 def main(
-    verbose: bool = typer.Option(
-        False, "--verbose", "-v", help="Mostrar logs detallados"
+    # verbose: bool = typer.Option(
+    #     False, "--verbose", "-v", help="Mostrar logs detallados"
+    # ),
+    use: Optional[str] = typer.Option(
+        None,
+        "--use",
+        "-u",
+        help="Perfil a utilizar para esta operación (ignora el perfil activo).",
+        is_eager=True,
     ),
     version: Optional[bool] = typer.Option(
         None,
@@ -40,8 +48,12 @@ def main(
     Callback principal. Se ejecuta antes que cualquier comando.
     Útil para configurar logging global.
     """
-    if verbose:
-        console.print("[dim]Modo verbose activado[/dim]")
+    if use:
+
+        ProfileManager._global_override = use
+
+    # if verbose:
+    #     console.print("[dim]Modo verbose activado[/dim]")
 
 
 def run_script():

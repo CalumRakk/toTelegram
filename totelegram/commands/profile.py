@@ -6,7 +6,6 @@ from pydantic import ValidationError
 
 from totelegram.commands.profile_ui import ProfileUI
 from totelegram.commands.profile_utils import (
-    UseOption,
     _finalize_profile,
     _handle_list_operation,
     _suggest_profile_activation,
@@ -86,11 +85,10 @@ def use_profile(
 def set_config(
     key: str = typer.Argument(..., help="Clave a modificar"),
     value: str = typer.Argument(..., help="Nuevo valor"),
-    use: Optional[str] = UseOption,
 ):
     """Edita una configuración."""
     try:
-        profile_name = pm.resolve_name(use)
+        profile_name = pm.resolve_name()
     except ValueError as e:
         console.print(f"[bold red]Error:[/bold red] {e}")
         list_profiles(quiet=True)
@@ -111,12 +109,10 @@ def set_config(
 
 
 @app.command("add")
-def add_to_list(
-    key: str, values: List[str], use: Optional[str] = UseOption, force: bool = False
-):
+def add_to_list(key: str, values: List[str], force: bool = False):
     """Agrega valores a una configuración de lista."""
     try:
-        profile_name = pm.resolve_name(use)
+        profile_name = pm.resolve_name()
     except ValueError as e:
         console.print(f"[bold red]Error:[/bold red] {e}")
         list_profiles(quiet=True)
@@ -126,12 +122,10 @@ def add_to_list(
 
 
 @app.command("remove")
-def remove_from_list(
-    key: str, values: List[str], use: Optional[str] = UseOption, force: bool = False
-):
+def remove_from_list(key: str, values: List[str], force: bool = False):
     """Elimina valores de una configuración de lista."""
     try:
-        profile_name = pm.resolve_name(use)
+        profile_name = pm.resolve_name()
     except ValueError as e:
         console.print(f"[bold red]Error:[/bold red] {e}")
         list_profiles(quiet=True)
@@ -172,7 +166,7 @@ def get_chat_name(current_settings) -> Optional[str]:
 
 
 @app.command("options")
-def list_options(use: Optional[str] = UseOption):
+def list_options():
     """Lista las opciones de configuración y sus valores actuales."""
     schema = Settings.get_schema_info()
     current_settings = None
@@ -180,7 +174,7 @@ def list_options(use: Optional[str] = UseOption):
     chat_display_name = None
 
     try:
-        active_name = pm.resolve_name(use)
+        active_name = pm.resolve_name()
         path = pm.get_path(active_name)
         current_settings = get_settings(path)
         if current_settings:
@@ -218,4 +212,4 @@ def delete_profile(name: str):
 
 
 if __name__ == "__main__":
-    set_config("chat_id", "-1001698464760", "leo")
+    set_config("chat_id", "-1001698464760")

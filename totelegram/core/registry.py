@@ -20,6 +20,8 @@ class ProfileManager:
     y la persistencia de sus configuraciones.
     """
 
+    _global_override: Optional[str] = None
+
     PROFILES_DIR = CONFIG_DIR / "profiles"
     CONFIG_FILE = CONFIG_DIR / "config.json"
 
@@ -47,30 +49,28 @@ class ProfileManager:
 
     def resolve_name(self, override_name: Optional[str] = None) -> str:
         """
-        Resuelve el nombre del perfil con lógica estricta:
-        1. Si se especifica override_name, se usa ese o falla (no hay fallback).
-        2. Si no hay override_name, se usa el activo o falla.
-        """
-        if override_name is not None:
-            if not self.exists(override_name):
-                raise ValueError(
-                    f"El perfil especificado con --use '{override_name}' no existe."
-                )
-            return override_name
+        Resuelve el nombre del perfil con una jerarquía estricta:
+        1. Si se pasa override_name por parámetro (prioridad absoluta del programador).
+        2. Si se seteó el flag global --use en el CLI (_global_override).
+        3. Si existe un perfil activo en el registro (config.json).
 
-        active = self.active_name
-        if not active:
+        Si ninguna se cumple o el perfil resultante no existe, EXPLOTA.
+        """
+        # Intentamos obtener el nombre por jerarquía
+        target = override_name or self._global_override or self.active_name
+
+        if not target:
             raise ValueError(
-                "No hay un perfil activo globalmente. "
-                "Usa 'totelegram profile switch <nombre>' para activar uno o "
-                "especifica uno temporal con '--use <nombre>'."
+                "Operación fallida: No se especificó un perfil con '--use' "
+                "ni existe un perfil activo globalmente. "
+                "Usa 'totelegram profile switch <nombre>' para activar uno."
             )
 
-        if not self.exists(active):
-            # Caso de borde: el registro dice que hay uno activo pero el archivo no existe
-            raise ValueError(f"El perfil activo '{active}' no existe físicamente.")
+        # Validación de existencia (Strict)
+        if not self.exists(target):
+            raise ValueError(f"El perfil '{target}' no existe en el sistema.")
 
-        return active
+        return target
 
     def activate(self, name: str):
         """Establece un perfil como activo."""

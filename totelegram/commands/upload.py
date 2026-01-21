@@ -1,11 +1,10 @@
 from pathlib import Path
-from typing import Optional, cast
+from typing import cast
 
 import typer
 from rich.table import Table
 
 from totelegram.commands.profile import list_profiles
-from totelegram.commands.profile_utils import UseOption
 from totelegram.console import console
 from totelegram.core.enums import (
     AvailabilityState,
@@ -60,7 +59,6 @@ def upload_file(
     target: Path = typer.Argument(
         ..., exists=True, help="Archivo o directorio a procesar."
     ),
-    user: Optional[str] = UseOption,
     policy: DuplicatePolicy = typer.Option(
         DuplicatePolicy.STRICT,
         "--policy",
@@ -75,11 +73,10 @@ def upload_file(
     ),
 ):
     """
-    Sube archivos o directorios a Telegram.
-    Aplica inteligencia colectiva para evitar transferencias redundantes.
+    Sube archivos o archivos de un directorio a Telegram.
     """
     try:
-        profile_name = pm.resolve_name(user)
+        profile_name = pm.resolve_name()
         env_path = pm.get_path(profile_name)
         settings = get_settings(env_path)
     except ValueError as e:
