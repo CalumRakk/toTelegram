@@ -1,210 +1,155 @@
 import logging
 import os
 import sys
-import time
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Optional, cast
+from typing import cast
+
+from totelegram.core.plans import SkipPlan
+from totelegram.services.validator import ValidationService
 
 sys.path.append(os.getcwd())
 
-from totelegram.core.enums import Strategy
+from totelegram.core.enums import AvailabilityState, DuplicatePolicy
 from totelegram.core.registry import ProfileManager
 from totelegram.core.setting import get_settings
 from totelegram.logging_config import setup_logging
-from totelegram.services.chunking import ChunkingService
-from totelegram.services.snapshot import SnapshotService
+from totelegram.services.discovery import DiscoveryService
+from totelegram.services.policy import PolicyExpert
 from totelegram.services.uploader import UploadService
 from totelegram.store.database import DatabaseSession
-from totelegram.store.models import Job, SourceFile
+from totelegram.store.models import Job, RemotePayload, SourceFile, TelegramChat
 from totelegram.telegram import TelegramSession
 
 
-class TestManualReal(unittest.TestCase):
-    pm: ProfileManager
-    media_folder: TemporaryDirectory
-    db_session: DatabaseSession
-    tg_session: TelegramSession
-    client = None
+class TestManualRealLogic(unittest.TestCase):
+    """
+    Test manual con cuenta real que valida los Escenarios de LOGIC_EXPLAINER.md
+    """
 
     @classmethod
     def setUpClass(cls):
-        """
-        Se ejecuta UNA VEZ antes de todos los tests.
-        Aquí abrimos la Base de Datos y la Conexión a Telegram.
-        """
         Path("tests/logs").mkdir(parents=True, exist_ok=True)
         setup_logging("tests/logs/test_runs.log", logging.INFO)
-        cls.logger = cast(logging.Logger, logging.getLogger("TestManualReal"))
+        cls.logger = cast(logging.Logger, logging.getLogger("ManualReal"))
 
         cls.pm = ProfileManager()
-
-        # Resolver Perfil
         profile_name = "demo"
-        if not cls.pm.exists(profile_name):
-            profile_name = cls.pm.active_name
-
         if not profile_name:
-            raise unittest.SkipTest(
-                "No hay perfil 'demo' ni activo para ejecutar pruebas."
-            )
+            raise unittest.SkipTest("No hay un perfil activo para ejecutar pruebas.")
 
-        cls.logger.info(f"=== INICIANDO SUITE DE TESTS CON PERFIL: {profile_name} ===")
+        cls.logger.info(f"=== INICIANDO SUITE REAL: PERFIL {profile_name} ===")
 
-        # Configurar Entorno
         env_path = cls.pm.get_path(profile_name)
         cls.settings = get_settings(env_path)
-        cls.settings.database_name = "test_run.sqlite"
-
-        # Carpeta temporal para generar archivos dummy (dura toda la clase)
+        cls.settings.database_name = "manual_test_run.sqlite"
         cls.media_folder = TemporaryDirectory()
 
-        # 3. Iniciar Base de Datos (Manual enter)
         cls.db_session = DatabaseSession(cls.settings)
         cls.db_session.__enter__()
 
         cls.tg_session = TelegramSession(cls.settings)
-        try:
-            cls.client = cls.tg_session.start()
-        except Exception as e:
-            cls.logger.critical(f"No se pudo conectar a Telegram: {e}")
-            cls.db_session.__exit__(None, None, None)
-            raise e
+        cls.client = cls.tg_session.start()
+
+        validate = ValidationService()
+        validate._force_refresh_peers(cls.client)
 
     @classmethod
     def tearDownClass(cls):
-        """
-        Se ejecuta UNA VEZ al final de todos los tests.
-        Cierra conexiones y limpia archivos.
-        """
-        cls.logger.info("=== FINALIZANDO SUITE DE TESTS ===")
-
-        # Cerrar Telegram
-        if cls.tg_session:
-            cls.tg_session.stop()
-
-        # Cerrar BD
-        if cls.db_session:
-            cls.db_session.__exit__(None, None, None)
-
-        # Limpiar carpeta temporal
-        if cls.media_folder:
-            cls.media_folder.cleanup()
-
-        # Borrar archivo SQLite
-        if cls.settings and cls.settings.database_path.exists():
+        cls.tg_session.stop()
+        cls.db_session.__exit__(None, None, None)
+        cls.media_folder.cleanup()
+        if cls.settings.database_path.exists():
             try:
                 cls.settings.database_path.unlink()
-            except PermissionError:
-                cls.logger.warning("No se pudo borrar la BD temporal (archivo en uso).")
+            except:
+                pass
 
-    def _create_dummy_file(
-        self, size_mb: int, force_name: Optional[str] = None
-    ) -> Path:
-        """
-        Crea un archivo con datos aleatorios.
-        Por defecto genera un nombre único para evitar colisiones de MD5/DB entre tests.
-        """
-        if force_name:
-            filename = force_name
-        else:
-            timestamp = time.time_ns()
-            filename = f"dummy_{size_mb}MB_{timestamp}.bin"
-
-        path = Path(self.media_folder.name) / filename
+    def _create_dummy_file(self, name: str, size_mb: int) -> Path:
+        path = Path(self.media_folder.name) / name
         with open(path, "wb") as f:
             f.write(os.urandom(size_mb * 1024 * 1024))
-
         return path
 
-    def _execute_upload_pipeline(self, target_path: Path):
-        chunker = ChunkingService(self.settings)
-        uploader = UploadService(self.client, self.settings)  # type: ignore
+    def test_logic_scenarios(self):
+        """
+        Prueba los estados SYSTEM_NEW -> FULFILLED -> REMOTE_MIRROR
+        usando los servicios reales.
+        """
+        # Preparación de servicios
+        discovery = DiscoveryService(self.client)
+        uploader = UploadService(self.client, self.settings)
+        from pyrogram.types import Chat
 
-        source = SourceFile.get_or_create_from_path(target_path)
+        tg_chat = self.client.get_chat(self.settings.chat_id)
+        chat_db = TelegramChat.get_or_create_from_tg(cast(Chat, tg_chat))
+        from pyrogram.types import User
 
-        job = Job.get_or_create_from_source(source, self.settings)
+        me = cast(User, self.client.get_me())
 
-        payloads = chunker.process_job(job)
-        for payload in payloads:
-            uploader.upload_payload(payload)
+        # --- CASO SYSTEM_NEW: el archivo es nuevo ----
+        self.logger.info(">>> TEST 1: Subida física inicial (SYSTEM_NEW)")
+        target = self._create_dummy_file("video_boda.mp4", 1)
+        source = SourceFile.get_or_create_from_path(target)
 
-        job.set_uploaded()
-        manifest = SnapshotService.generate_snapshot(job)
-        return manifest
+        job = Job.create_contract(source, chat_db, me.is_premium, self.settings)
 
-    def _remove_messages_from_manifest(self, manifest):
-        """Borra los mensajes usando el cliente compartido."""
-        if not self.client:
-            return
+        report = discovery.investigate(job)
+        self.assertEqual(
+            report.state, AvailabilityState.SYSTEM_NEW, "Debería ser un archivo nuevo."
+        )
 
-        chat_ids_map = {}
-        for part in manifest.parts:
-            if part.chat_id not in chat_ids_map:
-                chat_ids_map[part.chat_id] = []
-            chat_ids_map[part.chat_id].append(part.message_id)
+        uploader.execute_physical_upload(job)
+        self.assertTrue(job.status == "UPLOADED")
+        self.logger.info("✔ Archivo subido físicamente.")
 
-        for chat_id, msg_ids in chat_ids_map.items():
-            try:
-                self.logger.info(
-                    f"Limpieza: Borrando {len(msg_ids)} mensajes en {chat_id}"
-                )
-                self.client.delete_messages(chat_id, msg_ids)  # type: ignore
-            except Exception as e:
-                self.logger.error(f"Error borrando mensajes: {e}")
+        # --- CASO FULFILLED: el archivo se repite en el mismo chat ---
+        self.logger.info(">>> TEST 2: Intento repetido en el mismo chat (FULFILLED)")
 
-    def test_01_upload_single_file(self):
-        """Test subida archivo único (pequeño)"""
-        target = self._create_dummy_file(1)
-        manifest = self._execute_upload_pipeline(target)
+        report_fulfilled = discovery.investigate(job)
+        self.assertEqual(
+            report_fulfilled.state,
+            AvailabilityState.FULFILLED,
+            "Debería detectar integridad local.",
+        )
 
-        self.assertEqual(manifest.strategy, Strategy.SINGLE)
-        self.assertEqual(len(manifest.parts), 1)
+        plan = PolicyExpert.determine_plan(report_fulfilled, DuplicatePolicy.SMART)
+        self.logger.info(f"Plan decidido: {plan}")
+        self.assertIsInstance(plan, SkipPlan)
+        self.logger.info("El sistema sabe que el archivo existe en el mismo chat.")
 
-        # Limpieza inmediata para no saturar el chat si falla el siguiente test
-        self._remove_messages_from_manifest(manifest)
+        # --- CASO REMOTE_MIRROR: el archivo se repite en otro chat ---
+        self.logger.info(">>> TEST 3: Detección de duplicidad global (MIRROR)")
 
-    def test_02_upload_pieces_file(self):
-        """Test subida archivo partido (Chunked)"""
+        # Creamos un chat ficticio en la DB para pedirle al sistema que suba el mismo archivo allí
+        chat_virtual, _ = TelegramChat.get_or_create(
+            id=999999, defaults={"title": "Virtual", "type": "private"}
+        )
+        # El Job nace "vacío" (sin payloads en DB), solo con el contrato.
+        job_mirror = Job.create_contract(
+            source, chat_virtual, me.is_premium, self.settings
+        )
 
-        # Modificar configuración "en caliente" es seguro porque Settings es mutable en memoria
-        self.settings.max_filesize_bytes = 2 * 1024 * 1024  # type: ignore
-
-        target = self._create_dummy_file(5)
-        manifest = self._execute_upload_pipeline(target)
-
-        self.assertEqual(manifest.strategy, Strategy.CHUNKED)
-        self.assertEqual(len(manifest.parts), 3)  # 5MB / 2MB = 3 partes (2, 2, 1)
-
-        self._remove_messages_from_manifest(manifest)
-
-    def test_03_upload_throttled(self):
-        """Test limitador de velocidad"""
-        file_size_mb = 1
-        limit_kbps = 500
-
-        self.settings.upload_limit_rate_kbps = limit_kbps
-        # Restaurar tamaño para evitar hacer chunking innecesario
-        self.settings.max_filesize_bytes = 2000 * 1024 * 1024
-
-        target = self._create_dummy_file(file_size_mb)
-
-        start = time.time()
-        manifest = self._execute_upload_pipeline(target)
-        duration = time.time() - start
-
-        expected_min = (file_size_mb * 1024) / limit_kbps
+        report_mirror = discovery.investigate(job_mirror)
+        self.assertEqual(report_mirror.state, AvailabilityState.REMOTE_MIRROR)
         self.logger.info(
-            f"Speed Test: {duration:.2f}s (Mínimo teórico: {expected_min:.2f}s)"
+            "El sistema sabe que el archivo existe en otro chat del ecosistema."
         )
 
-        self.assertGreater(
-            duration,
-            expected_min * 0.8,
-            "Subida fue demasiado rápida, el limitador no funcionó.",
+        self._cleanup_remote_messages(job)
+
+    def _cleanup_remote_messages(self, job):
+        """Elimina los mensajes de Telegram para mantener el chat limpio."""
+        remotes = (
+            RemotePayload.select()
+            .join(Job, on=(RemotePayload.payload_id == Job.id))
+            .where(Job.source == job.source)
         )
-        self._remove_messages_from_manifest(manifest)
+        msg_ids = [r.message_id for r in remotes if r.chat_id == self.settings.chat_id]
+        if msg_ids:
+            self.logger.info(f"Limpiando {len(msg_ids)} mensajes del test...")
+            self.client.delete_messages(self.settings.chat_id, msg_ids)  # type: ignore
 
 
 if __name__ == "__main__":

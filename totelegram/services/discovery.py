@@ -1,4 +1,5 @@
 import logging
+import math
 import time
 from typing import TYPE_CHECKING, Dict, List, Optional, cast
 
@@ -10,7 +11,7 @@ if TYPE_CHECKING:
     from pyrogram import Client  # type: ignore
     from pyrogram.types import Message  # type: ignore
 
-from totelegram.core.enums import AvailabilityState
+from totelegram.core.enums import AvailabilityState, Strategy
 from totelegram.store.models import Job, Payload, RemotePayload
 
 logger = logging.getLogger(__name__)
@@ -84,7 +85,7 @@ class DiscoveryService:
         # Devolvemos las piezas ordenadas por secuencia
         return (
             [collected[i] for i in sorted(collected.keys())]
-            if len(collected) == job.payloads.count()
+            if len(collected) == self._get_expected_count(job)
             else []
         )
 
@@ -171,8 +172,9 @@ class DiscoveryService:
         """Comprueba si el chat actual ya posee el archivo completo y accesible."""
         local_remotes = self._get_remotes_for_chat(job, job.chat.id)
 
-        # Debe tener el número exacto de partes y pasar el JIT
-        if len(local_remotes) == job.payloads.count() and len(local_remotes) > 0:
+        expected = self._get_expected_count(job)
+
+        if len(local_remotes) == expected and expected > 0:
             return self._validate_jit(local_remotes)
         return False
 
@@ -199,7 +201,7 @@ class DiscoveryService:
 
         # Contamos cuántos payloads debería tener según su estrategia
         # y cuántos RemotePayload hay realmente en la DB.
-        expected_count = base_job.payloads.count()
+        expected_count = self._get_expected_count(base_job)
         remotes = list(
             RemotePayload.select()
             .join(Payload)
@@ -220,7 +222,7 @@ class DiscoveryService:
         for r in pool:
             by_chat.setdefault(r.chat_id, []).append(r)
 
-        expected_count = job.payloads.count()
+        expected_count = self._get_expected_count(job)
         for chat_id, remotes in by_chat.items():
             if len(remotes) == expected_count:
                 if self._validate_jit(remotes):
@@ -248,7 +250,7 @@ class DiscoveryService:
             parts_by_location.setdefault(remote.chat_id, []).append(remote)
 
         collected_puzzle = {}
-        total_parts_needed = job.payloads.count()
+        total_parts_needed = self._get_expected_count(job)
 
         # Va a cada chat y recoge las piezas que aún no tenemos
         for chat_id, remotes_in_this_chat in parts_by_location.items():
@@ -277,3 +279,18 @@ class DiscoveryService:
 
         # Si llegamos aquí, faltan piezas en la red global para completar este archivo
         return []
+
+    def _get_expected_count(self, job: Job) -> int:
+        """
+        Determina cuántas piezas esperamos para este archivo.
+        Si ya existen en DB, usa ese valor. Si no, lo calcula según el contrato.
+        """
+        db_count = job.payloads.count()
+        if db_count > 0:
+            return db_count
+
+        if job.strategy == Strategy.SINGLE:
+            return 1
+
+        # TODO : encapsular la lógica de CHUNKED si es posible.
+        return math.ceil(job.source.size / job.config.tg_max_size)
