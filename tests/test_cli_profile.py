@@ -152,30 +152,6 @@ class TestCliProfile(unittest.TestCase):
         self.assertEqual(result.exit_code, 0)
         self.assertIn("Operación cancelada por el usuario", result.stdout)
 
-    def test_set_config_type_safety(self):
-        """
-        Prueba CRÍTICA: Evitar corrupción de configuración.
-        Intentar meter un string en un campo numérico debe fallar.
-        """
-
-        self.pm.create("dummy", 1, "hash", "chat")
-        self.pm.activate("dummy")
-
-        # Intentamos asignar texto a un campo entero (MAX_FILESIZE_BYTES)
-        result = runner.invoke(
-            app, ["set", "MAX_FILESIZE_BYTES", "esto_no_es_un_numero"]
-        )
-
-        self.assertNotEqual(
-            result.exit_code, 0, "El comando debería fallar o manejar error"
-        )
-        self.assertIn("Error", result.stdout)
-
-        # Verificar que el valor NO cambió en el archivo
-        values = self.pm.get_config_values("dummy")
-        # El valor por defecto no es ese string
-        self.assertNotEqual(values.get("MAX_FILESIZE_BYTES"), "esto_no_es_un_numero")
-
     def test_use_profile_switching(self):
         """
         Prueba funcional: Verificar que podemos cambiar entre perfiles.

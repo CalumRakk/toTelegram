@@ -3,7 +3,7 @@ from typing import Optional
 
 import typer
 
-from totelegram.commands import profile, upload
+from totelegram.commands import config, profile, upload
 from totelegram.console import console
 from totelegram.core.registry import ProfileManager
 
@@ -13,6 +13,7 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 
+app.add_typer(config.app, name="config")
 app.add_typer(profile.app, name="profile")
 app.command(name="upload")(upload.upload_file)
 
