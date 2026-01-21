@@ -94,24 +94,16 @@ def set_config(
         list_profiles(quiet=True)
         raise typer.Exit(code=1)
 
+    ui.announce_profile_used(profile_name)
     try:
         validated_val = pm.update_config(key, value, profile_name=profile_name)
         if key.upper() == "CHAT_ID":
             _try_resolve_and_store_chat(profile_name, validated_val)
 
-        ui.announce_profile_used(profile_name)
         checkmark_text = "[bold green]✔[/bold green]"
         console.print(
             f"{checkmark_text} La configuracion [bold]{key.upper()}[/bold] se establecio en: '{value}'."
         )
-        # pm.update_config(key, value, profile_name=profile_name)
-        # ui.announce_profile_used(profile_name)
-        # checkmark_text = "[bold green]✔[/bold green]"
-
-        # console.print(
-        #     f"{checkmark_text} La configuracion [bold]{key.upper()}[/bold] se establecio en: '{value}'."
-        # )
-
     except (ValidationError, ValueError) as e:
         console.print(f"[bold red]Error:[/bold red] {e}")
         raise typer.Exit(code=1)
@@ -148,6 +140,15 @@ def _try_resolve_and_store_chat(profile_name: str, chat_id: str):
                 console.print(
                     f"[green]✔ Chat detectado: [bold]{chat_obj.title}[/bold][/green]"
                 )
+                has_permissions = validator._verify_permissions(client, chat_obj)
+                if has_permissions:
+                    console.print(
+                        "[green]✔ El Perfil tiene permisos para enviar media.[/green]"
+                    )
+                else:
+                    console.print(
+                        "[bold red]✘ El Perfil no tiene permisos para enviar media.[/bold red]"
+                    )
 
 
 @app.command("add")
