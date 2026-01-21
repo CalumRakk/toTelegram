@@ -278,6 +278,7 @@ class Payload(BaseModel):
 class RemotePayload(BaseModel):
     """Representa el Acceso Efectivo: El vínculo entre el Payload y el mensaje en Telegram."""
 
+    payload_id: int
     chat_id: int
 
     payload = peewee.ForeignKeyField(Payload, unique=True, backref="remote")

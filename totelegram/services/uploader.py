@@ -42,7 +42,7 @@ class UploadProgress:
 
 
 class UploadService:
-    def __init__(self, client: Client, settings: Settings):
+    def __init__(self, client: "Client", settings: Settings):
         self.client = client
         self.settings = settings
         self.discovery = DiscoveryService(client)

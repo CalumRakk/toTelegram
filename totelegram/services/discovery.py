@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 class DiscoveryReport(BaseModel):
     state: AvailabilityState
     remotes: Optional[List[RemotePayload]] = []
+    model_config = {"arbitrary_types_allowed": True}
 
     # @property
     # def is_redundant(self) -> bool:

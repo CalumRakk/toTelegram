@@ -35,9 +35,19 @@ class DatabaseSession:
 
         self.db.connect()
 
-        from totelegram.store.models import Job, Payload, RemotePayload, SourceFile
+        from totelegram.store.models import (
+            Job,
+            Payload,
+            RemotePayload,
+            SourceFile,
+            TelegramChat,
+            TelegramUser,
+        )
 
-        db_proxy.create_tables([SourceFile, Job, Payload, RemotePayload], safe=True)
+        db_proxy.create_tables(
+            [SourceFile, Job, Payload, RemotePayload, TelegramChat, TelegramUser],
+            safe=True,
+        )
         return self.db
 
     def __exit__(self, exc_type, exc_val, exc_tb):

@@ -4,8 +4,7 @@ import logging
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Generator, Optional, Union, cast
 
-from rich.console import Console
-
+from totelegram.console import console
 from totelegram.core.registry import ProfileManager
 from totelegram.telegram import TelegramSession
 
@@ -32,9 +31,6 @@ class ValidationService:
     antes de guardar un perfil.
     """
 
-    def __init__(self, console: Console):
-        self.console = console
-
     @contextmanager
     def validate_session(
         self, profile_name: str, api_id: int, api_hash: str
@@ -43,7 +39,7 @@ class ValidationService:
 
         ProfileManager.PROFILES_DIR.mkdir(parents=True, exist_ok=True)
 
-        self.console.print(
+        console.print(
             f"\n[bold blue]Iniciando validación para '{profile_name}'...[/bold blue]"
         )
         try:
@@ -55,7 +51,7 @@ class ValidationService:
             ) as client:
 
                 me = cast(Chat, client.get_me())
-                self.console.print(
+                console.print(
                     f"[green]✔ Login exitoso como:[/green] {me.first_name} (@{me.username})"
                 )
                 yield client
@@ -72,21 +68,19 @@ class ValidationService:
 
     def validate_chat_id(self, client: Client, target_chat_id: str) -> bool:
         """Valida que el chat ID o username sea accesible."""
-        self.console.print(f"[yellow]Buscando chat '{target_chat_id}'...[/yellow]")
+        console.print(f"[yellow]Buscando chat '{target_chat_id}'...[/yellow]")
 
         chat = self._resolve_target_chat(client, target_chat_id)
         if not chat:
             return False
 
         if not self._verify_permissions(client, chat):
-            self.console.print(
+            console.print(
                 "[bold red]✘ Error de Permisos:[/bold red] No puedes enviar archivos a este chat."
             )
             return False
 
-        self.console.print(
-            f"[bold green]✔ Validación completada. Todo listo.[/bold green]"
-        )
+        console.print(f"[bold green]✔ Validación completada. Todo listo.[/bold green]")
         return True
 
     def _resolve_target_chat(self, client, chat_id: Union[str, int]) -> Optional[Chat]:
@@ -94,16 +88,16 @@ class ValidationService:
         from pyrogram.errors import ChannelPrivate, PeerIdInvalid, UsernameInvalid
         from pyrogram.types import Chat
 
-        self.console.print(f"[yellow]Buscando chat '{chat_id}'...[/yellow]")
+        console.print(f"[yellow]Buscando chat '{chat_id}'...[/yellow]")
 
         try:
             return cast(Chat, client.get_chat(chat_id))
         except PeerIdInvalid:
-            self.console.print("[dim]Chat no en caché, escaneando diálogos...[/dim]")
+            console.print("[dim]Chat no en caché, escaneando diálogos...[/dim]")
             self._force_refresh_peers(client)
             try:
                 chat = cast(Chat, client.get_chat(chat_id))
-                self.console.print(
+                console.print(
                     f"[green]✔ Chat encontrado:[/green] {chat.title} (ID: {chat.id})"
                 )
                 return chat
@@ -112,7 +106,7 @@ class ValidationService:
         except (UsernameInvalid, ChannelPrivate):
             pass
 
-        self.console.print(
+        console.print(
             f"[bold red]✘ Error:[/bold red] No se encuentra el chat '{chat_id}'."
         )
         return None
@@ -121,7 +115,7 @@ class ValidationService:
         """Recorre diálogos para poblar caché de access_hash."""
         try:
             count = 0
-            for _ in client.get_dialogs(limit=200):
+            for _ in client.get_dialogs(limit=30):
                 count += 1
         except Exception:
             pass
@@ -133,7 +127,7 @@ class ValidationService:
         from pyrogram import enums
         from pyrogram.errors import ChatWriteForbidden
 
-        self.console.print(
+        console.print(
             f"[dim]Verificando permisos de escritura en {chat.type.value}...[/dim]"
         )
 
@@ -161,7 +155,7 @@ class ValidationService:
             # Miembro normal
             if member.status == enums.ChatMemberStatus.MEMBER:
                 if chat.type == enums.ChatType.CHANNEL:
-                    self.console.print(
+                    console.print(
                         "[red]Los miembros no pueden escribir en canales.[/red]"
                     )
                     return False

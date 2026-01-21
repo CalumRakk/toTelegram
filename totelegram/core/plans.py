@@ -25,6 +25,8 @@ class ForwardPlan(ExecutionPlan):
     remotes: List[RemotePayload]
     is_puzzle: bool = False
 
+    model_config = {"arbitrary_types_allowed": True}
+
     @property
     def source_chats_count(self) -> int:
         return len({r.chat_id for r in self.remotes})
@@ -35,3 +37,4 @@ class AskUserPlan(ExecutionPlan):
 
     state: AvailabilityState
     remotes: List[RemotePayload]
+    model_config = {"arbitrary_types_allowed": True}

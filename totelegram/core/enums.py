@@ -39,3 +39,9 @@ class DuplicatePolicy(str, enum.Enum):
     SMART = "smart"  # Intenta recuperar/preguntar.
     STRICT = "strict"  # Evita duplicados a toda costa.
     OVERWRITE = "force"  # Ignora la base de datos y sube de nuevo.
+
+    def __str__(self):
+        return self.value
+
+    def __repr__(self):
+        return self.value
