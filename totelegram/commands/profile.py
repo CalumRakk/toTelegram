@@ -95,17 +95,59 @@ def set_config(
         raise typer.Exit(code=1)
 
     try:
-        pm.update_config(key, value, profile_name=profile_name)
+        validated_val = pm.update_config(key, value, profile_name=profile_name)
+        if key.upper() == "CHAT_ID":
+            _try_resolve_and_store_chat(profile_name, validated_val)
+
         ui.announce_profile_used(profile_name)
         checkmark_text = "[bold green]✔[/bold green]"
-
         console.print(
             f"{checkmark_text} La configuracion [bold]{key.upper()}[/bold] se establecio en: '{value}'."
         )
+        # pm.update_config(key, value, profile_name=profile_name)
+        # ui.announce_profile_used(profile_name)
+        # checkmark_text = "[bold green]✔[/bold green]"
+
+        # console.print(
+        #     f"{checkmark_text} La configuracion [bold]{key.upper()}[/bold] se establecio en: '{value}'."
+        # )
 
     except (ValidationError, ValueError) as e:
         console.print(f"[bold red]Error:[/bold red] {e}")
         raise typer.Exit(code=1)
+
+
+def _try_resolve_and_store_chat(profile_name: str, chat_id: str):
+    """
+    Intenta conectar a Telegram para obtener el nombre del chat
+    y guardarlo en la DB local.
+    """
+    path = pm.get_path(profile_name)
+    settings = get_settings(path)
+    session_file = pm.PROFILES_DIR / f"{profile_name}.session"
+
+    # Si no hay sesión, no podemos resolver nada aún
+    if not session_file.exists():
+        console.print(
+            "[dim yellow]Nota: No hay archivo de sesión activo. El nombre del chat se resolverá en la próxima subida.[/dim yellow]"
+        )
+        return
+
+    console.print(f"[dim]Resolviendo identidad del chat '{chat_id}'...[/dim]")
+
+    from totelegram.services.validator import ValidationService
+    from totelegram.store.database import DatabaseSession
+    from totelegram.telegram import TelegramSession
+
+    with DatabaseSession(settings):
+        with TelegramSession(settings) as client:
+            validator = ValidationService()
+            chat_obj = validator._resolve_target_chat(client, chat_id)
+            if chat_obj:
+                TelegramChat.get_or_create_from_tg(chat_obj)
+                console.print(
+                    f"[green]✔ Chat detectado: [bold]{chat_obj.title}[/bold][/green]"
+                )
 
 
 @app.command("add")
