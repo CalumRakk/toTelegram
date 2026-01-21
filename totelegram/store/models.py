@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 
 class BaseModel(peewee.Model):
-    created_at = peewee.DateTimeField(default=datetime.now)
+    created_at = cast(datetime, peewee.DateTimeField(default=datetime.now))
     updated_at = peewee.DateTimeField(default=datetime.now)
 
     def save(self, *args, **kwargs):
@@ -107,6 +107,7 @@ class SourceFile(BaseModel):
     path_str = cast(str, peewee.CharField())
     md5sum = cast(str, peewee.CharField(unique=True))  # El ancla de todo el sistema
     size = cast(int, peewee.IntegerField())
+    # mtime : Unix timestamp. Es util para la identificar archivo en el disco con
     mtime = cast(float, peewee.FloatField())
     mimetype = cast(str, peewee.CharField())
 

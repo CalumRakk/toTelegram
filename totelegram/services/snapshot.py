@@ -25,6 +25,18 @@ class SnapshotService:
         source = job.source
         original_file_path = Path(source.path_str)
 
+        first_remote = (
+            RemotePayload.select().join(Payload).where(Payload.job == job).first()
+        )
+
+        if not first_remote:
+            raise ValueError(
+                f"No se puede generar snapshot: El Job {job.id} no tiene registros remotos en la DB."
+            )
+
+        owner_id = first_remote.owner.id
+        owner_name = first_remote.owner.first_name
+
         # Resolver el path del snapshot evitando colisiones
         output_path = SnapshotService._resolve_snapshot_path(
             original_file_path, source.md5sum
@@ -34,43 +46,52 @@ class SnapshotService:
             f"Generando manifiesto {MANIFEST_VERSION} para Job {job.id} -> {output_path.name}"
         )
 
-        # Construir Metadata del Origen
-        source_meta = SourceMetadata(
-            filename=original_file_path.name,
-            size=source.size,
-            md5sum=source.md5sum,
-            mime_type=source.mimetype,
-        )
-
         # Mapear Partes Remotas
         parts: list[RemotePart] = []
-        payloads = job.payloads.order_by(Payload.sequence_index)  # type: ignore
+        payloads = job.payloads.order_by(Payload.sequence_index)
 
         for payload in payloads:
-            remote: RemotePayload = RemotePayload.get_or_none(
-                RemotePayload.payload == payload
-            )
-            if not remote:
-                raise ValueError(
-                    f"Falta RemotePayload para Payload {payload.id}. Job incompleto."
-                )
+            remote_part_db = RemotePayload.get_or_none(RemotePayload.payload == payload)
 
-            message = parse_message_json_data(remote.json_metadata)
-            part = RemotePart(
-                sequence=payload.sequence_index,
-                message_id=remote.message_id,
-                chat_id=remote.chat_id,
-                link=message.link,
-                part_filename=Path(payload.temp_path).name,
-                part_size=payload.size,
+            if not remote_part_db:
+                logger.warning(
+                    f"Payload {payload.sequence_index} no tiene registro remoto. Snapshot incompleto."
+                )
+                continue
+
+            # Reconstruir mensaje para obtener el link
+            message = parse_message_json_data(remote_part_db.json_metadata)
+
+            parts.append(
+                RemotePart(
+                    sequence=payload.sequence_index,
+                    message_id=remote_part_db.message_id,
+                    chat_id=remote_part_db.chat_id,
+                    link=message.link or "",
+                    part_filename=Path(payload.temp_path).name,
+                    part_size=payload.size,
+                    part_md5sum=payload.md5sum,
+                )
             )
-            parts.append(part)
 
         # Crear Manifiesto
         manifest = UploadManifest(
-            strategy=job.strategy, source=source_meta, parts=parts
+            app_version=job.config.app_version,
+            strategy=job.strategy,
+            chunk_size=job.config.tg_max_size,
+            created_at=job.created_at,
+            target_chat_id=job.chat.id,
+            owner_id=owner_id,
+            owner_name=owner_name,
+            source=SourceMetadata(
+                filename=original_file_path.name,
+                size=source.size,
+                md5sum=source.md5sum,
+                mime_type=source.mimetype,
+                mtime=source.mtime,
+            ),
+            parts=parts,
         )
-
         # Guardado atómico con compresión LZMA
         with lzma.open(output_path, "wt", encoding="utf-8") as f:
             f.write(manifest.model_dump_json(indent=2))

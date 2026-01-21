@@ -14,22 +14,33 @@ class SourceMetadata(BaseModel):
     size: int
     md5sum: str
     mime_type: str
+    mtime: float
 
 
 class RemotePart(BaseModel):
-    sequence: int = Field(description="Orden de la parte, iniciando en 0")
+    sequence: int
     message_id: int
     chat_id: int
     link: str
     part_filename: str
     part_size: int
+    part_md5sum: str
 
 
 class UploadManifest(BaseModel):
     version: str = MANIFEST_VERSION
-    app_version: str = __version__
-    created_at: datetime = Field(default_factory=datetime.now)
+    app_version: str
+    created_at: datetime
+
+    # Bloque de Identidad del Job
     strategy: Strategy
+    chunk_size: int  # El 'tg_max_size' del contrato original (ADR-002)
+
+    # Bloque de Identidad del Chat/Usuario
+    target_chat_id: int
+    owner_id: int
+    owner_name: str
+
     source: SourceMetadata
     parts: List[RemotePart]
 

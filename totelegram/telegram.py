@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import locale
 import logging
 from pathlib import Path
@@ -100,11 +101,20 @@ def parse_message_json_data(json_data: dict) -> Message:
     from pyrogram.enums import MessageMediaType
     from pyrogram.types import Chat, Message
 
+    if isinstance(json_data, str):
+        json_data = json.loads(json_data)
+
     data = json_data.copy()
+
+    # Traducimos message_id (nombre en JSON) a id (nombre en constructor)
+    if "message_id" in data:
+        data["id"] = data.pop("message_id")
+
     if "_" in data:
         data.pop("_")
 
     chat_json = data["chat"].copy()
+
     if "_" in chat_json:
         chat_json.pop("_")
     chat = Chat(**chat_json)
@@ -116,10 +126,10 @@ def parse_message_json_data(json_data: dict) -> Message:
         media_type_str = media_raw.split(".")[-1].lower()
         media_type = MessageMediaType(media_type_str)
     elif media_raw:
-
         media_type = media_raw
 
     data["chat"] = chat
     data["media"] = media_type
 
+    data.pop("link", "")
     return Message(**data)
