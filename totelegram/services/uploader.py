@@ -51,58 +51,6 @@ class UploadService:
         me = cast("User", client.get_me())
         self.current_user = TelegramUser.get_or_create_from_tg(me)
 
-    # def process_job(self, job: Job, policy_override: Optional[DuplicatePolicy] = None):
-    #     """Orquestador principal del ciclo de vida de una subida."""
-    #     policy = policy_override or self.settings.duplicate_policy
-
-    #     # Fase de Descubrimiento
-    #     state, source_remotes = self.discovery.investigate(job)
-
-    #     # Toma la decisión final según Estado y Política
-    #     if state == AvailabilityState.FULFILLED:
-    #         console.print(
-    #             f"[dim]✔ [bold]{job.source.path_str}[/bold] ya está disponible en el destino.[/dim]"
-    #         )
-    #         job.set_uploaded()
-    #         return
-
-    #     if state == AvailabilityState.SYSTEM_NEW and source_remotes:
-    #         if policy == DuplicatePolicy.STRICT:
-    #             console.print(
-    #                 f"[yellow]STRICT:[/yellow] Archivo omitido (ya existe en el ecosistema)."
-    #             )
-    #             return
-
-    #         if policy == DuplicatePolicy.SMART:
-    #             console.print(
-    #                 f"\n[bold blue]INFO:[/bold blue] El archivo ya está en el ecosistema (Chat: {source_remotes[0].chat_id})."
-    #             )
-    #             choice = prompt(
-    #                 "¿Qué deseas hacer? [f] Reenviar / [u] Subir de nuevo / [s] Saltar",
-    #                 default="f",
-    #             ).lower()
-
-    #             if choice == "f":
-    #                 return self.execute_smart_forward(job, source_remotes)
-    #             elif choice == "s":
-    #                 console.print("[dim]Operación saltada.[/dim]")
-    #                 return
-    #         else:  # policy == OVERWRITE
-    #             pass
-
-    #     if (
-    #         state == AvailabilityState.REMOTE_RESTRICTED
-    #         and policy != DuplicatePolicy.OVERWRITE
-    #     ):
-    #         console.print(
-    #             f"[yellow]AVISO:[/yellow] El archivo existe en otros perfiles pero tú no tienes acceso."
-    #         )
-    #         if not confirm("¿Deseas realizar una subida física propia?", default=True):
-    #             return
-
-    #     # Ejecución: Subida Física
-    #     return self.execute_physical_upload(job)
-
     def execute_smart_forward(self, job: Job, source_remotes: List[RemotePayload]):
         """
         Reenvia de forma atomica los RemotePayloads específicados al chat de destino que contiene el job.
@@ -202,7 +150,11 @@ class UploadService:
         """Realiza la subida fisica de un Job."""
 
         # Esto genera los archivos .bin temporales si el job es CHUNKED
-        payloads = self.chunker.process_job(job)
+        if job.payloads.count() == 0:
+            payloads = self.chunker.process_job(job)
+        else:
+            payloads = list(job.payloads.order_by(Payload.sequence_index))
+
         console.print(
             f"Subida física: [bold]{job.source.path_str}[/bold] ({len(payloads)} partes)"
         )
@@ -212,6 +164,17 @@ class UploadService:
             if RemotePayload.select().where(RemotePayload.payload == payload).exists():
                 logger.debug(f"Parte {payload.sequence_index} ya subida. Saltando.")
                 continue
+            if not payload.path.exists():
+                if job.strategy == Strategy.CHUNKED:
+                    console.print(
+                        f"[yellow] Pieza {payload.sequence_index} desaparecida. Re-generando...[/yellow]"
+                    )
+                    self.chunker.split_file_for_missing_payload(job, payload)
+                else:
+                    # Si es SINGLE y no existe, el archivo origen desapareció de su ruta
+                    raise FileNotFoundError(
+                        f"El archivo original desaparecio mientras se subia: {payload.path}"
+                    )
 
             self._upload_single_payload(payload)
 

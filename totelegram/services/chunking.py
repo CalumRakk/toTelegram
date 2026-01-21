@@ -5,6 +5,7 @@ from typing import List, Tuple, Union
 from totelegram.core.enums import Strategy
 from totelegram.core.setting import Settings
 from totelegram.store.models import Job, Payload
+from totelegram.utils import create_md5sum_by_hashlib
 
 logger = logging.getLogger(__name__)
 
@@ -165,3 +166,27 @@ class ChunkingService:
             return payloads
 
         return []
+
+    def split_file_for_missing_payload(self, job: Job, payload: Payload):
+        """Re-genera los fragmentos del archivo original."""
+        chunks_folder = self.settings.worktable / "chunks"
+
+        # volvemos a ejecutar el split.
+        # Como el contrato (max_filesize_bytes) está en el Job config o settings
+        # el Chunker generará exactamente los mismos bytes.
+        FileChunker.split_file(
+            file_path=job.path,
+            chunk_size=job.config.tg_max_size,
+            output_folder=chunks_folder,
+        )
+
+        # Verificación post-reconstrucción
+        if not payload.path.exists():
+            raise Exception("No se pudo reconstruir la pieza faltante.")
+
+        # Validamos que el MD5 de lo que acabamos de crear sea igual al que dice la DB
+        new_md5 = create_md5sum_by_hashlib(payload.path)
+        if new_md5 != payload.md5sum:
+            raise Exception(
+                "Error de integridad: La pieza re-generada no coincide con el registro original."
+            )

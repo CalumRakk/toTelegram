@@ -200,35 +200,38 @@ class Job(BaseModel):
         self.status = JobStatus.UPLOADED
         self.save(only=[Job.status, Job.updated_at])
 
-    @classmethod
-    def get_or_create_from_source(
-        cls,
-        source: SourceFile,
-        user_is_premium: bool,
-        tg_max_size: int,
+    @staticmethod
+    def create_contract(
+        source: "SourceFile",
+        chat: "TelegramChat",
+        is_premium: bool,
+        settings: "Settings",
     ) -> "Job":
-        strategy = Strategy.SINGLE if source.size <= tg_max_size else Strategy.CHUNKED
-
-        job_config = StrategyConfig(
-            tg_max_size=tg_max_size,
-            user_is_premium=user_is_premium,
-            app_version=__version__,
+        """
+        Crea un Job basado en la estrategía y la configuración de la cuenta.
+        """
+        # Determinamos el límite técnico según el estado de la cuenta
+        tg_limit = (
+            settings.TG_MAX_SIZE_PREMIUM if is_premium else settings.TG_MAX_SIZE_NORMAL
         )
 
-        job, created = cls.get_or_create(
+        # Evaluamos la estrategia
+        strategy = Strategy.evaluate(source.size, tg_limit)
+
+        # Empaquetamos la configuración que regirá este Job para siempre (ADR-002)
+        config = StrategyConfig(
+            tg_max_size=tg_limit, user_is_premium=is_premium, app_version=__version__
+        )
+
+        logger.info(f"JOB CONTRACT: {source.md5sum} -> {strategy} (Limit: {tg_limit})")
+
+        return Job.create(
             source=source,
-            defaults={
-                "strategy": strategy,
-                "config": job_config,
-                "status": JobStatus.PENDING,
-            },
+            chat=chat,
+            strategy=strategy,
+            status=JobStatus.PENDING,
+            config=config,
         )
-
-        if created:
-            logger.info(
-                f"Nuevo Job {job.id} -> Destino: {job.chat.id} [{strategy.value}]"
-            )
-        return job
 
 
 class Payload(BaseModel):
@@ -251,10 +254,11 @@ class Payload(BaseModel):
 
     @staticmethod
     def create_payloads(job: Job, paths: list[Path]) -> list["Payload"]:
+        """Crea registros base para las partes. El MD5 es obligatorio."""
         saved_payloads = []
         with db_proxy.atomic():
             for idx, path in enumerate(paths):
-                # Si es SINGLE, usamos la data del Source, si es CHUNKED, calculamos la del trozo
+                # Si es single, nos ahorramos tener que generar nuevamente el md5
                 if job.strategy == Strategy.SINGLE:
                     md5_p, size_p = job.source.md5sum, job.source.size
                 else:
