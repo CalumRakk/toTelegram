@@ -36,11 +36,12 @@ class ValidationService:
         self, profile_name: str, api_id: int, api_hash: str
     ) -> Generator[Client, None, None]:
         from pyrogram.errors import ApiIdInvalid, ApiIdPublishedFlood
+        from pyrogram.types import Chat
 
         ProfileManager.PROFILES_DIR.mkdir(parents=True, exist_ok=True)
 
         console.print(
-            f"\n[bold blue]Iniciando validación para '{profile_name}'...[/bold blue]"
+            f"\n[bold blue]Iniciando validación de credenciales...[/bold blue]"
         )
         try:
             with TelegramSession(
@@ -83,7 +84,9 @@ class ValidationService:
         console.print(f"[bold green]✔ Validación completada. Todo listo.[/bold green]")
         return True
 
-    def _resolve_target_chat(self, client, chat_id: Union[str, int]) -> Optional[Chat]:
+    def _resolve_target_chat(
+        self, client, chat_id: Union[str, int]
+    ) -> Optional["Chat"]:
         """Intenta obtener el chat, refrescando peers si es necesario."""
         from pyrogram.errors import ChannelPrivate, PeerIdInvalid, UsernameInvalid
         from pyrogram.types import Chat
@@ -115,12 +118,12 @@ class ValidationService:
         """Recorre diálogos para poblar caché de access_hash."""
         try:
             count = 0
-            for _ in client.get_dialogs(limit=30):
+            for _ in client.get_dialogs(limit=200):
                 count += 1
         except Exception:
             pass
 
-    def _verify_permissions(self, client, chat: Chat) -> bool:
+    def _verify_permissions(self, client, chat: "Chat") -> bool:
         """
         Verifica si 'me' tiene permisos para enviar media en el chat.
         """

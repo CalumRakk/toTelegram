@@ -53,7 +53,11 @@ class ProfileUI:
         self.console.print(table)
 
     def render_options_table(
-        self, title: str, schema: List[Dict], current_settings: Any
+        self,
+        title: str,
+        schema: List[Dict],
+        current_settings: Any,
+        chat_info: Optional[str] = None,
     ):
         table = Table(title=title)
         table.add_column("Opción (Key)", style="bold cyan")
@@ -75,6 +79,8 @@ class ProfileUI:
                     display_val = "•" * len(val_str)
                 else:
                     display_val = val_str[:3] + "•" * (len(val_str) - 4) + val_str[-3:]
+            elif key == "CHAT_ID" and chat_info:
+                display_val = f"{chat_info} [dim]({val})[/dim]"
             else:
                 display_val = str(val)
 

@@ -17,6 +17,8 @@ from totelegram.console import console
 from totelegram.core.registry import ProfileManager
 from totelegram.core.setting import Settings, get_settings
 from totelegram.services.validator import ValidationService
+from totelegram.store.database import DatabaseSession
+from totelegram.store.models import TelegramChat
 
 app = typer.Typer(help="Gestión de perfiles de configuración.")
 pm = ProfileManager()
@@ -38,7 +40,7 @@ def create_profile(
     temp_name = f"temp_{uuid.uuid4().hex[:8]}"
     temp_session = ProfileManager.PROFILES_DIR / f"{temp_name}.session"
 
-    validator = ValidationService(console)
+    validator = ValidationService()
     try:
         with validator.validate_session(temp_name, api_id, api_hash) as client:
             if not _validate_chat_with_retry(validator, client, chat_id):
@@ -80,7 +82,7 @@ def use_profile(
         list_profiles(quiet=True)
 
 
-@app.command("set")
+@app.command("set", context_settings={"allow_interspersed_args": False})
 def set_config(
     key: str = typer.Argument(..., help="Clave a modificar"),
     value: str = typer.Argument(..., help="Nuevo valor"),
@@ -154,17 +156,35 @@ def list_profiles(
     ui.render_profiles_table(registry.active, registry.profiles, quiet)
 
 
+def get_chat_name(current_settings) -> Optional[str]:
+
+    with DatabaseSession(current_settings):
+        target = current_settings.chat_id
+        chat = None
+        try:
+            chat = TelegramChat.get_or_none(TelegramChat.id == int(target))
+        except (ValueError, TypeError):
+            clean_username = str(target).replace("@", "")
+            chat = TelegramChat.get_or_none(TelegramChat.username == clean_username)
+
+        if chat:
+            return chat.title
+
+
 @app.command("options")
 def list_options(use: Optional[str] = UseOption):
     """Lista las opciones de configuración y sus valores actuales."""
     schema = Settings.get_schema_info()
     current_settings = None
     active_name = None
+    chat_display_name = None
 
     try:
         active_name = pm.resolve_name(use)
         path = pm.get_path(active_name)
         current_settings = get_settings(path)
+        if current_settings:
+            chat_display_name = get_chat_name(current_settings)
     except (ValueError, FileNotFoundError):
         console.print(
             "\n[yellow]Ningún perfil activo. Mostrando valores por defecto.[/yellow]"
@@ -174,7 +194,9 @@ def list_options(use: Optional[str] = UseOption):
     if active_name:
         title += f" (Perfil Activo: [green]{active_name}[/green])"
 
-    ui.render_options_table(title, schema, current_settings)
+    ui.render_options_table(
+        title, schema, current_settings, chat_info=chat_display_name
+    )
     ui.print_options_help_footer()
 
 
@@ -196,4 +218,4 @@ def delete_profile(name: str):
 
 
 if __name__ == "__main__":
-    create_profile("leo", 123456, "dfggdfdfhghfg", "your_chat_id")
+    set_config("chat_id", "-1001698464760", "leo")
