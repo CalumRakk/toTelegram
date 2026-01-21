@@ -7,18 +7,53 @@ from rich.table import Table
 from totelegram.commands.profile import list_profiles
 from totelegram.commands.profile_utils import UseOption
 from totelegram.console import console
-from totelegram.core.enums import AvailabilityState, DuplicatePolicy
+from totelegram.core.enums import (
+    AvailabilityState,
+    DuplicatePolicy,
+    Strategy,
+)
+from totelegram.core.plans import AskUserPlan, PhysicalUploadPlan, SkipPlan
 from totelegram.core.registry import ProfileManager
 from totelegram.core.setting import get_settings
 from totelegram.services.discovery import DiscoveryService
+from totelegram.services.policy import PolicyExpert
 from totelegram.services.snapshot import SnapshotService
 from totelegram.services.uploader import UploadService
 from totelegram.store.database import DatabaseSession
-from totelegram.store.models import Job, SourceFile
+from totelegram.store.models import Job, SourceFile, TelegramChat
 from totelegram.telegram import TelegramSession
 from totelegram.utils import is_excluded
 
 pm = ProfileManager()
+
+
+def _handle_redundancy_interaction(
+    job: Job, uploader: UploadService, plan: AskUserPlan
+):
+    source_chats = {r.chat_id for r in plan.remotes}
+
+    if plan.state == AvailabilityState.REMOTE_PUZZLE:
+        console.print(
+            f"[bold cyan]Puzzle Detectado:[/bold cyan] Piezas encontradas en {len(source_chats)} chats diferentes."
+        )
+        for chat_id in source_chats:
+            parts_here = [r for r in plan.remotes if r.chat_id == chat_id]
+            console.print(f"  - Chat [dim]{chat_id}[/dim]: {len(parts_here)} partes.")
+    else:
+        console.print(
+            f"[bold green]Espejo Detectado:[/bold green] Archivo íntegro en el chat {list(source_chats)[0]}."
+        )
+
+    action = typer.prompt(
+        "¿Acción? [f] Forward (Unificar/Clonar) / [u] Upload / [s] Skip", default="f"
+    ).lower()
+
+    if action == "f":
+        uploader.execute_smart_forward(job, plan.remotes)
+    elif action == "u":
+        uploader.execute_physical_upload(job)
+    else:
+        console.print("[dim]Saltado por el usuario.[/dim]")
 
 
 def upload_file(
@@ -66,74 +101,48 @@ def upload_file(
 
     console.print(f"\n[bold cyan]Iniciando sesión:[/bold cyan] {profile_name}\n")
     with DatabaseSession(settings), TelegramSession(settings) as client:
-        from pyrogram.types import User
+        from pyrogram.types import Chat, User
+
+        tg_chat = cast(Chat, client.get_chat(settings.chat_id))
+        chat_db = TelegramChat.get_or_create_from_tg(tg_chat)
 
         uploader = UploadService(client, settings)
         discovery = DiscoveryService(client)
         me = cast(User, client.get_me())
-        tg_limit = (
-            settings.TG_MAX_SIZE_PREMIUM
-            if me.is_premium
-            else settings.TG_MAX_SIZE_NORMAL
-        )
 
         for path in all_paths:
             console.print(f"\n[bold]Procesando:[/bold] [blue]{path.name}[/blue]")
 
-            try:
-                source = SourceFile.get_or_create_from_path(path)
-                job = Job.get_or_create_from_source(
-                    source=source, user_is_premium=me.is_premium, tg_max_size=tg_limit
-                )
+            source = SourceFile.get_or_create_from_path(path)
+            job = Job.get_or_none(Job.source == source, Job.chat == chat_db)
 
-                state, remotes = discovery.investigate(job)
+            if not job:
+                job = Job.create_contract(source, chat_db, me.is_premium, settings)
+                console.print(f"[bold]Estrategia fijada:[/bold] {job.strategy.value}")
+                if job.strategy == Strategy.CHUNKED:
+                    console.print(
+                        f"El archivo se dividirá en partes de {job.config.tg_max_size / (1024**2):.0f}MB"
+                    )
 
-                if state == AvailabilityState.FULFILLED:
-                    console.print("[dim]✔ Ya disponible en el destino.[/dim]")
+            report = discovery.investigate(job)
+            plan = PolicyExpert.determine_plan(report, settings.duplicate_policy)
+            if isinstance(plan, SkipPlan):
+                console.print(f"[dim] {plan.reason}[/dim]")
+                if plan.is_already_fulfilled:
                     job.set_uploaded()
 
-                elif state in [
-                    AvailabilityState.REMOTE_MIRROR,
-                    AvailabilityState.REMOTE_PUZZLE,
-                ]:
-                    if policy == DuplicatePolicy.STRICT:
-                        console.print(
-                            "[yellow]Omitido (STRICT): ya existe en el ecosistema.[/yellow]"
-                        )
-                        continue
+            elif isinstance(plan, PhysicalUploadPlan):
+                console.print(f"[bold] {plan.reason}[/bold]")
+                uploader.execute_physical_upload(job)
 
-                    action = "f"  # Default smart forward
-                    if policy == DuplicatePolicy.SMART:
-                        console.print(
-                            f"[blue]💡 Encontrado en otro chat ({len(remotes)} partes).[/blue]"
-                        )
-                        action = typer.prompt(
-                            "¿Acción? [f] Forward / [u] Upload / [s] Skip", default="f"
-                        ).lower()
-
-                    if action == "f":
-                        uploader.execute_smart_forward(job, remotes)
-                    elif action == "u":
+            elif isinstance(plan, AskUserPlan):
+                if plan.state == AvailabilityState.REMOTE_RESTRICTED:
+                    if typer.confirm("Existe pero no tienes acceso. ¿Subir de nuevo?"):
                         uploader.execute_physical_upload(job)
-                    else:
-                        console.print("[dim]Saltado por el usuario.[/dim]")
-                elif state == AvailabilityState.REMOTE_RESTRICTED:
-                    if policy == DuplicatePolicy.OVERWRITE or typer.confirm(
-                        "Existe pero no tienes acceso. ¿Subir de nuevo?"
-                    ):
-                        uploader.execute_physical_upload(job)
-                else:  # SYSTEM_NEW
-                    uploader.execute_physical_upload(job)
+                else:
+                    _handle_redundancy_interaction(job, uploader, plan)
 
-                SnapshotService.generate_snapshot(job)
-
-            except Exception as e:
-                console.print(
-                    f"[bold red]✘ Error procesando {path.name}:[/bold red] {e}"
-                )
-                if not force:
-                    if not typer.confirm("¿Deseas continuar con el siguiente archivo?"):
-                        break
+            SnapshotService.generate_snapshot(job)
 
     console.print(
         f"\n[bold green]✔ Tarea finalizada perfl {profile_name}.[/bold green]\n"

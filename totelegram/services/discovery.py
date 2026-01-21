@@ -1,6 +1,8 @@
 import logging
 import time
-from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, cast
+from typing import TYPE_CHECKING, Dict, List, Optional, cast
+
+from pydantic import BaseModel
 
 from totelegram.utils import batched
 
@@ -14,36 +16,53 @@ from totelegram.store.models import Job, Payload, RemotePayload
 logger = logging.getLogger(__name__)
 
 
+class DiscoveryReport(BaseModel):
+    state: AvailabilityState
+    remotes: Optional[List[RemotePayload]] = []
+
+    # @property
+    # def is_redundant(self) -> bool:
+    #     """
+    #     Encapsula el concepto de: 'El archivo existe fuera
+    #     del destino, ya sea como espejo o como puzzle'.
+    #     """
+    #     # Todo: Encapsula bien, pero me da la sensacion de caja negra.
+    #     return self.state in [
+    #         AvailabilityState.REMOTE_MIRROR,
+    #         AvailabilityState.REMOTE_PUZZLE,
+    #     ]
+
+
 class DiscoveryService:
     def __init__(self, client: "Client"):
         self.client = client
 
-    def investigate(self, job: Job) -> Tuple[AvailabilityState, List[RemotePayload]]:
+    def investigate(self, job: Job):
         """
         Orquesta la investigación de redundancia siguiendo el principio de
         mínimo esfuerzo: Local -> Espejo Único -> Puzzle -> Nuevo.
         """
-        # ¿Está el objetivo ya cumplido en el destino?
-        if self._is_already_fulfilled(job):
-            return AvailabilityState.FULFILLED, []
 
-        # Escaneo global del ecosistema (MD5 Hits)
+        if self._is_already_fulfilled(job):
+            return DiscoveryReport(state=AvailabilityState.FULFILLED)
+
         global_remotes = self._query_global_records_db(job)
         if not global_remotes:
-            return AvailabilityState.SYSTEM_NEW, []
+            return DiscoveryReport(state=AvailabilityState.SYSTEM_NEW)
 
-        # Buscar un Espejo Íntegro (Un solo chat tiene todo el archivo)
         mirror_remotes = self._find_integrity_mirror(job, global_remotes)
         if mirror_remotes:
-            return AvailabilityState.REMOTE_MIRROR, mirror_remotes
+            return DiscoveryReport(
+                state=AvailabilityState.REMOTE_MIRROR, remotes=mirror_remotes
+            )
 
-        # Intentar Re-unificación (Piezas dispersas completan el archivo)
         puzzle_pieces = self._assemble_puzzle_pieces(job, global_remotes)
         if puzzle_pieces:
-            return AvailabilityState.REMOTE_PUZZLE, puzzle_pieces
+            return DiscoveryReport(
+                state=AvailabilityState.REMOTE_PUZZLE, remotes=puzzle_pieces
+            )
 
-        # La DB lo conoce, pero no hay acceso físico actual
-        return AvailabilityState.REMOTE_RESTRICTED, []
+        return DiscoveryReport(state=AvailabilityState.REMOTE_RESTRICTED)
 
     def _collect_puzzle_pieces(self, job, remotes_by_chat):
         """Intenta recolectar todas las secuencias del archivo desde fuentes dispersas."""
@@ -67,33 +86,6 @@ class DiscoveryService:
             if len(collected) == job.payloads.count()
             else []
         )
-
-    def _get_remotes_for_chat(self, source_file, chat_id) -> List[RemotePayload]:
-        """
-        Obtiene los RemotePayloads de la base de datos para un chat.
-
-        """
-        # Obtenemos el Job que sirvió de base para ese chat
-        base_job = (
-            Job.select().where(Job.source == source_file, Job.chat == chat_id).first()
-        )
-
-        if not base_job:
-            return []
-
-        # Contamos cuántos payloads debería tener según su estrategia
-        # y cuántos RemotePayload hay realmente en la DB.
-        expected_count = base_job.payloads.count()
-        remotes = list(
-            RemotePayload.select()
-            .join(Payload)
-            .where(Payload.job == base_job)
-            .order_by(Payload.sequence_index)
-        )
-
-        if len(remotes) == expected_count and expected_count > 0:
-            return remotes
-        return []
 
     def _validate_jit(self, remotes: List[RemotePayload]) -> bool:
         """
@@ -174,9 +166,6 @@ class DiscoveryService:
             logger.debug(f"JIT Identity check failed: {e}")
             return False
 
-    # -------------------------------
-    # Métodos Internos de Diagnóstico
-
     def _is_already_fulfilled(self, job: Job) -> bool:
         """Comprueba si el chat actual ya posee el archivo completo y accesible."""
         local_remotes = self._get_remotes_for_chat(job, job.chat.id)
@@ -187,13 +176,39 @@ class DiscoveryService:
         return False
 
     def _query_global_records_db(self, job: Job) -> List[RemotePayload]:
-        """Obtiene todas las huellas del MD5 fuera del chat actual."""
         return list(
             RemotePayload.select()
             .join(Payload)
             .join(Job)
             .where(Job.source == job.source, RemotePayload.chat_id != job.chat.id)
         )
+
+    def _get_remotes_for_chat(self, source_file, chat_id) -> List[RemotePayload]:
+        """
+        Obtiene los RemotePayloads de la base de datos para un chat.
+
+        """
+        # Obtenemos el Job que sirvió de base para ese chat
+        base_job = (
+            Job.select().where(Job.source == source_file, Job.chat == chat_id).first()
+        )
+
+        if not base_job:
+            return []
+
+        # Contamos cuántos payloads debería tener según su estrategia
+        # y cuántos RemotePayload hay realmente en la DB.
+        expected_count = base_job.payloads.count()
+        remotes = list(
+            RemotePayload.select()
+            .join(Payload)
+            .where(Payload.job == base_job)
+            .order_by(Payload.sequence_index)
+        )
+
+        if len(remotes) == expected_count and expected_count > 0:
+            return remotes
+        return []
 
     def _find_integrity_mirror(
         self, job: Job, pool: List[RemotePayload]
@@ -254,7 +269,7 @@ class DiscoveryService:
             if len(collected_puzzle) == total_parts_needed:
                 break
 
-        # 3. Verificación final: ¿Conseguimos todas las piezas del 0 al N?
+        # Verificación final: ¿Conseguimos todas las piezas del 0 al N?
         if len(collected_puzzle) == total_parts_needed:
             # Devolvemos la lista ordenada (Parte 1, Parte 2, Parte 3...)
             return [collected_puzzle[i] for i in sorted(collected_puzzle.keys())]

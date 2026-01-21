@@ -7,6 +7,8 @@ from typing import Any, ClassVar, Dict, List, Optional, Set, Union, cast, get_or
 from pydantic import Field, TypeAdapter, ValidationError, field_validator
 from pydantic_settings import BaseSettings
 
+from totelegram.core.enums import DuplicatePolicy
+
 
 def get_user_config_dir(app_name: str) -> Path:
     if sys.platform.startswith("win"):
@@ -37,15 +39,17 @@ class Settings(BaseSettings):
     upload_limit_rate_kbps: int = Field(
         default=0, description="Límite de velocidad de subida en KB/s. 0 = sin límite"
     )
-    # FIX: QUITAR LA CAPACIDAD DE IGNORAR CARPETAS, NO FUNCIONA CON LA LOGICA DEL PROGRAMA.
+
     # TODO: agrega un default que impida subir archivo muy pequeños.
+
     exclude_files: List[str] = Field(
         default=[],
         description="Patrones (glob). Ej: '*.log', 'node_modules' (ignora contenido), 'src/*.tmp'.",
     )
-    duplicate_policy: str = Field(
-        default="strict",
-        description="Politica de Duplicados: 'smart' (preguntar), 'strict' (omitir), 'force' (sube/reenvia).",
+
+    duplicate_policy: DuplicatePolicy = Field(
+        default=DuplicatePolicy.SMART,
+        description="Gobernanza de duplicados: 'smart', 'strict' o 'force'.",
     )
 
     app_name: str = "toTelegram"
