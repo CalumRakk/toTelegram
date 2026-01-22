@@ -11,7 +11,7 @@ from totelegram.commands.profile_utils import (
     suggest_profile_activation,
     validate_profile_name,
 )
-from totelegram.console import console
+from totelegram.console import UI, console
 from totelegram.core.registry import ProfileManager
 from totelegram.core.setting import CHAT_ID_NOT_SET
 from totelegram.services.validator import ValidationService
@@ -45,8 +45,8 @@ def list_profiles(
     """Muestra la lista de perfiles si no se pasa un subcomando."""
     registry = pm.get_registry()
     if not registry.profiles:
-        console.print("[yellow]No hay perfiles registrados.[/yellow]")
-        console.print(
+        UI.warn("No hay perfiles registrados.")
+        UI.info(
             "Usa [yellow]'totelegram profile create'[/yellow] para crear uno nuevo."
         )
         return
@@ -70,8 +70,8 @@ def create_profile(
     validator = ValidationService()
 
     try:
-        console.print("\n[bold cyan]1. Autenticación con Telegram[/bold cyan]")
-        console.print(
+        UI.info("\n[bold cyan]1. Autenticación con Telegram[/bold cyan]")
+        UI.info(
             "[dim]Se solicitará tu número y código (OTP) para vincular la cuenta.[/dim]\n"
         )
         with validator.validate_session(temp_name, api_id, api_hash) as _:
@@ -89,13 +89,13 @@ def create_profile(
         pm.create(
             name=profile_name, api_id=api_id, api_hash=api_hash, chat_id=CHAT_ID_NOT_SET
         )
-        console.print(
+        UI.success(
             f"[green]✔ Identidad salvada correctamente en {profile_name}.session[/green]"
         )
 
         # RESOLUCIÓN DE DESTINO
         console.print(Rule(style="dim"))
-        console.print("[bold cyan]2. Configuración del Destino[/bold cyan]")
+        UI.info("[bold cyan]2. Configuración del Destino[/bold cyan]")
 
         resolved_chat = chat_id
 
@@ -111,21 +111,19 @@ def create_profile(
                     resolved_chat = CHAT_ID_NOT_SET
             elif resolved_chat == "me":
                 pm.update_config("CHAT_ID", "me", profile_name=profile_name)
-                console.print(
-                    "[green]✔ Destino configurado: Mensajes Guardados[/green]"
-                )
+                UI.success("[green]✔ Destino configurado: Mensajes Guardados[/green]")
 
         console.print(Rule(style="dim"))
         if resolved_chat != CHAT_ID_NOT_SET:
-            console.print(
+            UI.success(
                 f"[bold green]¡Éxito! Perfil '{profile_name}' listo para usar.[/bold green]"
             )
         else:
-            console.print(
+            UI.warn(
                 f"[bold yellow]Perfil '{profile_name}' creado, pero sin destino configurado.[/bold yellow]"
             )
-            console.print("[dim]Puedes configurarlo luego usando:[/dim]")
-            console.print(f"  [cyan]totelegram config set chat_id <id>[/cyan]\n")
+            UI.info("[dim]Puedes configurarlo luego usando:[/dim]")
+            UI.info(f"  [cyan]totelegram config set chat_id <id>[/cyan]\n")
 
         suggest_profile_activation(profile_name)
 
@@ -150,9 +148,7 @@ def use_profile(
 
     try:
         pm.activate(profile_name)
-        console.print(
-            f"[bold green]✔ Ahora usando el perfil: {profile_name}[/bold green]"
-        )
+        UI.success(f"Ahora usando el perfil: [bold]{profile_name}[/]")
     except ValueError as e:
         console.print(f"[bold red]Error:[/bold red] {e}")
         list_profiles(quiet=True)
@@ -187,4 +183,4 @@ def delete_profile(name: str):
         f"¿Estás seguro de que deseas borrar el perfil '{name}' y su configuración?"
     ):
         pm.delete_profile(name)
-        console.print(f"[green]Perfil '{name}' eliminado.[/green]")
+        UI.success(f"Perfil '[bold]{name}[/]' eliminado.")

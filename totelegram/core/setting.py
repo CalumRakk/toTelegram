@@ -227,7 +227,6 @@ class Settings(BaseSettings):
     @field_validator("chat_id", mode="before")
     @classmethod
     def semantic_chat_id_normalizer(cls, v: Any) -> Union[str, int]:
-        # Usamos la misma función de normalización que creaste
         return normalize_chat_id(str(v))
 
 

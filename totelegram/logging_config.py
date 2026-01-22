@@ -29,7 +29,6 @@ def handler_file(path: str, formatter: logging.Formatter) -> logging.FileHandler
 def handler_supervisor_stdout(formatter: logging.Formatter) -> logging.StreamHandler:
     handler = logging.StreamHandler(sys.stdout)
     handler.setLevel(logging.DEBUG)
-    # handler.addFilter(lambda record: record.levelno < logging.WARNING)
     handler.setFormatter(formatter)
     return handler
 
@@ -45,7 +44,7 @@ def setup_logging(path: str, level: int = logging.INFO) -> None:
     for handler in logging.root.handlers[:]:
         logging.root.removeHandler(handler)
         handler.close()
-        
+
     formatter = logger_formatter()
 
     running_under_supervisord = any(

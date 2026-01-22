@@ -4,7 +4,7 @@ from typing import Optional
 import typer
 
 from totelegram.commands import config, profile, upload
-from totelegram.console import console
+from totelegram.console import UI, console
 from totelegram.core.registry import ProfileManager
 
 COMMANDS_IGNORING_USE = ["profile", "version"]
@@ -55,9 +55,7 @@ def main(
     if use:
         pm = ProfileManager()
         if not pm.exists(use):
-            console.print(
-                f"[bold red]Error:[/bold red] El perfil '[yellow]{use}[/yellow]' no existe."
-            )
+            UI.error(f"El perfil '[bold]{use}[/]' no existe.")
             profile.list_profiles(quiet=True)
             raise typer.Exit(code=1)
 
@@ -77,7 +75,7 @@ def run_script():
     try:
         app()
     except Exception as e:
-        console.print(f"[bold red]Error:[/bold red] {e}")
+        UI.error(str(e))
         raise e
 
 

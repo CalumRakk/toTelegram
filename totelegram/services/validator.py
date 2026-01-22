@@ -4,7 +4,7 @@ import logging
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Dict, Generator, List, Optional, Union, cast
 
-from totelegram.console import console
+from totelegram.console import UI, console
 from totelegram.core.registry import ProfileManager
 from totelegram.telegram import TelegramSession
 
@@ -40,9 +40,7 @@ class ValidationService:
 
         ProfileManager.PROFILES_DIR.mkdir(parents=True, exist_ok=True)
 
-        console.print(
-            f"\n[bold blue]Iniciando validación de credenciales...[/bold blue]"
-        )
+        UI.info("Iniciando validación de credenciales...")
         try:
             with TelegramSession(
                 session_name=profile_name,
@@ -52,8 +50,8 @@ class ValidationService:
             ) as client:
 
                 me = cast(Chat, client.get_me())
-                console.print(
-                    f"[green]✔ Login exitoso como:[/green] {me.first_name} (@{me.username})"
+                UI.success(
+                    f"Login exitoso como: [bold]{me.first_name}[/] (@{me.username})"
                 )
                 yield client
 
@@ -75,22 +73,18 @@ class ValidationService:
         """
         chat = self._resolve_target_chat(client, target_chat_id)
         if not chat:
-            console.print(
-                f"[bold red]✘ Error:[/bold red] No se encuentra el chat '{target_chat_id}'."
-            )
+            UI.error(f"No se encuentra el chat '[bold]{target_chat_id}[/]'")
             return None
 
         # Informamos sobre permisos
         if not self._verify_permissions(client, chat):
-            console.print(
+            UI.warn(
                 "[bold yellow]⚠ Advertencia de Permisos:[/bold yellow] "
                 "Parece que no tienes permisos de escritura en este chat. "
                 "Podrás guardarlo, pero las subidas podrían fallar."
             )
         else:
-            console.print(
-                f"[bold green]✔ Chat verificado:[/bold green] {chat.title or 'Privado'}"
-            )
+            UI.success(f"Chat verificado: [bold]{chat.title or 'Privado'}[/]")
 
         return chat
 
@@ -101,16 +95,16 @@ class ValidationService:
         from pyrogram.errors import ChannelPrivate, PeerIdInvalid, UsernameInvalid
         from pyrogram.types import Chat
 
-        console.print(f"[yellow]Buscando chat '{chat_id}'...[/yellow]")
+        UI.info(f"[yellow]Buscando chat '{chat_id}'...[/yellow]")
 
         try:
             return cast(Chat, client.get_chat(chat_id))
         except PeerIdInvalid:
-            console.print("[dim]Chat no en caché, escaneando diálogos...[/dim]")
+            UI.info("[dim]Chat no en caché, escaneando diálogos...[/dim]")
             self._force_refresh_peers(client)
             try:
                 chat = cast(Chat, client.get_chat(chat_id))
-                console.print(
+                UI.info(
                     f"[green]✔ Chat encontrado:[/green] {chat.title} (ID: {chat.id})"
                 )
                 return chat
@@ -119,9 +113,7 @@ class ValidationService:
         except (UsernameInvalid, ChannelPrivate):
             pass
 
-        console.print(
-            f"[bold red]✘ Error:[/bold red] No se encuentra el chat '{chat_id}'."
-        )
+        UI.info(f"[bold red]✘ Error:[/bold red] No se encuentra el chat '{chat_id}'.")
         return None
 
     def _force_refresh_peers(self, client: "Client"):

@@ -9,7 +9,7 @@ from totelegram.commands.profile_utils import (
     get_friendly_chat_name,
     handle_list_operation,
 )
-from totelegram.console import console
+from totelegram.console import UI, console
 from totelegram.core.registry import ProfileManager
 from totelegram.core.setting import Settings, get_settings, normalize_chat_id
 from totelegram.store.database import DatabaseSession
@@ -42,20 +42,14 @@ def resolve_and_store_chat_logic(chat_alias: str, profile_name: str):
 
         db_chat, created = TelegramChat.get_or_create_from_tg(chat_obj)
         if created:
-            console.print(
-                f"[green]✔ Nuevo chat guardado: [bold]{db_chat.title}[/bold] [dim]({normalized_key})[/dim][/green]"
-            )
+            UI.success(f"Nuevo chat guardado: {db_chat.title} ({normalized_key})")
         else:
             db_chat.update_from_tg(chat_obj)
-            console.print(
-                f"[green]✔ Chat actualizado: [bold]{db_chat.title}[/bold] [dim]({normalized_key})[/dim][/green]"
-            )
+            UI.success(f"Chat actualizado: {db_chat.title} ({normalized_key})")
 
         pm.update_config("CHAT_ID", str(normalized_key), profile_name=profile_name)
 
-        console.print(
-            f"[green]✔ Configuración actualizada: [bold]{db_chat.title}[/bold] [dim]({normalized_key})[/dim][/green]"
-        )
+        UI.success(f"Configuración actualizada:{db_chat.title} ({normalized_key})")
         return True
 
     return False
@@ -76,9 +70,7 @@ def main(ctx: typer.Context):
         active_name = None
         settings = None
         chat_display_name = None
-        console.print(
-            "\n[yellow]Ningún perfil activo. Mostrando valores por defecto.[/yellow]"
-        )
+        UI.warn("Ningún perfil activo. Mostrando valores por defecto.")
 
     title = "Configuración"
     if active_name:
@@ -104,12 +96,10 @@ def set_config(
             resolve_and_store_chat_logic(value, profile_name)
 
         pm.update_config(key, value, profile_name=profile_name)
-        console.print(
-            f"[bold green]✔[/bold green] [bold]{key.upper()}[/bold] -> '{value}'."
-        )
+        UI.success(f"{key.upper()} -> '{value}'.")
 
     except (ValidationError, ValueError) as e:
-        console.print(f"[bold red]Error:[/bold red] {e}")
+        UI.error(f"[bold red]Error:[/bold red] {e}")
         raise typer.Exit(code=1)
 
 

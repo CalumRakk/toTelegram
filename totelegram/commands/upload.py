@@ -5,7 +5,7 @@ import typer
 from rich.table import Table
 
 from totelegram.commands.profile import list_profiles
-from totelegram.console import console
+from totelegram.console import UI, console
 from totelegram.core.enums import (
     AvailabilityState,
     DuplicatePolicy,
@@ -80,15 +80,13 @@ def upload_file(
         env_path = pm.get_path(profile_name)
         settings = get_settings(env_path)
     except ValueError as e:
-        console.print(f"[bold red]Error de perfil:[/bold red] {e}")
+        UI.error(f"Error de perfil: {e}")
         list_profiles(quiet=True)
         raise typer.Exit(code=1)
 
     all_paths = _resolver_target_paths(target, settings)
     if not all_paths:
-        console.print(
-            "[yellow]No se encontraron archivos válidos para procesar.[/yellow]"
-        )
+        UI.warn("No se encontraron archivos válidos para procesar.")
         raise typer.Exit(0)
 
     _print_upload_summary(all_paths, target)
@@ -115,7 +113,7 @@ def upload_file(
 
             if not job:
                 job = Job.create_contract(source, chat_db, me.is_premium, settings)
-                console.print(f"[bold]Estrategia fijada:[/bold] {job.strategy.value}")
+                UI.info(f"Estrategia fijada: [bold]{job.strategy.value}[/]")
                 if job.strategy == Strategy.CHUNKED:
                     console.print(
                         f"El archivo se dividirá en partes de {job.config.tg_max_size / (1024**2):.0f}MB"
@@ -141,9 +139,7 @@ def upload_file(
 
             SnapshotService.generate_snapshot(job)
 
-    console.print(
-        f"\n[bold green]✔ Tarea finalizada perfl {profile_name}.[/bold green]\n"
-    )
+    UI.success(f"Tarea finalizada perfil [bold]{profile_name}[/].")
 
 
 def _resolver_target_paths(target: Path, settings) -> list[Path]:
