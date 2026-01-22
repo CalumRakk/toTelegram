@@ -28,6 +28,27 @@ ui = ProfileUI(console)
 #     warn_if_override_active()
 
 
+@app.callback(invoke_without_command=True)
+def profile_profile(ctx: typer.Context):
+    """Muestra la lista de perfiles si no se pasa un subcomando."""
+    list_profiles(False)
+
+
+@app.command("list")
+def list_profiles(
+    quiet: bool = typer.Option(False, "--quiet", "-q", help="Salida silenciosa")
+):
+    """Muestra la lista de perfiles si no se pasa un subcomando."""
+    registry = pm.get_registry()
+    if not registry.profiles:
+        console.print("[yellow]No hay perfiles registrados.[/yellow]")
+        console.print(
+            "Usa [yellow]'totelegram profile create'[/yellow] para crear uno nuevo."
+        )
+        return
+    ui.render_profiles_table(registry.active, registry.profiles, quiet)
+
+
 @app.command("create")
 def create_profile(
     profile_name: str = typer.Option(
@@ -84,21 +105,6 @@ def use_profile(
     except ValueError as e:
         console.print(f"[bold red]Error:[/bold red] {e}")
         list_profiles(quiet=True)
-
-
-@app.command("list")
-def list_profiles(
-    quiet: bool = typer.Option(False, "--quiet", "-q", help="Salida silenciosa")
-):
-    """Enumera todos los perfiles registrados."""
-    registry = pm.get_registry()
-    if not registry.profiles:
-        console.print("[yellow]No hay perfiles registrados.[/yellow]")
-        console.print(
-            "Usa [yellow]'totelegram profile create'[/yellow] para crear uno nuevo."
-        )
-        return
-    ui.render_profiles_table(registry.active, registry.profiles, quiet)
 
 
 def get_chat_name(current_settings) -> Optional[str]:
