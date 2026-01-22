@@ -12,7 +12,7 @@ if TYPE_CHECKING:
     from pyrogram.types import Message  # type: ignore
 
 from totelegram.core.enums import AvailabilityState, Strategy
-from totelegram.store.models import Job, Payload, RemotePayload
+from totelegram.store.models import Job, Payload, RemotePayload, SourceFile
 
 logger = logging.getLogger(__name__)
 
@@ -170,7 +170,7 @@ class DiscoveryService:
 
     def _is_already_fulfilled(self, job: Job) -> bool:
         """Comprueba si el chat actual ya posee el archivo completo y accesible."""
-        local_remotes = self._get_remotes_for_chat(job, job.chat.id)
+        local_remotes = self._get_remotes_for_chat(job.source, job.chat.id)
 
         expected = self._get_expected_count(job)
 
@@ -186,7 +186,9 @@ class DiscoveryService:
             .where(Job.source == job.source, RemotePayload.chat_id != job.chat.id)
         )
 
-    def _get_remotes_for_chat(self, source_file, chat_id) -> List[RemotePayload]:
+    def _get_remotes_for_chat(
+        self, source_file: SourceFile, chat_id: int
+    ) -> List[RemotePayload]:
         """
         Obtiene los RemotePayloads de la base de datos para un chat.
 
