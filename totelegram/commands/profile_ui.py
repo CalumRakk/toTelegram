@@ -7,6 +7,8 @@ from rich.markup import escape
 from rich.panel import Panel
 from rich.table import Table
 
+from totelegram.console import UI
+
 
 class ProfileUI:
     def __init__(self, console: Console):
@@ -159,3 +161,42 @@ Encierra el patrón entre comillas:
                 f"@{chat['username']}" if chat["username"] else str(chat["id"]),
             )
         self.console.print(table)
+
+    def render_search_tip(self):
+        """Muestra el consejo de oro para encontrar chats nuevos."""
+        tip_text = (
+            "[bold cyan]TIP PARA CHATS NUEVOS:[/bold cyan]\n"
+            "Si acabas de crear un canal o grupo y no aparece en la búsqueda:\n"
+            "1. Abre ese chat en tu móvil o escritorio.\n"
+            "2. Envía un mensaje cualquiera (ej. 'Configurando toTelegram').\n"
+            "3. Vuelva aquí e intenta buscar de nuevo."
+        )
+        self.console.print(
+            Panel(
+                tip_text,
+                title="¿No encuentras tu chat?",
+                border_style="cyan",
+                padding=(1, 1),
+            )
+        )
+
+    def render_search_results_feedback(
+        self, query: str, scanned: int, results_count: int
+    ):
+        """Informa sobre el resultado del escaneo de forma humana."""
+        if results_count > 0:
+            self.console.print(
+                f"\n[green]✔[/green] Analicé tus [bold]{scanned}[/bold] chats más recientes.\n"
+                f"Encontré [bold cyan]{results_count}[/bold cyan] coincidencias para '[italic]{query}[/italic]':"
+            )
+        else:
+            self.console.print(
+                f"\n[yellow]![/yellow] Analicé tus [bold]{scanned}[/bold] chats más recientes "
+                f"pero [bold red]no encontré[/bold red] nada que coincida con '[italic]{query}[/italic]'."
+            )
+
+    def render_privacy_notice(self):
+        """Aviso de privacidad rápido."""
+        UI.info(
+            "[dim]Nota: Por privacidad, solo se listan los resultados que coinciden con tu búsqueda.[/dim]"
+        )

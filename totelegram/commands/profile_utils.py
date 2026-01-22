@@ -4,7 +4,7 @@ import typer
 from rich.panel import Panel
 
 from totelegram.commands.profile_ui import ProfileUI
-from totelegram.console import console
+from totelegram.console import UI, console
 from totelegram.core.registry import ProfileManager
 from totelegram.core.setting import CHAT_ID_NOT_SET, Settings, normalize_chat_id
 from totelegram.store.database import DatabaseSession
@@ -180,31 +180,91 @@ def _finalize_profile(name, temp_file, final_file, api_id, api_hash, chat_id):
 
 
 def _capture_chat_id_wizard(validator: "ValidationService", client: "Client") -> str:
+
     ui.console.print("\n[bold cyan]Selección de Destino[/bold cyan]")
-    ui.console.print(" [1] [bold]Mensajes Guardados[/bold] (Tu nube personal privada)")
-    ui.console.print(" [2] [bold]Buscar[/bold] por nombre (Canales, Grupos...)")
-    ui.console.print(" [3] [bold]Manual[/bold] (Introducir ID o @username)")
-    ui.console.print(" [4] [bold]Omitir[/bold] (Se configurará mas tarde)")
+    ui.console.print(" [1] Se configurará [bold]Mensajes guardados[/]")
+    ui.console.print(" [2] Buscar entres tus Canales, Grupos, etc.")
+    ui.console.print(" [3] Introducir [bold]ID[/] o [bold]@username[/].")
+    ui.console.print(" [4] Se configurará más tarde.")
 
     opcion = typer.prompt("\nElige una opción", default="1")
 
     if opcion == "1":
+        UI.info("Chat de destino: [bold]Mensajes Guardados[/]")
         return "me"
 
     if opcion == "2":
-        query = typer.prompt("Escribe el nombre del chat")
-        results = validator.search_chats(client, query)
-        if results:
-            ui.render_search_results(results)
-            idx = typer.prompt("\nSelecciona el número (#)", default="1")
-            try:
-                return str(results[int(idx) - 1]["id"])
-            except:
-                console.print("[red]Selección inválida.[/red]")
-        return _capture_chat_id_wizard(validator, client)  # Reintento
+        rul = _interactive_search_loop(validator, client)
+        UI.info(f"Chat de destino: {rul}")
+        return rul
 
     if opcion == "3":
         r = typer.prompt("Introduce el ID o @username")
-        return str(normalize_chat_id(r))
+        r_norm = str(normalize_chat_id(r))
+        UI.info(f"Chat de destino: {r_norm}")
+        return r_norm
 
+    UI.info(f"Chat de destino: {CHAT_ID_NOT_SET}")
     return CHAT_ID_NOT_SET
+
+
+def _interactive_search_loop(validator: "ValidationService", client: "Client") -> str:
+    """Bucle interactivo de búsqueda con TIPS y reintentos."""
+    query = typer.prompt("Escribe el nombre del chat que buscas")
+    current_limit = 50
+
+    ui.render_privacy_notice()
+
+    while True:
+        results, scanned = validator.search_chats(client, query, limit=current_limit)
+        ui.render_search_results_feedback(query, scanned, len(results))
+
+        if results:
+            ui.render_search_results(results)
+            choice = typer.prompt(
+                "\nSelecciona el numeral (#) o '0' para buscar de nuevo", default="0"
+            )
+
+            if choice == "0":
+                query = typer.prompt("Escribe el nuevo nombre")
+                continue
+
+            try:
+                return str(results[int(choice) - 1]["id"])
+            except (ValueError, IndexError):
+                ui.console.print("[red]Selección inválida.[/red]")
+                query = typer.prompt("Escribe el nuevo nombre")
+                continue
+
+        # SI NO HAY RESULTADOS
+        ui.render_search_tip()
+        ui.console.print("\n[bold]¿Qué deseas hacer?[/bold]")
+        ui.console.print(
+            f" [1] [bold]Reintentar[/bold] con '{query}' (Si ya enviaste el mensaje)"
+        )
+        ui.console.print(
+            f" [2] [bold]Búsqueda profunda[/bold] (Escanear más chats antiguos)"
+        )
+        ui.console.print(
+            f" [3] [bold]Probar otro nombre[/bold] (Cambiar palabra clave)"
+        )
+        ui.console.print(f" [4] [bold]Cancelar[/bold] y volver al menú principal")
+
+        action = typer.prompt("\nSelecciona una acción", default="1")
+
+        if action == "1":
+            continue
+        elif action == "2":
+            current_limit += 100
+            ui.console.print(
+                f"[dim]Ampliando rango de búsqueda a {current_limit} chats...[/dim]"
+            )
+            continue
+        elif action == "3":
+            query = typer.prompt("Escribe el nuevo nombre")
+            current_limit = 50
+            continue
+        else:
+            return _capture_chat_id_wizard(
+                validator, client
+            )  # Volver al menú principal

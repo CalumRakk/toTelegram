@@ -106,7 +106,9 @@ def create_profile(
                 resolved_chat = _capture_chat_id_wizard(validator, client)
 
             if resolved_chat and resolved_chat != "me":
-                success = resolve_and_store_chat_logic(resolved_chat, profile_name)
+                success = resolve_and_store_chat_logic(
+                    resolved_chat, profile_name, client=client
+                )
                 if not success:
                     resolved_chat = CHAT_ID_NOT_SET
             elif resolved_chat == "me":

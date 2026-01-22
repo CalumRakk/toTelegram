@@ -84,7 +84,9 @@ class ValidationService:
                 "Podrás guardarlo, pero las subidas podrían fallar."
             )
         else:
-            UI.success(f"Chat verificado: [bold]{chat.title or 'Privado'}[/]")
+            UI.success(
+                f"Chat verificado: El chat [bold cyan]{chat.title or 'Privado'}[/] [bold]tiene permiso para enviar archivos.[/]"
+            )
 
         return chat
 
@@ -133,12 +135,11 @@ class ValidationService:
         from pyrogram.errors import ChatWriteForbidden
         from pyrogram.types import ChatMember
 
-        console.print(
-            f"[dim]Verificando permisos de escritura en {chat.type.value}...[/dim]"
-        )
+        UI.info(f"[dim]Verificando permisos de escritura en {chat.type.value}...[/dim]")
 
         # Chat Privado (Mensajes guardados o DM)
         if chat.type == enums.ChatType.PRIVATE:
+            UI.info("[green]✔ Permiso de escritura verificado.[/green]")
             return True
 
         try:
@@ -161,9 +162,7 @@ class ValidationService:
             # Miembro normal
             if member.status == enums.ChatMemberStatus.MEMBER:
                 if chat.type == enums.ChatType.CHANNEL:
-                    console.print(
-                        "[red]Los miembros no pueden escribir en canales.[/red]"
-                    )
+                    UI.warn("[red]Los miembros no pueden escribir en canales.[/red]")
                     return False
 
                 # En grupos, verificar restricciones globales o del chat
@@ -183,30 +182,56 @@ class ValidationService:
 
         return False
 
-    def search_chats(self, client: Client, query: str) -> List[Dict]:
-        """Busca en los diálogos recientes del usuario."""
-        results = []
-        with console.status(f"[dim]Buscando '{query}' en tus chats...[/dim]"):
-            for dialog in client.get_dialogs(limit=50):  # type: ignore
-                chat = dialog.chat
-                title = (
-                    chat.title
-                    or f"{chat.first_name or ''} {chat.last_name or ''}".strip()
-                )
+    def search_chats(
+        self, client: Client, query: str, limit: int = 50
+    ) -> tuple[List[Dict], int]:
+        """
+        Busca en los diálogos del usuario filtrando por nombre/username.
 
-                # Filtro simple por nombre o username
-                if query.lower() in title.lower() or (
-                    chat.username and query.lower() in chat.username.lower()
-                ):
-                    results.append(
-                        {
-                            "id": chat.id,
-                            "title": title,
-                            "type": chat.type.value,
-                            "username": chat.username,
-                        }
+        Args:
+            client: Cliente de Pyrogram iniciado.
+            query: Palabra clave a buscar.
+            limit: Cuántos chats analizar en total antes de parar de buscar.
+
+        Returns:
+            tuple: (Resultados encontrados, Total de chats analizados)
+        """
+        results = []
+        scanned_count = 0
+
+        with console.status(
+            f"[dim]Buscando '{query}' en tu cuenta de Telegram...[/dim]"
+        ):
+            try:
+                for dialog in client.get_dialogs():  # type: ignore
+                    if scanned_count >= limit:
+                        break
+
+                    chat = dialog.chat
+                    scanned_count += 1
+
+                    # Normalizamos el nombre para la búsqueda
+                    title = (
+                        chat.title
+                        or f"{chat.first_name or ''} {chat.last_name or ''}".strip()
                     )
 
-                if len(results) >= 10:
-                    break
-        return results
+                    # Lógica de filtrado
+                    is_match = query.lower() in title.lower() or (
+                        chat.username and query.lower() in chat.username.lower()
+                    )
+
+                    if is_match:
+                        results.append(
+                            {
+                                "id": chat.id,
+                                "title": title,
+                                "type": chat.type.value,
+                                "username": chat.username,
+                            }
+                        )
+
+            except Exception as e:
+                logger.debug(f"Error consultando diálogos: {e}")
+
+        return results, scanned_count

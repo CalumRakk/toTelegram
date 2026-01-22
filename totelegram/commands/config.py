@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 import typer
 from click.core import Command
@@ -6,12 +6,19 @@ from pydantic import ValidationError
 
 from totelegram.commands.profile_ui import ProfileUI
 from totelegram.commands.profile_utils import (
+    _capture_chat_id_wizard,
     get_friendly_chat_name,
     handle_list_operation,
 )
 from totelegram.console import UI, console
 from totelegram.core.registry import ProfileManager
-from totelegram.core.setting import Settings, get_settings, normalize_chat_id
+from totelegram.core.setting import (
+    CHAT_ID_NOT_SET,
+    Settings,
+    get_settings,
+    normalize_chat_id,
+)
+from totelegram.services.validator import ValidationService
 from totelegram.store.database import DatabaseSession
 from totelegram.store.models import TelegramChat
 from totelegram.telegram import TelegramSession
@@ -25,7 +32,9 @@ pm = ProfileManager()
 ui = ProfileUI(console)
 
 
-def resolve_and_store_chat_logic(chat_alias: str, profile_name: str):
+def resolve_and_store_chat_logic(
+    chat_alias: str, profile_name: str, client: Optional["Client"] = None
+):
     """
     Valida que un chat exista y lo guarda en la base de datos. Y incluye un fallback de permisos por consola.
     """
@@ -35,10 +44,10 @@ def resolve_and_store_chat_logic(chat_alias: str, profile_name: str):
     settings = pm.get_settings(profile_name)
     validator = ValidationService()
 
-    with DatabaseSession(settings), TelegramSession(settings) as client:
-        chat_obj = validator.validate_chat_id(client, normalized_key)
+    def _execute(c: "Client"):
+        chat_obj = validator.validate_chat_id(c, normalized_key)
         if not chat_obj:
-            return
+            return False
 
         db_chat, created = TelegramChat.get_or_create_from_tg(chat_obj)
         if created:
@@ -48,9 +57,14 @@ def resolve_and_store_chat_logic(chat_alias: str, profile_name: str):
             UI.success(f"Chat actualizado: {db_chat.title} ({normalized_key})")
 
         pm.update_config("CHAT_ID", str(normalized_key), profile_name=profile_name)
-
-        UI.success(f"Configuración actualizada:{db_chat.title} ({normalized_key})")
         return True
+
+    with DatabaseSession(settings):
+        if client:
+            return _execute(client)
+        else:
+            with TelegramSession(settings) as new_client:
+                return _execute(new_client)
 
     return False
 
@@ -101,6 +115,36 @@ def set_config(
     except (ValidationError, ValueError) as e:
         UI.error(f"[bold red]Error:[/bold red] {e}")
         raise typer.Exit(code=1)
+
+
+@app.command("wizard")
+def config_wizard():
+    """Asistente interactivo para encontrar y configurar el chat de destino."""
+
+    profile_name = pm.resolve_name()
+    ui.announce_profile_used(profile_name)
+
+    settings = pm.get_settings(profile_name)
+    validator = ValidationService()
+
+    try:
+        UI.info(f"Iniciando cliente de telegram con sesión de {profile_name}...")
+        with TelegramSession(settings) as client:
+            UI.success("Cliente de telegram iniciado.")
+
+            resolved_chat = _capture_chat_id_wizard(validator, client)
+
+            if resolved_chat == "me":
+                pm.update_config("CHAT_ID", "me", profile_name=profile_name)
+                UI.success("Destino configurado: Mensajes Guardados")
+            elif resolved_chat != CHAT_ID_NOT_SET:
+                resolve_and_store_chat_logic(resolved_chat, profile_name, client=client)
+            else:
+                UI.info("Operación cancelada. No se han realizado cambios.")
+
+    except Exception as e:
+        UI.error(f"Error en el asistente: {e}")
+        raise typer.Exit(1)
 
 
 @app.command("add")
