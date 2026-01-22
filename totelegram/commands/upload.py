@@ -116,24 +116,22 @@ def upload_file(
                 job = Job.create_contract(source, chat_db, me.is_premium, settings)
                 UI.info(f"Estrategia fijada: [bold]{job.strategy.value}[/]")
                 if job.strategy == Strategy.SINGLE:
-                    console.print(
-                        f"\n[bold]Archivo único:[/bold] [blue]{path.name}[/blue]"
-                    )
+                    UI.info(f"\n[bold]Archivo único:[/bold] [blue]{path.name}[/blue]")
                 else:
                     parts_count = discovery._get_expected_count(job)
-                    console.print(
+                    UI.info(
                         f"\n[bold]Fragmentando en {parts_count} partes:[/bold] [blue]{path.name}[/blue]"
                     )
 
             report = discovery.investigate(job)
             plan = PolicyExpert.determine_plan(report, settings.duplicate_policy)
             if isinstance(plan, SkipPlan):
-                console.print(f"[dim] {plan.reason}[/dim]")
+                UI.info(f"[dim] {plan.reason}[/dim]")
                 if plan.is_already_fulfilled:
                     job.set_uploaded()
 
             elif isinstance(plan, PhysicalUploadPlan):
-                console.print(f"[bold] {plan.reason}[/bold]")
+                UI.info(f"[bold] {plan.reason}[/bold]")
                 uploader.execute_physical_upload(job)
 
             elif isinstance(plan, AskUserPlan):

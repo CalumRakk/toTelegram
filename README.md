@@ -37,7 +37,7 @@ pip install git+https://github.com/CalumRakk/toTelegram.git
 totelegram profile create
 ```
 
-> Ten a mano tu **API_ID** y **API_HASH** de [Telegram](my.telegram.org).
+> Ten a mano tu **API_ID** y **API_HASH** de [Telegram](https://my.telegram.org/).
 
 **3. Configura un chat de destino si el asistente no lo hizo:**
 
