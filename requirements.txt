@@ -4,7 +4,7 @@ click==8.3.1
 colorama==0.4.6
 distlib==0.4.0
 ffmpeg-python==0.2.0
-filelock==3.20.2
+filelock==3.20.3
 filetype==1.2.0
 future==1.0.0
 humanfriendly==10.0
