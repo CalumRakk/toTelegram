@@ -11,6 +11,15 @@ pm = ProfileManager()
 ui = ProfileUI(console)
 
 
+def warn_if_override_active():
+    """Avisa si se está usando --use en un comando que no lo requiere."""
+    if pm._global_override:
+        console.print(
+            f"[dim yellow]Nota: El contexto activo por flag (--use {pm._global_override}) "
+            f"se ignorará para esta operación de gestión.[/dim yellow]\n"
+        )
+
+
 def _handle_list_operation(
     action: Literal["add", "remove"],
     key: str,

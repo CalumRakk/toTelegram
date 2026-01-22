@@ -9,6 +9,7 @@ from totelegram.commands.profile_utils import (
     _suggest_profile_activation,
     _validate_chat_with_retry,
     validate_profile_name,
+    warn_if_override_active,
 )
 from totelegram.console import console
 from totelegram.core.registry import ProfileManager
@@ -21,6 +22,12 @@ pm = ProfileManager()
 ui = ProfileUI(console)
 
 
+# @app.callback()
+# def profile_main():
+#     """Gestión de perfiles (este callback corre antes que create/list/etc)"""
+#     warn_if_override_active()
+
+
 @app.command("create")
 def create_profile(
     profile_name: str = typer.Option(
@@ -31,6 +38,7 @@ def create_profile(
     chat_id: str = typer.Option(..., help="Chat ID o Username", prompt=True),
 ):
     """Crea un nuevo perfil de configuración interactivamente."""
+    warn_if_override_active()
 
     final_session = ProfileManager.PROFILES_DIR / f"{profile_name}.session"
     temp_name = f"temp_{uuid.uuid4().hex[:8]}"

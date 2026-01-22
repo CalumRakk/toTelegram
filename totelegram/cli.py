@@ -7,6 +7,8 @@ from totelegram.commands import config, profile, upload
 from totelegram.console import console
 from totelegram.core.registry import ProfileManager
 
+COMMANDS_IGNORING_USE = ["profile", "version"]
+
 app = typer.Typer(
     help="Herramienta para subir archivos a Telegram sin límite de tamaño.",
     add_completion=False,
@@ -29,6 +31,7 @@ def main(
     # verbose: bool = typer.Option(
     #     False, "--verbose", "-v", help="Mostrar logs detallados"
     # ),
+    ctx: typer.Context,
     use: Optional[str] = typer.Option(
         None,
         "--use",
@@ -50,6 +53,18 @@ def main(
     Útil para configurar logging global.
     """
     if use:
+        pm = ProfileManager()
+        if not pm.exists(use):
+            console.print(
+                f"[bold red]Error:[/bold red] El perfil '[yellow]{use}[/yellow]' no existe."
+            )
+            profile.list_profiles(quiet=True)
+            raise typer.Exit(code=1)
+
+        if ctx.invoked_subcommand in COMMANDS_IGNORING_USE:
+            console.print(
+                f"[dim yellow]Nota: El flag --use '{use}' no tiene efecto en comandos de '{ctx.invoked_subcommand}'.[/dim yellow]"
+            )
 
         ProfileManager._global_override = use
 
