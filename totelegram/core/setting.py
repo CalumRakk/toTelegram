@@ -1,4 +1,5 @@
 import os
+import re
 import sys
 from os import getenv
 from pathlib import Path
@@ -8,6 +9,53 @@ from pydantic import Field, TypeAdapter, ValidationError, field_validator
 from pydantic_settings import BaseSettings
 
 from totelegram.core.enums import DuplicatePolicy
+
+CHAT_ID_NOT_SET = "NOT_SET"
+
+
+def normalize_chat_id(value: str) -> Union[int, str]:
+    """
+    Normaliza un identificador de chat de Telegram.
+
+    Acepta alias ("me", "self"), IDs numéricos positivos o negativos,
+    y usernames con o sin "@". El resultado se devuelve en un formato
+    estándar compatible con la API de Telegram.
+
+    Logica:
+    - "me" / "self" -> "me"
+    - IDs numéricos -> int
+    - Usernames válidos -> "@username"
+
+    Args:
+        value (str): Identificador de destino a normalizar.
+
+    Returns:
+        Union[int, str]: Identificador normalizado.
+
+    Raises:
+        ValueError: Si el valor no corresponde a un destino válido.
+    """
+
+    raw = str(value).strip()
+    if raw.upper() == CHAT_ID_NOT_SET or not raw:
+        return CHAT_ID_NOT_SET
+
+    if raw.lower() in ["me", "self"]:
+        return "me"
+
+    clean_numeric = raw.replace("-", "")
+    if clean_numeric.isdigit():
+        return int(raw)
+
+    clean_username = raw.lstrip("@")
+
+    if re.match(r"^[a-zA-Z0-9_]+$", clean_username):
+        return f"@{clean_username}"
+
+    raise ValueError(
+        f"El destino '{raw}' no es válido. Debe ser 'me', un ID numérico "
+        "o un @username (ej: caracoltv)."
+    )
 
 
 def get_user_config_dir(app_name: str) -> Path:
@@ -25,7 +73,8 @@ def get_user_config_dir(app_name: str) -> Path:
 class Settings(BaseSettings):
     profile_name: str = Field(description="Nombre de la sesión")
     chat_id: Union[str, int] = Field(
-        ..., description="ID del chat o enlace de invitación"
+        default=CHAT_ID_NOT_SET,
+        description="ID del chat destino. NOT_SET indica configuración pendiente.",
     )
     api_hash: str = Field(
         description="Telegram API hash", default="d524b414d21f4d37f08684c1df41ac9c"
@@ -122,13 +171,6 @@ class Settings(BaseSettings):
         """Devuelve True si el archivo coincide con algún patrón de exclusión."""
         return any(path.match(pattern) for pattern in self.exclude_files_default)
 
-    @field_validator("chat_id", mode="before")
-    def convert_to_int_if_possible(cls, v):
-        try:
-            return int(v)
-        except (ValueError, TypeError):
-            return str(v)
-
     @classmethod
     def get_schema_info(cls) -> List[Dict[str, str]]:
         """
@@ -181,6 +223,12 @@ class Settings(BaseSettings):
 
         # Intentamos validar. Pydantic intentará convertir "true" a True, "123" a 123, etc.
         return adapter.validate_python(value)
+
+    @field_validator("chat_id", mode="before")
+    @classmethod
+    def semantic_chat_id_normalizer(cls, v: Any) -> Union[str, int]:
+        # Usamos la misma función de normalización que creaste
+        return normalize_chat_id(str(v))
 
 
 def get_settings(env_path: Union[Path, str] = ".env") -> Settings:

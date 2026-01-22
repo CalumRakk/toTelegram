@@ -57,7 +57,8 @@ class TestCliConfig(unittest.TestCase):
         result = runner.invoke(app, ["set", "upload_limit_rate_kbps", "500"])
 
         self.assertEqual(result.exit_code, 0)
-        self.assertIn("UPLOAD_LIMIT_RATE_KBPS -> '500'", result.stdout)
+        self.assertIn("UPLOAD_LIMIT_RATE_KBPS", result.stdout)
+        self.assertIn("'500'", result.stdout)
 
         # Verificar permanencia en el .env
         values = self.pm.get_config_values("test_user")
@@ -103,7 +104,7 @@ class TestCliConfig(unittest.TestCase):
         self.assertNotIn("*.tmp", values["EXCLUDE_FILES"])  # type: ignore
         self.assertIn("*.bak", values["EXCLUDE_FILES"])  # type: ignore
 
-    @patch("totelegram.commands.config._try_resolve_and_store_chat")
+    @patch("totelegram.commands.config.resolve_and_store_chat_logic")
     def test_chat_id_trigger_resolution(self, mock_resolve):
         """Verificar que al cambiar el CHAT_ID se intenta resolver el nombre."""
         runner.invoke(app, ["set", "CHAT_ID", "@nuevo_chat"])

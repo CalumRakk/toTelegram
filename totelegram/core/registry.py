@@ -7,7 +7,7 @@ from typing import Dict, List, Literal, Optional, get_origin
 from dotenv import dotenv_values, set_key
 
 from totelegram.core.schemas import ProfileRegistry
-from totelegram.core.setting import Settings, get_user_config_dir
+from totelegram.core.setting import Settings, get_settings, get_user_config_dir
 
 APP_SESSION_NAME = "toTelegram"
 CONFIG_DIR = Path(get_user_config_dir(APP_SESSION_NAME))
@@ -117,6 +117,12 @@ class ProfileManager:
         """Devuelve el contenido raw del .env."""
         path = self.get_path(profile_name)
         return dotenv_values(path)
+
+    def get_settings(self, profile_name: Optional[str] = None) -> Settings:
+        if profile_name is None:
+            profile_name = self.active_name
+        path = self.get_path(profile_name)
+        return get_settings(path)
 
     def update_config(self, key: str, value: str, profile_name: Optional[str] = None):
         """

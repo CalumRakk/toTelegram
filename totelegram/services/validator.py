@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from contextlib import contextmanager
-from typing import TYPE_CHECKING, Generator, Optional, Union, cast
+from typing import TYPE_CHECKING, Dict, Generator, List, Optional, Union, cast
 
 from totelegram.console import console
 from totelegram.core.registry import ProfileManager
@@ -67,22 +67,32 @@ class ValidationService:
             logger.debug(f"Error: inesperado: {e}")
             raise e
 
-    def validate_chat_id(self, client: Client, target_chat_id: str) -> bool:
-        """Valida que el chat ID o username sea accesible."""
-        console.print(f"[yellow]Buscando chat '{target_chat_id}'...[/yellow]")
-
+    def validate_chat_id(
+        self, client: Client, target_chat_id: str | int
+    ) -> Optional["Chat"]:
+        """
+        Retorna el objeto Chat si lo encuentra, de lo contrario None.
+        """
         chat = self._resolve_target_chat(client, target_chat_id)
         if not chat:
-            return False
+            console.print(
+                f"[bold red]✘ Error:[/bold red] No se encuentra el chat '{target_chat_id}'."
+            )
+            return None
 
+        # Informamos sobre permisos
         if not self._verify_permissions(client, chat):
             console.print(
-                "[bold red]✘ Error de Permisos:[/bold red] No puedes enviar archivos a este chat."
+                "[bold yellow]⚠ Advertencia de Permisos:[/bold yellow] "
+                "Parece que no tienes permisos de escritura en este chat. "
+                "Podrás guardarlo, pero las subidas podrían fallar."
             )
-            return False
+        else:
+            console.print(
+                f"[bold green]✔ Chat verificado:[/bold green] {chat.title or 'Privado'}"
+            )
 
-        console.print(f"[bold green]✔ Validación completada. Todo listo.[/bold green]")
-        return True
+        return chat
 
     def _resolve_target_chat(
         self, client, chat_id: Union[str, int]
@@ -114,21 +124,22 @@ class ValidationService:
         )
         return None
 
-    def _force_refresh_peers(self, client):
+    def _force_refresh_peers(self, client: "Client"):
         """Recorre diálogos para poblar caché de access_hash."""
         try:
             count = 0
-            for _ in client.get_dialogs(limit=200):
+            for _ in client.get_dialogs():  # type: ignore
                 count += 1
         except Exception:
             pass
 
-    def _verify_permissions(self, client, chat: "Chat") -> bool:
+    def _verify_permissions(self, client: "Client", chat: "Chat") -> bool:
         """
-        Verifica si 'me' tiene permisos para enviar media en el chat.
+        Verifica la session del client tiene permisos para escribir en el chat.
         """
         from pyrogram import enums
         from pyrogram.errors import ChatWriteForbidden
+        from pyrogram.types import ChatMember
 
         console.print(
             f"[dim]Verificando permisos de escritura en {chat.type.value}...[/dim]"
@@ -139,7 +150,7 @@ class ValidationService:
             return True
 
         try:
-            member = client.get_chat_member(chat.id, "me")
+            member: ChatMember = client.get_chat_member(chat.id, "me")  # type: ignore
 
             # Dueño o Admin
             if member.status in [
@@ -179,3 +190,31 @@ class ValidationService:
             return False
 
         return False
+
+    def search_chats(self, client: Client, query: str) -> List[Dict]:
+        """Busca en los diálogos recientes del usuario."""
+        results = []
+        with console.status(f"[dim]Buscando '{query}' en tus chats...[/dim]"):
+            for dialog in client.get_dialogs(limit=50):  # type: ignore
+                chat = dialog.chat
+                title = (
+                    chat.title
+                    or f"{chat.first_name or ''} {chat.last_name or ''}".strip()
+                )
+
+                # Filtro simple por nombre o username
+                if query.lower() in title.lower() or (
+                    chat.username and query.lower() in chat.username.lower()
+                ):
+                    results.append(
+                        {
+                            "id": chat.id,
+                            "title": title,
+                            "type": chat.type.value,
+                            "username": chat.username,
+                        }
+                    )
+
+                if len(results) >= 10:
+                    break
+        return results

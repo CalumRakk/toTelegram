@@ -137,3 +137,25 @@ Encierra el patrón entre comillas:
         self.console.print(
             f"\n[bold green]Usando perfil:[/bold green] [green]{profile_name}[/green]\n"
         )
+
+    def render_search_results(self, chats: List[Dict]):
+        if not chats:
+            self.console.print(
+                "[yellow]No se encontraron chats que coincidan con la búsqueda.[/yellow]"
+            )
+            return
+
+        table = Table(title="Resultados de búsqueda en Telegram", expand=True)
+        table.add_column("#", style="cyan", justify="right")
+        table.add_column("Tipo", style="magenta")
+        table.add_column("Título / Nombre", style="green")
+        table.add_column("Username / ID", style="dim")
+
+        for i, chat in enumerate(chats, 1):
+            table.add_row(
+                str(i),
+                chat["type"],
+                chat["title"],
+                f"@{chat['username']}" if chat["username"] else str(chat["id"]),
+            )
+        self.console.print(table)

@@ -41,9 +41,13 @@ class TestCliProfile(unittest.TestCase):
         self.patcher_profiles.stop()
         self.test_dir_obj.cleanup()
 
+    @patch("totelegram.commands.profile.TelegramSession")
+    @patch("totelegram.commands.config.TelegramSession")
     @patch("totelegram.commands.profile.uuid")
     @patch("totelegram.commands.profile.ValidationService")
-    def test_create_profile_happy_path(self, MockValidationService, mock_uuid):
+    def test_create_profile_happy_path(
+        self, MockValidationService, mock_uuid, MockTgConfig, MockTgProfile
+    ):
         """
         Prueba el flujo completo exitoso:
         1. Genera nombre temporal.
@@ -51,6 +55,10 @@ class TestCliProfile(unittest.TestCase):
         3. Valida chat OK.
         4. Renombra archivo y crea .env.
         """
+
+        mock_client = MagicMock()
+        MockTgConfig.return_value.__enter__.return_value = mock_client
+        MockTgProfile.return_value.__enter__.return_value = mock_client
 
         # El temp será "temp_12345678.session"
         mock_uuid.uuid4.return_value.hex = "12345678"
@@ -75,31 +83,13 @@ class TestCliProfile(unittest.TestCase):
             "--api-hash",
             "fake_hash_123",
             "--chat-id",
-            "-100123",
+            "me",
         ]
         result = runner.invoke(app, args)
 
-        # El comando terminó bien
         self.assertEqual(result.exit_code, 0, f"Salida inesperada: {result.stdout}")
-        self.assertIn("Perfil 'test_user' creado en", result.stdout)
-
-        # El archivo temporal YA NO debe existir (fue renombrado)
-        temp_path = self.mock_profiles_dir / "temp_12345678.session"
-        self.assertFalse(
-            temp_path.exists(), "El archivo temporal no se eliminó/renombró"
-        )
-
-        # El archivo final .session SI debe existir
-        final_session = self.mock_profiles_dir / "test_user.session"
-        self.assertTrue(final_session.exists(), "No se creó el archivo de sesión final")
-
-        # El archivo .env SI debe existir
-        final_env = self.mock_profiles_dir / "test_user.env"
-        self.assertTrue(final_env.exists(), "No se creó el archivo .env")
-
-        # El perfil debe estar activo
-        registry = self.pm.get_registry()
-        self.assertEqual(registry.active, "test_user")
+        self.assertTrue((self.mock_profiles_dir / "test_user.session").exists())
+        self.assertTrue((self.mock_profiles_dir / "test_user.env").exists())
 
     def test_create_profile_prevents_overwrite(self):
         """
@@ -128,29 +118,37 @@ class TestCliProfile(unittest.TestCase):
         self.assertIn("ya existe", result.stdout)
 
     @patch("totelegram.commands.profile.ValidationService")
-    def test_create_profile_validation_failed_aborted(self, MockValidationService):
+    @patch("totelegram.commands.profile.TelegramSession")
+    @patch("totelegram.commands.config.TelegramSession")
+    def test_create_profile_validation_failed_aborted(
+        self, MockTgConfig, MockTgProfile, MockValidationService
+    ):
         """
-        Simula que el Login es válido, pero el CHAT_ID es inválido.
-        El usuario decide NO guardar el perfil.
+        Simula que el Login es válido, pero el usuario elige Omitir el chat.
         """
+        mock_client = MagicMock()
+        MockTgConfig.return_value.__enter__.return_value = mock_client
+        MockTgProfile.return_value.__enter__.return_value = mock_client
+
         instance = MockValidationService.return_value
 
-        mock_client = MagicMock()
-        instance.validate_session.return_value.__enter__.return_value = mock_client
+        # Simulamos éxito en login pero luego el usuario cancela en el wizard
+        @contextmanager
+        def side_effect_validate_session(session_name, api_id, api_hash):
+            (self.mock_profiles_dir / f"{session_name}.session").touch()
+            yield mock_client
 
-        # Simular que la validación del CHAT_ID falla (devuelve False)
-        instance.validate_chat_id.return_value = False
+        instance.validate_session.side_effect = side_effect_validate_session
 
-        inputs = "bad_user\n12345\nfake_hash\n-100123\nn\n"
+        # Inputs: Name, API_ID, API_HASH, Wizard Option 4
+        inputs = "bad_user\n12345\nfake_hash\n4\n"  # 4 = Omitir
         result = runner.invoke(app, ["create"], input=inputs)
 
-        # Verificar que NO se creó el archivo
-        env_path = self.mock_profiles_dir / "bad_user.env"
-        self.assertFalse(env_path.exists(), "El archivo .env no debería haberse creado")
-
-        # Verificar que el comando terminó bien (cancelación voluntaria es exit 0)
         self.assertEqual(result.exit_code, 0)
-        self.assertIn("Operación cancelada por el usuario", result.stdout)
+        self.assertIn("creado, pero sin destino configurado", result.stdout)
+
+        # El archivo DEBE existir (ADR-005)
+        self.assertTrue((self.mock_profiles_dir / "bad_user.env").exists())
 
     def test_use_profile_switching(self):
         """

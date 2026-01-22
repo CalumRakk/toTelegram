@@ -101,7 +101,7 @@ def upload_file(
         from pyrogram.types import Chat, User
 
         tg_chat = cast(Chat, client.get_chat(settings.chat_id))
-        chat_db = TelegramChat.get_or_create_from_tg(tg_chat)
+        chat_db, _ = TelegramChat.get_or_create_from_tg(tg_chat)
 
         uploader = UploadService(client, settings)
         discovery = DiscoveryService(client)

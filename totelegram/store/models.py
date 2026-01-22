@@ -2,7 +2,7 @@ import json
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Generator, cast
+from typing import TYPE_CHECKING, Generator, Optional, Tuple, cast
 
 import peewee
 from playhouse.sqlite_ext import JSONField
@@ -43,35 +43,48 @@ class TelegramChat(BaseModel):
 
     id = cast(int, peewee.BigIntegerField(primary_key=True))
     title = cast(str, peewee.CharField(null=True))
-    username = cast(str, peewee.CharField(null=True))
+    username = cast(Optional[str], peewee.CharField(null=True))
     type = cast(str, peewee.CharField())  # 'private', 'group', 'channel', etc.
 
     is_public = cast(bool, peewee.BooleanField(default=False))
     last_verified = peewee.DateTimeField(null=True)
 
     @staticmethod
-    def get_or_create_from_tg(tg_chat: "TgChat") -> "TelegramChat":
+    def get_or_create_from_tg(tg_chat: "TgChat") -> Tuple["TelegramChat", bool]:
         """
         tg_chat puede ser un objeto Chat de Pyrogram.
         """
         chat, created = TelegramChat.get_or_create(
             id=tg_chat.id,
             defaults={
-                "title": tg_chat.title
-                or f"{tg_chat.first_name or ''} {tg_chat.last_name or ''}".strip(),
+                "title": tg_chat.title,
                 "username": tg_chat.username,
                 "type": str(tg_chat.type.value),
                 "is_public": True if tg_chat.username else False,
                 "last_verified": datetime.now(),
             },
         )
-        if not created:
-            chat.title = tg_chat.title or chat.title
-            chat.username = tg_chat.username
-            chat.is_public = True if tg_chat.username else False
-            chat.last_verified = datetime.now()
-            chat.save()
-        return chat
+        return chat, created
+
+    def update_from_tg(
+        self,
+        tg_chat: "TgChat",
+    ):
+        self.title = tg_chat.title
+        self.username = tg_chat.username
+        self.type = str(tg_chat.type.value)
+        self.is_public = True if tg_chat.username else False
+        self.last_verified = datetime.now()
+        self.save(
+            only=[
+                TelegramChat.title,
+                TelegramChat.username,
+                TelegramChat.type,
+                TelegramChat.is_public,
+                TelegramChat.last_verified,
+                TelegramChat.updated_at,
+            ]
+        )
 
 
 class TelegramUser(BaseModel):

@@ -1,4 +1,4 @@
-from typing import List, Literal, Optional
+from typing import TYPE_CHECKING, List, Literal, Optional
 
 import typer
 from rich.panel import Panel
@@ -6,9 +6,42 @@ from rich.panel import Panel
 from totelegram.commands.profile_ui import ProfileUI
 from totelegram.console import console
 from totelegram.core.registry import ProfileManager
+from totelegram.core.setting import CHAT_ID_NOT_SET, Settings, normalize_chat_id
+from totelegram.store.database import DatabaseSession
+from totelegram.store.models import TelegramChat
+
+if TYPE_CHECKING:
+    from pyrogram import Client  # type: ignore
+
+    from totelegram.services.validator import ValidationService
 
 pm = ProfileManager()
 ui = ProfileUI(console)
+
+
+def get_friendly_chat_name(settings: Settings) -> str:
+    """
+    Aplica las reglas heurísticas para devolver un nombre amigable
+    sin necesariamente golpear la red o la DB.
+    """
+    val = str(settings.chat_id).lower().strip()
+
+    if val.lower() in ["me", "self"]:
+        return "Mensajes Guardados"
+
+    # Usernames
+    if val.startswith("@"):
+        # TODO: analizar si vale la pena consultar el la db el `title`
+        return val
+
+    # IDs Numéricos
+    if val.replace("-", "").isdigit():
+        with DatabaseSession(settings):
+            chat = TelegramChat.get_or_none(TelegramChat.id == int(val))
+            if chat:
+                return f"{chat.title}"
+
+    return "[Destino sin identificar]"
 
 
 def warn_if_override_active():
@@ -20,7 +53,7 @@ def warn_if_override_active():
         )
 
 
-def _handle_list_operation(
+def handle_list_operation(
     action: Literal["add", "remove"],
     key: str,
     values: List[str],
@@ -108,8 +141,12 @@ def validate_profile_name(profile_name: str):
     raise typer.Exit(code=1)
 
 
-def _suggest_profile_activation(profile_name: str):
-    """Lógica de UI para activar el perfil recién creado."""
+def suggest_profile_activation(profile_name: str):
+    """Sugerencia de activación automática.
+
+    Si el perfil activo es None, lo activa.
+    Si el perfil activo es distinto al indicado, pide confirmación.
+    """
     try:
         config = pm.get_registry()
 
@@ -130,27 +167,6 @@ def _suggest_profile_activation(profile_name: str):
         )
 
 
-def _validate_chat_with_retry(validator, client, chat_id) -> bool:
-    """Retorna True si el chat es válido o el usuario decide continuar."""
-    if validator.validate_chat_id(client, chat_id):
-        return True
-
-    ui.console.print(
-        Panel(
-            f"El chat '[cyan]{chat_id}[/cyan]' no parece accesible.\n"
-            "Puedes guardarlo ahora y corregirlo después con [yellow]profile set CHAT_ID[/yellow].",
-            title="Chat no encontrado",
-            border_style="yellow",
-        )
-    )
-    result = typer.confirm("¿Deseas guardar el perfil de todos modos?", default=True)
-    if not result:
-        console.print("Operación cancelada por el usuario.")
-        return False
-    console.print("Continuando con el guardado del perfil...")
-    return True
-
-
 def _finalize_profile(name, temp_file, final_file, api_id, api_hash, chat_id):
     """Realiza el renombramiento y creación del archivo .env."""
     try:
@@ -161,3 +177,34 @@ def _finalize_profile(name, temp_file, final_file, api_id, api_hash, chat_id):
         if final_file.exists():
             final_file.unlink()
         raise e
+
+
+def _capture_chat_id_wizard(validator: "ValidationService", client: "Client") -> str:
+    ui.console.print("\n[bold cyan]Selección de Destino[/bold cyan]")
+    ui.console.print(" [1] [bold]Mensajes Guardados[/bold] (Tu nube personal privada)")
+    ui.console.print(" [2] [bold]Buscar[/bold] por nombre (Canales, Grupos...)")
+    ui.console.print(" [3] [bold]Manual[/bold] (Introducir ID o @username)")
+    ui.console.print(" [4] [bold]Omitir[/bold] (Se configurará mas tarde)")
+
+    opcion = typer.prompt("\nElige una opción", default="1")
+
+    if opcion == "1":
+        return "me"
+
+    if opcion == "2":
+        query = typer.prompt("Escribe el nombre del chat")
+        results = validator.search_chats(client, query)
+        if results:
+            ui.render_search_results(results)
+            idx = typer.prompt("\nSelecciona el número (#)", default="1")
+            try:
+                return str(results[int(idx) - 1]["id"])
+            except:
+                console.print("[red]Selección inválida.[/red]")
+        return _capture_chat_id_wizard(validator, client)  # Reintento
+
+    if opcion == "3":
+        r = typer.prompt("Introduce el ID o @username")
+        return str(normalize_chat_id(r))
+
+    return CHAT_ID_NOT_SET

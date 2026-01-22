@@ -16,6 +16,7 @@ class DatabaseSession:
     """
 
     def __init__(self, settings: Settings):
+        # TODO: revisar si es mejor especificar el valor necesario en ves de recibir el objeto settings
         self.settings = settings
         self.db = None
 
