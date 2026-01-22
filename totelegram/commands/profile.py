@@ -90,7 +90,7 @@ def create_profile(
             name=profile_name, api_id=api_id, api_hash=api_hash, chat_id=CHAT_ID_NOT_SET
         )
         UI.success(
-            f"[green]✔ Identidad salvada correctamente en {profile_name}.session[/green]"
+            f"[green][v] Identidad salvada correctamente en {profile_name}.session[/green]"
         )
 
         # RESOLUCIÓN DE DESTINO
@@ -113,12 +113,12 @@ def create_profile(
                     resolved_chat = CHAT_ID_NOT_SET
             elif resolved_chat == "me":
                 pm.update_config("CHAT_ID", "me", profile_name=profile_name)
-                UI.success("[green]✔ Destino configurado: Mensajes Guardados[/green]")
+                UI.success("[green][v] Destino configurado: Mensajes Guardados[/green]")
 
         console.print(Rule(style="dim"))
         if resolved_chat != CHAT_ID_NOT_SET:
             UI.success(
-                f"[bold green]¡Éxito! Perfil '{profile_name}' listo para usar.[/bold green]"
+                f"[bold green]Perfil '{profile_name}' listo para usar.[/bold green]"
             )
         else:
             UI.warn(

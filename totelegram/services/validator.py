@@ -107,7 +107,7 @@ class ValidationService:
             try:
                 chat = cast(Chat, client.get_chat(chat_id))
                 UI.info(
-                    f"[green]✔ Chat encontrado:[/green] {chat.title} (ID: {chat.id})"
+                    f"[green][OK] Chat encontrado:[/green] {chat.title} (ID: {chat.id})"
                 )
                 return chat
             except PeerIdInvalid:
@@ -115,7 +115,7 @@ class ValidationService:
         except (UsernameInvalid, ChannelPrivate):
             pass
 
-        UI.info(f"[bold red]✘ Error:[/bold red] No se encuentra el chat '{chat_id}'.")
+        UI.info(f"[bold red][X] Error:[/bold red] No se encuentra el chat '{chat_id}'.")
         return None
 
     def _force_refresh_peers(self, client: "Client"):
@@ -139,7 +139,7 @@ class ValidationService:
 
         # Chat Privado (Mensajes guardados o DM)
         if chat.type == enums.ChatType.PRIVATE:
-            UI.info("[green]✔ Permiso de escritura verificado.[/green]")
+            UI.info("[green][OK] Permiso de escritura verificado.[/green]")
             return True
 
         try:

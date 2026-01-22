@@ -16,7 +16,7 @@ class PolicyExpert:
 
         if report.state == AvailabilityState.FULFILLED:
             return SkipPlan(
-                reason="El archivo ya está íntegro en el chat destino.",
+                reason="Ya disponible en este chat. No se requiere acción.",
                 is_already_fulfilled=True,
             )
 

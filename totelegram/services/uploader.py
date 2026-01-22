@@ -3,6 +3,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, cast
 
+from totelegram.console import UI
 from totelegram.store.database import db_proxy
 from totelegram.utils import batched
 
@@ -26,19 +27,25 @@ console = Console()
 
 
 class UploadProgress:
-    """Maneja el estado visual de la subida para Pyrogram."""
-
-    def __init__(self, filename: str):
+    def __init__(self, filename: str, is_chunk: bool = False, part_index: int = 0):
         self.filename = filename
+        self.is_chunk = is_chunk
+        self.part_index = part_index
         self.last_percentage = -1
 
     def __call__(self, current: int, total: int):
         percentage = int(current * 100 / total)
-        if percentage % 5 == 0 and self.last_percentage != percentage:
+
+        # reporta cada 1%
+        if percentage % 1 == 0 and self.last_percentage != percentage:
             self.last_percentage = percentage
-            logger.info(
-                f"Subiendo {self.filename}: {current}/{total} bytes ({percentage}%)"
-            )
+
+            if self.is_chunk:
+                prefix = f"[dim]Parte {self.part_index+1}[/dim]"
+            else:
+                prefix = "Enviando"
+
+            UI.info(f"{prefix} [cyan]{self.filename}[/]: {percentage}%", end="\r")
 
 
 class UploadService:
@@ -134,7 +141,7 @@ class UploadService:
                 job.set_uploaded()
 
             console.print(
-                f"[bold green]✔ Smart Forward completado con éxito.[/bold green]"
+                f"[bold green][OK] Smart Forward completado con éxito.[/bold green]"
             )
         except Exception as e:
             logger.error(f"Error en reenvío inteligente: {e}. Limpiando destino...")
@@ -148,22 +155,22 @@ class UploadService:
 
     def execute_physical_upload(self, job: Job):
         """Realiza la subida fisica de un Job."""
-
-        # Esto genera los archivos .bin temporales si el job es CHUNKED
         if job.payloads.count() == 0:
             payloads = self.chunker.process_job(job)
         else:
             payloads = list(job.payloads.order_by(Payload.sequence_index))
 
-        console.print(
-            f"Subida física: [bold]{job.source.path_str}[/bold] ({len(payloads)} partes)"
-        )
+        if job.strategy == Strategy.SINGLE:
+            UI.info(f"Subiendo el archivo físico...")
+        else:
+            UI.info(f"Iniciando subida de {len(payloads)} fragmentos...")
 
-        for payload in payloads:
+        for idx, payload in enumerate(payloads):
             # Verificar si esta parte ya se subió (por si el job se interrumpió a la mitad)
             if RemotePayload.select().where(RemotePayload.payload == payload).exists():
                 logger.debug(f"Parte {payload.sequence_index} ya subida. Saltando.")
                 continue
+
             if not payload.path.exists():
                 if job.strategy == Strategy.CHUNKED:
                     console.print(
@@ -176,11 +183,16 @@ class UploadService:
                         f"El archivo original desaparecio mientras se subia: {payload.path}"
                     )
 
-            self._upload_single_payload(payload)
+            self._upload_single_payload(
+                payload, is_chunk=(job.strategy == Strategy.CHUNKED), index=idx
+            )
 
         job.set_uploaded()
+        UI.success("¡Disponibilidad confirmada!")
 
-    def _upload_single_payload(self, payload: Payload):
+    def _upload_single_payload(
+        self, payload: Payload, is_chunk: bool = False, index: int = 0
+    ):
         """Sube un archivo individual (trozo o archivo único) a Telegram."""
         if not payload.path.exists():
             raise FileNotFoundError(f"Archivo físico no encontrado: {payload.path}")
@@ -190,7 +202,7 @@ class UploadService:
         with open_upload_source(
             payload.path, self.settings.upload_limit_rate_kbps
         ) as doc_stream:
-            progress = UploadProgress(filename)
+            progress = UploadProgress(filename, is_chunk=is_chunk, part_index=index)
 
             try:
                 tg_message = self.client.send_document(

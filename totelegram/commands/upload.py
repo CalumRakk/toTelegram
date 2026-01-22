@@ -105,18 +105,24 @@ def upload_file(
         discovery = DiscoveryService(client)
         me = cast(User, client.get_me())
 
+        UI.info(
+            f"Destino: [bold cyan]{tg_chat.title or 'Privado'}[/] [dim]({settings.chat_id})[/dim]"
+        )
         for path in all_paths:
-            console.print(f"\n[bold]Procesando:[/bold] [blue]{path.name}[/blue]")
-
             source = SourceFile.get_or_create_from_path(path)
             job = Job.get_or_none(Job.source == source, Job.chat == chat_db)
 
             if not job:
                 job = Job.create_contract(source, chat_db, me.is_premium, settings)
                 UI.info(f"Estrategia fijada: [bold]{job.strategy.value}[/]")
-                if job.strategy == Strategy.CHUNKED:
+                if job.strategy == Strategy.SINGLE:
                     console.print(
-                        f"El archivo se dividirá en partes de {job.config.tg_max_size / (1024**2):.0f}MB"
+                        f"\n[bold]Archivo único:[/bold] [blue]{path.name}[/blue]"
+                    )
+                else:
+                    parts_count = discovery._get_expected_count(job)
+                    console.print(
+                        f"\n[bold]Fragmentando en {parts_count} partes:[/bold] [blue]{path.name}[/blue]"
                     )
 
             report = discovery.investigate(job)
@@ -159,15 +165,21 @@ def _resolver_target_paths(target: Path, settings) -> list[Path]:
 
 
 def _print_upload_summary(paths: list[Path], target: Path):
-    """TABLA de resumen de lo que se va a procesar."""
+    """TABLA de resumen de lo que se va a procesar (Sin Emojis)."""
     total_size = sum(p.stat().st_size for p in paths)
+    total_size_mb = total_size / (1024**2)
+
+    size_str = f"{total_size_mb:.2f} MB"
+    if total_size_mb > 1024:
+        size_str = f"{total_size_mb/1024:.2f} GB"
 
     table = Table(title="Preparación de Subida", show_header=False, box=None)
-    table.add_row("📂 Origen:", f"[bold white]{target}[/bold white]")
-    table.add_row("📄 Archivos encontrados:", f"[bold cyan]{len(paths)}[/bold cyan]")
+
+    table.add_row("[bold cyan]>[/] Origen:", f"[bold white]{target}[/bold white]")
+    table.add_row("[bold cyan]>[/] Archivos:", f"[bold cyan]{len(paths)}[/bold cyan]")
     table.add_row(
-        "📊 Tamaño total:",
-        f"[bold magenta]{total_size / (1024**2):.2f} MB[/bold magenta]",
+        "[bold cyan]>[/] Peso total:",
+        f"[bold magenta]{size_str}[/bold magenta]",
     )
 
     console.print(table)

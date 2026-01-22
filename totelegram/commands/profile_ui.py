@@ -186,7 +186,7 @@ Encierra el patrón entre comillas:
         """Informa sobre el resultado del escaneo de forma humana."""
         if results_count > 0:
             self.console.print(
-                f"\n[green]✔[/green] Analicé tus [bold]{scanned}[/bold] chats más recientes.\n"
+                f"\n[green][v][/green] Analicé tus [bold]{scanned}[/bold] chats más recientes.\n"
                 f"Encontré [bold cyan]{results_count}[/bold cyan] coincidencias para '[italic]{query}[/italic]':"
             )
         else:

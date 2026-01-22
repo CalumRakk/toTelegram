@@ -87,7 +87,9 @@ def handle_list_operation(
     # 4. Ejecución
     try:
         new_list = pm.update_config_list(action, key, cleaned, profile)
-        console.print(f"[green]✔ Operación exitosa. Lista actual: {new_list}[/green]")
+        console.print(
+            f"[green][OK] Operación exitosa. Lista actual: {new_list}[/green]"
+        )
     except Exception as e:
         console.print(f"[bold red]Error:[/bold red] {e}")
         raise typer.Exit(code=1)
