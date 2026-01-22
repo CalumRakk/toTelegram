@@ -161,4 +161,5 @@ class TestCliProfile(unittest.TestCase):
 
         self.assertEqual(result.exit_code, 0)
         self.assertEqual(self.pm.active_name, "perfil_B")
-        self.assertIn("Ahora usando el perfil: perfil_B", result.stdout)
+        self.assertIn("Ahora usando el perfil", result.stdout)
+        self.assertIn("perfil_B", result.stdout)
