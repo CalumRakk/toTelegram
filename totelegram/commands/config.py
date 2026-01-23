@@ -38,8 +38,6 @@ def resolve_and_store_chat_logic(
     """
     Valida que un chat exista y lo guarda en la base de datos. Y incluye un fallback de permisos por consola.
     """
-    from totelegram.services.validator import ValidationService
-
     normalized_key = normalize_chat_id(chat_alias)
     settings = pm.get_settings(profile_name)
     validator = ValidationService()

@@ -41,12 +41,16 @@ class TestCliProfile(unittest.TestCase):
         self.patcher_profiles.stop()
         self.test_dir_obj.cleanup()
 
-    @patch("totelegram.commands.profile.TelegramSession")
-    @patch("totelegram.commands.config.TelegramSession")
-    @patch("totelegram.commands.profile.uuid")
     @patch("totelegram.commands.profile.ValidationService")
+    @patch("totelegram.commands.profile.TelegramSession")
+    @patch("totelegram.commands.profile.resolve_and_store_chat_logic")
+    @patch("totelegram.commands.profile.uuid")
     def test_create_profile_happy_path(
-        self, MockValidationService, mock_uuid, MockTgConfig, MockTgProfile
+        self,
+        mock_uuid,
+        mock_resolve_logic,
+        MockTgTelegramSession,
+        MockValidationService,
     ):
         """
         Prueba el flujo completo exitoso:
@@ -57,8 +61,9 @@ class TestCliProfile(unittest.TestCase):
         """
 
         mock_client = MagicMock()
-        MockTgConfig.return_value.__enter__.return_value = mock_client
-        MockTgProfile.return_value.__enter__.return_value = mock_client
+        MockTgTelegramSession.return_value.__enter__.return_value = mock_client
+        MockTgTelegramSession.return_value.__enter__.return_value = mock_client
+        mock_resolve_logic.return_value = True
 
         # El temp será "temp_12345678.session"
         mock_uuid.uuid4.return_value.hex = "12345678"
