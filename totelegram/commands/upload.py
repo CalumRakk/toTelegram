@@ -2,15 +2,13 @@ from pathlib import Path
 from typing import cast
 
 import typer
+from rich import box
+from rich.markup import escape
 from rich.table import Table
 
 from totelegram.commands.profile import list_profiles
 from totelegram.console import UI, console
-from totelegram.core.enums import (
-    AvailabilityState,
-    DuplicatePolicy,
-    Strategy,
-)
+from totelegram.core.enums import AvailabilityState, DuplicatePolicy, Strategy
 from totelegram.core.plans import AskUserPlan, PhysicalUploadPlan, SkipPlan
 from totelegram.core.registry import ProfileManager
 from totelegram.core.setting import get_settings
@@ -84,6 +82,7 @@ def upload_file(
         UI.error(f"Error de perfil: {e}")
         list_profiles(quiet=True)
         raise typer.Exit(code=1)
+
     exclusion_patterns = settings.exclude_files_default + settings.exclude_files
     all_paths = _resolver_target_paths(
         target, exclusion_patterns, settings.max_filesize_bytes
@@ -157,21 +156,127 @@ def upload_file(
     UI.success(f"Tarea finalizada perfil [bold]{profile_name}[/].")
 
 
+def _print_skip_report(
+    by_snapshot: list[Path], by_size: list[Path], by_exclusion: list[Path]
+):
+    """
+    Muestra un reporte inteligente:
+    - Si son pocos archivos (<5): Lista detallada línea por línea.
+    - Si son muchos: Tabla resumen agrupada.
+    """
+    total_skipped = len(by_snapshot) + len(by_size) + len(by_exclusion)
+
+    if total_skipped == 0:
+        return
+
+    # MODALIDAD DETALLADA (Pocos archivos)
+    if total_skipped < 5:
+        console.print()
+        if by_snapshot:
+            for p in by_snapshot:
+                console.print(f"[yellow]Omitido (Snapshot):[/yellow] {escape(p.name)}")
+
+        if by_exclusion:
+            for p in by_exclusion:
+                console.print(
+                    f"[dim yellow]Omitido (Exclusión):[/dim yellow] {escape(p.name)}"
+                )
+
+        if by_size:
+            for p in by_size:
+                console.print(f"[red]Omitido (Tamaño):[/red] {escape(p.name)}")
+        console.print()
+        return
+
+    # MODALIDAD RESUMEN (Muchos archivos - Tabla)
+
+    table = Table(
+        title=f"Resumen: {total_skipped} archivos omitidos",
+        box=box.SIMPLE,
+        show_header=True,
+        header_style="bold magenta",
+        expand=True,
+    )
+
+    table.add_column("Motivo", style="cyan", no_wrap=True)
+    table.add_column("Cant.", justify="right", style="bold white", width=6)
+    table.add_column("Ejemplos", style="dim")
+
+    def format_examples(files: list[Path]) -> str:
+        limit = 3
+        names = [escape(f.name) for f in files[:limit]]
+        remaining = len(files) - limit
+        text = ", ".join(names)
+        if remaining > 0:
+            text += f", ... y {remaining} más"
+        return text
+
+    if by_snapshot:
+        table.add_row(
+            "Snapshot Existente", str(len(by_snapshot)), format_examples(by_snapshot)
+        )
+
+    if by_exclusion:
+        table.add_row(
+            "Patrón de Exclusión", str(len(by_exclusion)), format_examples(by_exclusion)
+        )
+
+    if by_size:
+        table.add_row("Excede Tamaño Máx.", str(len(by_size)), format_examples(by_size))
+
+    console.print()
+    console.print(table)
+    console.print()
+
+
 def _resolver_target_paths(
-    target: Path, patterns: list[str], max_filesize_bytes
+    target: Path, patterns: list[str], max_filesize_bytes: int
 ) -> list[Path]:
-    """Escanea el objetivo y aplica reglas de exclusión."""
+    """
+    Escanea el objetivo, aplica reglas y genera un reporte de omisiones.
+    """
     found = []
 
+    # Listas para categorizar las omisiones
+    skipped_by_snapshot = []
+    skipped_by_size = []
+    skipped_by_exclusion = []
+
+    def has_snapshot(file_path: Path) -> bool:
+        return file_path.with_name(f"{file_path.name}.json.xz").exists()
+
     with console.status(f"[dim]Escaneando {target}...[/dim]"):
+
+        def process_candidate(p: Path):
+            # 1. Exclusión por Patrón (user config)
+            if is_excluded(p, patterns):
+                skipped_by_exclusion.append(p)
+                return
+
+            # 2. Exclusión por Snapshot (ya procesado)
+            if has_snapshot(p):
+                skipped_by_snapshot.append(p)
+                return
+
+            # 3. Exclusión por Tamaño (límite duro)
+            # Nota: Si max_filesize_bytes actúa como filtro estricto
+            if p.stat().st_size > max_filesize_bytes:
+                skipped_by_size.append(p)
+                return
+
+            # Si pasa todo, es un archivo válido
+            found.append(p)
+
         if target.is_file():
-            if not is_excluded(target, patterns):
-                found.append(target)
+            process_candidate(target)
         else:
             for p in target.rglob("*"):
-                if p.is_file() and not is_excluded(p, patterns):
-                    if p.stat().st_size <= max_filesize_bytes:
-                        found.append(p)
+                if p.is_file():
+                    process_candidate(p)
+
+    # Generar el reporte visual antes de devolver los resultados
+    _print_skip_report(skipped_by_snapshot, skipped_by_size, skipped_by_exclusion)
+
     return found
 
 
