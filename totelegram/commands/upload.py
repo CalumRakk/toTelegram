@@ -3,7 +3,6 @@ from typing import cast
 
 import typer
 from rich.markup import escape
-from rich.table import Table
 
 from totelegram.commands.profile import list_profiles
 from totelegram.console import UI, console
@@ -87,10 +86,11 @@ def upload_file(
         target, exclusion_patterns, settings.max_filesize_bytes
     )
     if not all_paths:
-        UI.warn("No se encontraron archivos para procesar.")
+        if target.is_dir():
+            UI.warn("No se encontraron archivos para procesar.")
         raise typer.Exit(0)
 
-    _print_upload_summary(all_paths, target)
+    _print_upload_summary(all_paths)
     if len(all_paths) > 7 and not force:
         if not typer.confirm(f"¿Deseas procesar estos {len(all_paths)} archivos?"):
             raise typer.Exit(0)
@@ -175,11 +175,13 @@ def _print_skip_report(
     if total_skipped < 5:
         console.print()
         for p in by_snapshot:
-            console.print(f"[yellow]SKIP (Snapshot):[/] {escape(p.name)}")
+            console.print(f"[yellow]Omitido (Ya tiene Snapshot):[/] {escape(p.name)}")
         for p in by_exclusion:
-            console.print(f"[dim yellow]SKIP (Exclusion):[/] {escape(p.name)}")
+            console.print(
+                f"[dim yellow]Omitido (Excluido por Patron):[/] {escape(p.name)}"
+            )
         for p in by_size:
-            console.print(f"[red]SKIP (Size > Limit):[/] {escape(p.name)}")
+            console.print(f"[red]Omitido (Excede peso maximo):[/] {escape(p.name)}")
         console.print()
         return
 
@@ -301,7 +303,7 @@ def _print_scan_context(total: int, snapshots: int):
     console.print(summary)
 
 
-def _print_upload_summary(paths: list[Path], target: Path):
+def _print_upload_summary(paths: list[Path]):
     """TABLA de resumen de lo que se va a procesar (Sin Emojis)."""
     total_size = sum(p.stat().st_size for p in paths)
     total_size_mb = total_size / (1024**2)
@@ -310,13 +312,15 @@ def _print_upload_summary(paths: list[Path], target: Path):
     if total_size_mb > 1024:
         size_str = f"{total_size_mb/1024:.2f} GB"
 
-    table = Table(title="Preparación de Subida", show_header=False, box=None)
+    console.print("Preparación de Subida...\n")
 
-    table.add_row("[bold cyan]>[/] Origen:", f"[bold white]{target}[/bold white]")
-    table.add_row("[bold cyan]>[/] Archivos:", f"[bold cyan]{len(paths)}[/bold cyan]")
-    table.add_row(
-        "[bold cyan]>[/] Peso total:",
-        f"[bold magenta]{size_str}[/bold magenta]",
+    string_files = "Archivos" if len(paths) > 1 else "Archivo"
+    string_size = "Peso total" if len(paths) > 1 else "Peso"
+    console.print(
+        f"[bold cyan]>[/] {string_files}:", f"[bold cyan]{paths[0].name}[/bold cyan]"
     )
 
-    console.print(table)
+    console.print(
+        f"[bold cyan]>[/] {string_size}:",
+        f"[bold magenta]{size_str}[/bold magenta]",
+    )

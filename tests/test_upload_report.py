@@ -29,7 +29,7 @@ class TestUploadReport(unittest.TestCase):
         self.assertNotIn("Contenido omitido:", output_text)
 
         # Verificamos formato detallado
-        self.assertIn("SKIP (Snapshot)", output_text)
+        self.assertIn("Omitido (Ya tiene Snapshot)", output_text)
         self.assertIn("video1.mp4", output_text)
 
     @patch("totelegram.commands.upload.console")
