@@ -1,7 +1,10 @@
+import logging
 from decimal import __version__
 from typing import Optional
 
 import typer
+
+logging.getLogger("dotenv").setLevel(logging.CRITICAL)
 
 from totelegram.commands import config, profile, upload
 from totelegram.console import UI, console

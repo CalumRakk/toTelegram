@@ -2,9 +2,9 @@ import glob
 import json
 import logging
 from pathlib import Path
-from typing import Dict, List, Literal, Optional, get_origin
+from typing import Any, Dict, List, Literal, Optional, Tuple, get_origin
 
-from dotenv import dotenv_values, set_key
+from dotenv import dotenv_values, set_key, unset_key
 
 from totelegram.core.schemas import ProfileRegistry
 from totelegram.core.setting import Settings, get_settings, get_user_config_dir
@@ -268,3 +268,28 @@ class ProfileManager:
         session_path = self.PROFILES_DIR / f"{name}.session"
         if session_path.exists():
             session_path.unlink()
+
+    def unset_config(
+        self, key: str, profile_name: Optional[str] = None
+    ) -> Tuple[bool, Any]:
+        """
+        Elimina una clave del archivo .env para que Pydantic use el valor por defecto.
+        Retorna el valor por defecto que ha quedado activo.
+        """
+        key = key.upper()
+
+        self._validate_key_is_modifiable(key)
+
+        path = self.get_path(profile_name)
+
+        # intenta eliminar la clave del archivo físico
+        succes, _ = unset_key(path, key, quote_mode="never")
+        if not succes:
+            return False, None
+
+        # Instanciamos Settings para averiguar cuál es el default
+        field_info = Settings.model_fields.get(key.lower())
+
+        if field_info:
+            return True, field_info.default
+        return True, None

@@ -115,6 +115,49 @@ def set_config(
         raise typer.Exit(code=1)
 
 
+@app.command("unset")
+def unset_config(
+    key: str = typer.Argument(..., help="Clave a restaurar a su valor por defecto"),
+):
+    """Quita una configuración personalizada para usar el valor por defecto."""
+    profile_name = pm.resolve_name()
+    ui.announce_profile_used(profile_name)
+
+    try:
+        key = key.upper()
+        if key == "CHAT_ID":
+            UI.warn(
+                "El CHAT_ID no tiene un valor por defecto seguro. Usa 'set' o el asistente (wizard)."
+            )
+            raise typer.Exit(code=1)
+
+        settings = pm.get_settings(profile_name)
+
+        was_reset, default_value = pm.unset_config(key, profile_name=profile_name)
+
+        # Decidimos qué valor mostrar
+        # Si NO hubo reset, sacamos el valor directamente del objeto settings (que ya es el default)
+        # Si hubo reset, usamos el default_value que nos devolvió el manager
+        actual_val = (
+            default_value if was_reset else getattr(settings, key.lower(), None)
+        )
+
+        display_val = f"[green]{actual_val}[/green]"
+
+        if was_reset:
+            UI.success(f"Configuración restaurada: [bold]{key}[/]")
+            console.print(f"   Ahora usa el valor por defecto: {display_val}")
+        else:
+            UI.info(
+                f"La configuración [bold]{key}[/] ya estaba usando su valor por defecto."
+            )
+            console.print(f"   Valor actual: {display_val}")
+
+    except ValueError as e:
+        UI.error(str(e))
+        raise typer.Exit(code=1)
+
+
 @app.command("wizard")
 def config_wizard():
     """Asistente interactivo para encontrar y configurar el chat de destino."""
