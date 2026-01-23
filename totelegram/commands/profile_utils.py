@@ -36,7 +36,7 @@ def get_friendly_chat_name(settings: Settings) -> str:
 
     # IDs Numéricos
     if val.replace("-", "").isdigit():
-        with DatabaseSession(settings):
+        with DatabaseSession(settings.database_path):
             chat = TelegramChat.get_or_none(TelegramChat.id == int(val))
             if chat:
                 return f"{chat.title}"

@@ -57,7 +57,7 @@ def resolve_and_store_chat_logic(
         pm.update_config("CHAT_ID", str(normalized_key), profile_name=profile_name)
         return True
 
-    with DatabaseSession(settings):
+    with DatabaseSession(settings.database_path):
         if client:
             return _execute(client)
         else:

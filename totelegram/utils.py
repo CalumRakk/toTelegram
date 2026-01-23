@@ -4,7 +4,7 @@ import re
 import sys
 from pathlib import Path
 from time import sleep
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, List
 
 if TYPE_CHECKING:
     from totelegram.core.setting import Settings
@@ -26,7 +26,7 @@ else:
             yield batch
 
 
-def is_excluded(path: Path, settings: "Settings") -> bool:
+def is_excluded(path: Path, patterns: List[str]) -> bool:
     """Devuelve True si el path debe ser excluido según las reglas de exclusión."""
     logger.info(f"Comprobando path exclusion de {path=}")
     if not path.exists():
@@ -35,12 +35,18 @@ def is_excluded(path: Path, settings: "Settings") -> bool:
     elif path.is_dir():
         logger.info(f"Es un directorio: {path}, se omite")
         return True
-    elif settings.is_excluded(path):
-        logger.info(f"Está excluido por configuración: {path}, se omite ")
-        return True
-    elif settings.is_excluded_default(path):
-        logger.info(f"Está excluido por configuración: {path}, se omite ")
-        return True
+
+    for pattern in patterns:
+        # Para coincidencia directa (archivo o carpeta exacta)
+        if path.match(pattern):
+            return True
+
+        # Para coincidencia recursiva (si una carpeta padre está excluida)
+        for parent in path.parents:
+            if str(parent) == ".":
+                break
+            if parent.match(pattern):
+                return True
     return False
 
 

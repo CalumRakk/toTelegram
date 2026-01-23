@@ -45,9 +45,10 @@ class TestManualRealLogic(unittest.TestCase):
         cls.settings = get_settings(env_path)
         cls.settings.database_name = "manual_test_run.sqlite"
         cls.media_folder = TemporaryDirectory()
+        cls.database_path = Path(cls.media_folder.name) / cls.settings.database_name
 
-        cls.db_session = DatabaseSession(cls.settings)
-        cls.db_session.__enter__()
+        cls.db_session = DatabaseSession(cls.database_path)
+        cls.db_session.start()
 
         cls.tg_session = TelegramSession(cls.settings)
         cls.client = cls.tg_session.start()
@@ -58,7 +59,7 @@ class TestManualRealLogic(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls.tg_session.stop()
-        cls.db_session.__exit__(None, None, None)
+        cls.db_session.close()
         cls.media_folder.cleanup()
         if cls.settings.database_path.exists():
             try:
@@ -83,7 +84,7 @@ class TestManualRealLogic(unittest.TestCase):
         from pyrogram.types import Chat
 
         tg_chat = self.client.get_chat(self.settings.chat_id)
-        chat_db = TelegramChat.get_or_create_from_tg(cast(Chat, tg_chat))
+        chat_db, _ = TelegramChat.get_or_create_from_tg(cast(Chat, tg_chat))
         from pyrogram.types import User
 
         me = cast(User, self.client.get_me())

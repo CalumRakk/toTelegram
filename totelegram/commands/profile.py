@@ -13,7 +13,7 @@ from totelegram.commands.profile_utils import (
 )
 from totelegram.console import UI, console
 from totelegram.core.registry import ProfileManager
-from totelegram.core.setting import CHAT_ID_NOT_SET
+from totelegram.core.setting import CHAT_ID_NOT_SET, Settings
 from totelegram.services.validator import ValidationService
 from totelegram.store.database import DatabaseSession
 from totelegram.store.models import TelegramChat
@@ -156,10 +156,10 @@ def use_profile(
         list_profiles(quiet=True)
 
 
-def get_chat_name(current_settings) -> Optional[str]:
+def get_chat_name(settings: Settings) -> Optional[str]:
 
-    with DatabaseSession(current_settings):
-        target = current_settings.chat_id
+    with DatabaseSession(settings.database_path):
+        target = settings.chat_id
         chat = None
         try:
             chat = TelegramChat.get_or_none(TelegramChat.id == int(target))

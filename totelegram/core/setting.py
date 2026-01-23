@@ -146,31 +146,6 @@ class Settings(BaseSettings):
     def profile_path(self):
         return self.worktable / "profiles"
 
-    def is_excluded(self, path: Path) -> bool:
-        """
-        Devuelve True si el archivo o alguna de sus carpetas padre
-        coincide con los patrones de exclusión.
-        """
-        if not self.exclude_files:
-            return False
-
-        for pattern in self.exclude_files:
-            # Para coincidencia directa (archivo o carpeta exacta)
-            if path.match(pattern):
-                return True
-
-            # Para coincidencia recursiva (si una carpeta padre está excluida)
-            for parent in path.parents:
-                if str(parent) == ".":
-                    break
-                if parent.match(pattern):
-                    return True
-        return False
-
-    def is_excluded_default(self, path: Path) -> bool:
-        """Devuelve True si el archivo coincide con algún patrón de exclusión."""
-        return any(path.match(pattern) for pattern in self.exclude_files_default)
-
     @classmethod
     def get_schema_info(cls) -> List[Dict[str, str]]:
         """

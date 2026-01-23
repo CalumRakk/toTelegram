@@ -83,8 +83,10 @@ def upload_file(
         UI.error(f"Error de perfil: {e}")
         list_profiles(quiet=True)
         raise typer.Exit(code=1)
-
-    all_paths = _resolver_target_paths(target, settings)
+    exclusion_patterns = settings.exclude_files_default + settings.exclude_files
+    all_paths = _resolver_target_paths(
+        target, exclusion_patterns, settings.max_filesize_bytes
+    )
     if not all_paths:
         UI.warn("No se encontraron archivos válidos para procesar.")
         raise typer.Exit(0)
@@ -95,7 +97,7 @@ def upload_file(
             raise typer.Exit(0)
 
     console.print(f"\n[bold cyan]Iniciando sesión:[/bold cyan] {profile_name}\n")
-    with DatabaseSession(settings), TelegramSession(settings) as client:
+    with DatabaseSession(settings.database_path), TelegramSession(settings) as client:
         from pyrogram.types import Chat, User
 
         tg_chat = cast(Chat, client.get_chat(settings.chat_id))
@@ -146,18 +148,20 @@ def upload_file(
     UI.success(f"Tarea finalizada perfil [bold]{profile_name}[/].")
 
 
-def _resolver_target_paths(target: Path, settings) -> list[Path]:
+def _resolver_target_paths(
+    target: Path, patterns: list[str], max_filesize_bytes
+) -> list[Path]:
     """Escanea el objetivo y aplica reglas de exclusión."""
     found = []
 
     with console.status(f"[dim]Escaneando {target}...[/dim]"):
         if target.is_file():
-            if not is_excluded(target, settings):
+            if not is_excluded(target, patterns):
                 found.append(target)
         else:
             for p in target.rglob("*"):
-                if p.is_file() and not is_excluded(p, settings):
-                    if p.stat().st_size <= settings.max_filesize_bytes:
+                if p.is_file() and not is_excluded(p, patterns):
+                    if p.stat().st_size <= max_filesize_bytes:
                         found.append(p)
     return found
 

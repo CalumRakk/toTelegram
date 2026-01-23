@@ -26,7 +26,10 @@ class TestExclusion(unittest.TestCase):
         with patch.object(Path, "exists", return_value=True), patch.object(
             Path, "is_dir", return_value=False
         ):
-            self.assertTrue(is_excluded(p, self.settings))
+            exclusion_patterns = (
+                self.settings.exclude_files_default + self.settings.exclude_files
+            )
+            self.assertTrue(is_excluded(p, exclusion_patterns))
 
     def test_should_allow_regular_file(self):
         p = Path("video.mp4")
