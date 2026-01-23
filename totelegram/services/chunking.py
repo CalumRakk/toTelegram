@@ -3,7 +3,6 @@ from pathlib import Path
 from typing import List, Tuple, Union
 
 from totelegram.core.enums import Strategy
-from totelegram.core.setting import Settings
 from totelegram.store.models import Job, Payload
 from totelegram.utils import create_md5sum_by_hashlib
 
@@ -124,11 +123,15 @@ class FileChunker:
 
 
 class ChunkingService:
-    def __init__(self, settings: Settings):
-        self.settings = settings
+    def __init__(self, work_dir: Path, chunk_size: int):
+        """
+        Args:
+            work_dir: Directorio base donde se crearán las subcarpetas temporales.
+            chunk_size: Tamaño de chunk a usar si la estrategia lo requiere.
+        """
+        self.work_dir = work_dir
+        self.chunk_size = chunk_size
 
-    # TODO: analizar si deberiamos de pasar settings al método en vez del init. Es para darle una connotación más de peso.
-    # porque ahora da la sensacion de que crea el Job de forma magica.
     def process_job(self, job: Job) -> List[Payload]:
         """
         Procesa un Job y devuelve una lista de Payloads listos para ser subidos.
@@ -154,11 +157,11 @@ class ChunkingService:
         elif job.strategy == Strategy.CHUNKED:
             logger.info(f"Job {job.id}: Estrategia CHUNKED. Iniciando división...")
 
-            chunks_folder = self.settings.worktable / "chunks"
+            chunks_folder = self.work_dir / "chunks"
 
             chunks_paths = FileChunker.split_file(
                 file_path=job.path,
-                chunk_size=self.settings.max_filesize_bytes,
+                chunk_size=self.chunk_size,
                 output_folder=chunks_folder,
             )
 
@@ -169,22 +172,17 @@ class ChunkingService:
 
     def split_file_for_missing_payload(self, job: Job, payload: Payload):
         """Re-genera los fragmentos del archivo original."""
-        chunks_folder = self.settings.worktable / "chunks"
+        chunks_folder = self.work_dir / "chunks"
 
-        # volvemos a ejecutar el split.
-        # Como el contrato (max_filesize_bytes) está en el Job config o settings
-        # el Chunker generará exactamente los mismos bytes.
         FileChunker.split_file(
             file_path=job.path,
             chunk_size=job.config.tg_max_size,
             output_folder=chunks_folder,
         )
 
-        # Verificación post-reconstrucción
         if not payload.path.exists():
             raise Exception("No se pudo reconstruir la pieza faltante.")
 
-        # Validamos que el MD5 de lo que acabamos de crear sea igual al que dice la DB
         new_md5 = create_md5sum_by_hashlib(payload.path)
         if new_md5 != payload.md5sum:
             raise Exception(

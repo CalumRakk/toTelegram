@@ -14,6 +14,7 @@ from totelegram.core.enums import (
 from totelegram.core.plans import AskUserPlan, PhysicalUploadPlan, SkipPlan
 from totelegram.core.registry import ProfileManager
 from totelegram.core.setting import get_settings
+from totelegram.services.chunking import ChunkingService
 from totelegram.services.discovery import DiscoveryService
 from totelegram.services.policy import PolicyExpert
 from totelegram.services.snapshot import SnapshotService
@@ -102,9 +103,17 @@ def upload_file(
 
         tg_chat = cast(Chat, client.get_chat(settings.chat_id))
         chat_db, _ = TelegramChat.get_or_create_from_tg(tg_chat)
-
-        uploader = UploadService(client, settings)
+        chunker = ChunkingService(
+            work_dir=settings.worktable, chunk_size=settings.max_filesize_bytes
+        )
         discovery = DiscoveryService(client)
+        uploader = UploadService(
+            client=client,
+            chunk_service=chunker,
+            upload_limit_rate_kbps=settings.upload_limit_rate_kbps,
+            max_filename_length=settings.max_filename_length,
+            discovery=discovery,
+        )
         me = cast(User, client.get_me())
 
         UI.info(

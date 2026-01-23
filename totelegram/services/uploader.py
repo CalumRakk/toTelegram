@@ -16,7 +16,6 @@ from rich.console import Console
 from totelegram.core.enums import (
     Strategy,
 )
-from totelegram.core.setting import Settings
 from totelegram.services.chunking import ChunkingService
 from totelegram.services.discovery import DiscoveryService
 from totelegram.store.models import Job, Payload, RemotePayload, TelegramUser
@@ -49,11 +48,21 @@ class UploadProgress:
 
 
 class UploadService:
-    def __init__(self, client: "Client", settings: Settings):
+    def __init__(
+        self,
+        client: "Client",
+        chunk_service: ChunkingService,
+        upload_limit_rate_kbps: int = 0,
+        max_filename_length: int = 60,
+        discovery: Optional[DiscoveryService] = None,
+    ):
+
         self.client = client
-        self.settings = settings
-        self.discovery = DiscoveryService(client)
-        self.chunker = ChunkingService(settings)
+        self.chunker = chunk_service
+        self.limit_rate_kbps = upload_limit_rate_kbps
+        self.max_filename_len = max_filename_length
+
+        self.discovery = discovery or DiscoveryService(client)
 
         me = cast("User", client.get_me())
         self.current_user = TelegramUser.get_or_create_from_tg(me)
@@ -199,9 +208,7 @@ class UploadService:
 
         filename, caption = self._build_tg_metadata(payload)
 
-        with open_upload_source(
-            payload.path, self.settings.upload_limit_rate_kbps
-        ) as doc_stream:
+        with open_upload_source(payload.path, self.limit_rate_kbps) as doc_stream:
             progress = UploadProgress(filename, is_chunk=is_chunk, part_index=index)
 
             try:
@@ -235,7 +242,7 @@ class UploadService:
         filename = payload.path.name
         caption = None
 
-        if len(filename) >= self.settings.max_filename_length:
+        if len(filename) >= self.max_filename_len:
             suffix = Path(filename).suffix
             filename = f"{payload.md5sum}{suffix}"
             caption = original_name

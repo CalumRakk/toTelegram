@@ -7,6 +7,7 @@ from tempfile import TemporaryDirectory
 from typing import cast
 
 from totelegram.core.plans import SkipPlan
+from totelegram.services.chunking import ChunkingService
 from totelegram.services.validator import ValidationService
 
 sys.path.append(os.getcwd())
@@ -80,7 +81,17 @@ class TestManualRealLogic(unittest.TestCase):
         """
         # Preparación de servicios
         discovery = DiscoveryService(self.client)
-        uploader = UploadService(self.client, self.settings)
+        chunker = ChunkingService(
+            work_dir=Path(self.media_folder.name),
+            chunk_size=1024 * 1024 * 10,
+        )
+        uploader = UploadService(
+            client=self.client,
+            chunk_service=chunker,
+            upload_limit_rate_kbps=0,
+            max_filename_length=50,
+            discovery=discovery,
+        )
         from pyrogram.types import Chat
 
         tg_chat = self.client.get_chat(self.settings.chat_id)
