@@ -2,7 +2,6 @@ from pathlib import Path
 from typing import cast
 
 import typer
-from rich import box
 from rich.markup import escape
 from rich.table import Table
 
@@ -88,7 +87,7 @@ def upload_file(
         target, exclusion_patterns, settings.max_filesize_bytes
     )
     if not all_paths:
-        UI.warn("No se encontraron archivos válidos para procesar.")
+        UI.warn("No se encontraron archivos para procesar.")
         raise typer.Exit(0)
 
     _print_upload_summary(all_paths, target)
@@ -157,75 +156,71 @@ def upload_file(
 
 
 def _print_skip_report(
-    by_snapshot: list[Path], by_size: list[Path], by_exclusion: list[Path]
+    by_snapshot: list[Path],
+    by_size: list[Path],
+    by_exclusion: list[Path],
+    patterns: list[str],
 ):
     """
-    Muestra un reporte inteligente:
-    - Si son pocos archivos (<5): Lista detallada línea por línea.
-    - Si son muchos: Tabla resumen agrupada.
+    Muestra un reporte.
+    - Pocos archivos (<5): Lista detallada línea por línea.
+    - Muchos archivos: Bloques de resumen con ejemplos en una sola línea.
     """
     total_skipped = len(by_snapshot) + len(by_size) + len(by_exclusion)
 
     if total_skipped == 0:
         return
 
-    # MODALIDAD DETALLADA (Pocos archivos)
+    # FORMATO DETALLADO (Pocos archivos)
     if total_skipped < 5:
         console.print()
-        if by_snapshot:
-            for p in by_snapshot:
-                console.print(f"[yellow]Omitido (Snapshot):[/yellow] {escape(p.name)}")
-
-        if by_exclusion:
-            for p in by_exclusion:
-                console.print(
-                    f"[dim yellow]Omitido (Exclusión):[/dim yellow] {escape(p.name)}"
-                )
-
-        if by_size:
-            for p in by_size:
-                console.print(f"[red]Omitido (Tamaño):[/red] {escape(p.name)}")
+        for p in by_snapshot:
+            console.print(f"[yellow]SKIP (Snapshot):[/] {escape(p.name)}")
+        for p in by_exclusion:
+            console.print(f"[dim yellow]SKIP (Exclusion):[/] {escape(p.name)}")
+        for p in by_size:
+            console.print(f"[red]SKIP (Size > Limit):[/] {escape(p.name)}")
         console.print()
         return
 
-    # MODALIDAD RESUMEN (Muchos archivos - Tabla)
+    # FORMATO CONSOLIDADO (Muchos archivos)
 
-    table = Table(
-        title=f"Resumen: {total_skipped} archivos omitidos",
-        box=box.SIMPLE,
-        show_header=True,
-        header_style="bold magenta",
-        expand=True,
-    )
+    console.print(f"\n    Contenido omitido: ({total_skipped})")
 
-    table.add_column("Motivo", style="cyan", no_wrap=True)
-    table.add_column("Cant.", justify="right", style="bold white", width=6)
-    table.add_column("Ejemplos", style="dim")
+    def print_block(label: str, style: str, files: list[Path], current_patterns=None):
+        if not files:
+            return
 
-    def format_examples(files: list[Path]) -> str:
+        count = len(files)
+
+        # Formateo de patrones (Para quitar el None y la lista cruda)
+        pat_str = ""
+        if current_patterns:
+            clean_list = ", ".join(current_patterns)
+            pat_str = f"[dim]({clean_list})[/dim]"
+
+        # Categoría, Cantidad y Patrones (si existen)
+        console.print(f"\t[bold {style}]{label}:[/] [bold white]{count}[/] {pat_str}")
+
+        # Mostramos hasta 3 ejemplos
         limit = 3
-        names = [escape(f.name) for f in files[:limit]]
-        remaining = len(files) - limit
-        text = ", ".join(names)
+        for f in files[:limit]:
+            console.print(f"\t    [dim]{escape(f.as_posix())}[/dim]", highlight=False)
+
+        # Mostramos el resto. Si el resto es 1, lo mostramos.
+        remaining = count - limit
         if remaining > 0:
-            text += f", ... y {remaining} más"
-        return text
+            if remaining == 1:
+                console.print(
+                    f"\t    [dim]{escape(files[-1].name)}[/dim]", highlight=False
+                )
+            else:
+                console.print(f"\t    [dim]{remaining} archivos mas...[/dim]")
 
-    if by_snapshot:
-        table.add_row(
-            "Snapshot Existente", str(len(by_snapshot)), format_examples(by_snapshot)
-        )
+    print_block("Ya tienen Snapshot", "yellow", by_snapshot)
+    print_block("Excluidos por Patron", "yellow", by_exclusion, patterns)
+    print_block("Exceden peso maximo", "red", by_size)
 
-    if by_exclusion:
-        table.add_row(
-            "Patrón de Exclusión", str(len(by_exclusion)), format_examples(by_exclusion)
-        )
-
-    if by_size:
-        table.add_row("Excede Tamaño Máx.", str(len(by_size)), format_examples(by_size))
-
-    console.print()
-    console.print(table)
     console.print()
 
 
@@ -242,24 +237,29 @@ def _resolver_target_paths(
     skipped_by_size = []
     skipped_by_exclusion = []
 
+    stats = {"total": 0, "snapshots": 0}
+
     def has_snapshot(file_path: Path) -> bool:
         return file_path.with_name(f"{file_path.name}.json.xz").exists()
 
     with console.status(f"[dim]Escaneando {target}...[/dim]"):
 
         def process_candidate(p: Path):
-            # 1. Exclusión por Patrón (user config)
+            stats["total"] += 1
+            if p.name.endswith(".json.xz"):
+                stats["snapshots"] += 1
+
+            # Exclusión por Patrón (user config)
             if is_excluded(p, patterns):
                 skipped_by_exclusion.append(p)
                 return
 
-            # 2. Exclusión por Snapshot (ya procesado)
+            # Exclusión por Snapshot
             if has_snapshot(p):
                 skipped_by_snapshot.append(p)
                 return
 
-            # 3. Exclusión por Tamaño (límite duro)
-            # Nota: Si max_filesize_bytes actúa como filtro estricto
+            # Exclusión por Tamaño
             if p.stat().st_size > max_filesize_bytes:
                 skipped_by_size.append(p)
                 return
@@ -274,10 +274,31 @@ def _resolver_target_paths(
                 if p.is_file():
                     process_candidate(p)
 
-    # Generar el reporte visual antes de devolver los resultados
-    _print_skip_report(skipped_by_snapshot, skipped_by_size, skipped_by_exclusion)
+    # Imprime el escaneo si un directorio
+    if target.is_dir():
+        _print_scan_context(stats["total"], stats["snapshots"])
+
+    # Imprime el reporte.
+    _print_skip_report(
+        skipped_by_snapshot, skipped_by_size, skipped_by_exclusion, patterns
+    )
 
     return found
+
+
+def _print_scan_context(total: int, snapshots: int):
+    """
+    Muestra un resumen rápido de lo encontrado en un directorio
+    """
+    content_files = total - snapshots
+
+    console.print()
+
+    summary = (
+        f"\n[dim]Total archivos encontrado:[/dim] [bold]{total}[/bold] archivos  "
+        f"({content_files} contenido, {snapshots} snapshots)"
+    )
+    console.print(summary)
 
 
 def _print_upload_summary(paths: list[Path], target: Path):
