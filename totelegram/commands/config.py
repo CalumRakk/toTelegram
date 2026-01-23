@@ -28,12 +28,14 @@ if TYPE_CHECKING:
     from pyrogram.types import User
 
 app = typer.Typer(help="Configuración del perfil actual.")
-pm = ProfileManager()
 ui = ProfileUI(console)
 
 
 def resolve_and_store_chat_logic(
-    chat_alias: str, profile_name: str, client: Optional["Client"] = None
+    pm: ProfileManager,
+    chat_alias: str,
+    profile_name: str,
+    client: Optional["Client"] = None,
 ):
     """
     Valida que un chat exista y lo guarda en la base de datos. Y incluye un fallback de permisos por consola.
@@ -74,6 +76,7 @@ def main(ctx: typer.Context):
         return
 
     try:
+        pm: ProfileManager = ctx.obj
         active_name = pm.resolve_name()
         path = pm.get_path(active_name)
         settings = get_settings(path)
@@ -97,15 +100,17 @@ def main(ctx: typer.Context):
 
 @app.command("set", context_settings={"allow_interspersed_args": False})
 def set_config(
+    ctx: typer.Context,
     key: str = typer.Argument(..., help="Clave a modificar"),
     value: str = typer.Argument(..., help="Nuevo valor"),
 ):
     """Edita una configuración del perfil."""
+    pm: ProfileManager = ctx.obj
     profile_name = pm.resolve_name()
     ui.announce_profile_used(profile_name)
     try:
         if key.upper() == "CHAT_ID":
-            resolve_and_store_chat_logic(value, profile_name)
+            resolve_and_store_chat_logic(pm, value, profile_name)
 
         pm.update_config(key, value, profile_name=profile_name)
         UI.success(f"{key.upper()} -> '{value}'.")
@@ -117,9 +122,11 @@ def set_config(
 
 @app.command("unset")
 def unset_config(
+    ctx: typer.Context,
     key: str = typer.Argument(..., help="Clave a restaurar a su valor por defecto"),
 ):
     """Quita una configuración personalizada para usar el valor por defecto."""
+    pm: ProfileManager = ctx.obj
     profile_name = pm.resolve_name()
     ui.announce_profile_used(profile_name)
 
@@ -159,9 +166,9 @@ def unset_config(
 
 
 @app.command("wizard")
-def config_wizard():
+def config_wizard(ctx: typer.Context):
     """Asistente interactivo para encontrar y configurar el chat de destino."""
-
+    pm: ProfileManager = ctx.obj
     profile_name = pm.resolve_name()
     ui.announce_profile_used(profile_name)
 
@@ -179,7 +186,9 @@ def config_wizard():
                 pm.update_config("CHAT_ID", "me", profile_name=profile_name)
                 UI.success("Destino configurado: Mensajes Guardados")
             elif resolved_chat != CHAT_ID_NOT_SET:
-                resolve_and_store_chat_logic(resolved_chat, profile_name, client=client)
+                resolve_and_store_chat_logic(
+                    pm, resolved_chat, profile_name, client=client
+                )
             else:
                 UI.info("Operación cancelada. No se han realizado cambios.")
 
@@ -189,17 +198,21 @@ def config_wizard():
 
 
 @app.command("add")
-def add_to_list(key: str, values: list[str], force: bool = False):
+def add_to_list(ctx: typer.Context, key: str, values: list[str], force: bool = False):
     """Agrega valores a una lista (ej. EXCLUDE_FILES)."""
+    pm: ProfileManager = ctx.obj
     profile_name = pm.resolve_name()
-    handle_list_operation("add", key, values, profile_name, force)
+    handle_list_operation(pm, "add", key, values, profile_name, force)
 
 
 @app.command("remove")
-def remove_from_list(key: str, values: list[str], force: bool = False):
+def remove_from_list(
+    ctx: typer.Context, key: str, values: list[str], force: bool = False
+):
     """Elimina valores de una lista."""
+    pm: ProfileManager = ctx.obj
     profile_name = pm.resolve_name()
-    handle_list_operation("remove", key, values, profile_name, force)
+    handle_list_operation(pm, "remove", key, values, profile_name, force)
 
 
 if __name__ == "__main__":

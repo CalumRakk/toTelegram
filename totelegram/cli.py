@@ -55,22 +55,27 @@ def main(
     Callback principal. Se ejecuta antes que cualquier comando.
     Útil para configurar logging global.
     """
+    # Si ctx.obj ya existe (porque lo inyectamos en un test), lo usamos.
+    # Si no, creamos el de producción.
+    if ctx.obj is None:
+        ctx.obj = ProfileManager()
+
+    pm = ctx.obj
+
     if use:
-        pm = ProfileManager()
         if not pm.exists(use):
             UI.error(f"El perfil '[bold]{use}[/]' no existe.")
-            profile.list_profiles(quiet=True)
+            profile.list_profiles(pm, quiet=True)
             raise typer.Exit(code=1)
+
+        pm.set_override(use)
 
         if ctx.invoked_subcommand in COMMANDS_IGNORING_USE:
             console.print(
                 f"[dim yellow]Nota: El flag --use '{use}' no tiene efecto en comandos de '{ctx.invoked_subcommand}'.[/dim yellow]"
             )
 
-        ProfileManager._global_override = use
-
-    # if verbose:
-    #     console.print("[dim]Modo verbose activado[/dim]")
+    ctx.obj = pm
 
 
 def run_script():

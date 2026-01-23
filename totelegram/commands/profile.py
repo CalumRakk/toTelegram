@@ -20,14 +20,7 @@ from totelegram.store.models import TelegramChat
 from totelegram.telegram import TelegramSession
 
 app = typer.Typer(help="Gestión de perfiles de configuración.")
-pm = ProfileManager()
 ui = ProfileUI(console)
-
-
-# @app.callback()
-# def profile_main():
-#     """Gestión de perfiles (este callback corre antes que create/list/etc)"""
-#     warn_if_override_active()
 
 
 @app.callback(invoke_without_command=True)
@@ -35,14 +28,16 @@ def profile_profile(ctx: typer.Context):
     """Muestra la lista de perfiles si no se pasa un subcomando."""
     if ctx.invoked_subcommand is not None:
         return
-    list_profiles(False)
+    list_profiles(ctx, False)
 
 
 @app.command("list")
 def list_profiles(
-    quiet: bool = typer.Option(False, "--quiet", "-q", help="Salida silenciosa")
+    ctx: typer.Context,
+    quiet: bool = typer.Option(False, "--quiet", "-q", help="Salida silenciosa"),
 ):
     """Muestra la lista de perfiles si no se pasa un subcomando."""
+    pm: ProfileManager = ctx.obj
     registry = pm.get_registry()
     if not registry.profiles:
         UI.warn("No hay perfiles registrados.")
@@ -55,6 +50,7 @@ def list_profiles(
 
 @app.command("create")
 def create_profile(
+    ctx: typer.Context,
     profile_name: str = typer.Option(..., prompt=True, callback=validate_profile_name),
     api_id: int = typer.Option(..., prompt=True),
     api_hash: str = typer.Option(..., prompt=True, hide_input=True),
@@ -62,10 +58,10 @@ def create_profile(
         None, help="Chat ID (opcional para saltar asistente)"
     ),
 ):
-
-    final_session = ProfileManager.PROFILES_DIR / f"{profile_name}.session"
+    pm: ProfileManager = ctx.obj
+    final_session = pm.profiles_dir / f"{profile_name}.session"
     temp_name = f"temp_{uuid.uuid4().hex[:8]}"
-    temp_session = ProfileManager.PROFILES_DIR / f"{temp_name}.session"
+    temp_session = pm.profiles_dir / f"{temp_name}.session"
 
     validator = ValidationService()
 
@@ -107,7 +103,7 @@ def create_profile(
 
             if resolved_chat and resolved_chat != "me":
                 success = resolve_and_store_chat_logic(
-                    resolved_chat, profile_name, client=client
+                    pm, resolved_chat, profile_name, client=client
                 )
                 if not success:
                     resolved_chat = CHAT_ID_NOT_SET
@@ -127,8 +123,7 @@ def create_profile(
             UI.info("[dim]Puedes configurarlo luego usando:[/dim]")
             UI.info(f"  [cyan]totelegram config set chat_id <id>[/cyan]\n")
 
-        suggest_profile_activation(profile_name)
-
+        suggest_profile_activation(pm, profile_name)
     except Exception as e:
         console.print(f"\n[bold red]Error en la creación:[/bold red] {e}")
         raise typer.Exit(1)
@@ -136,11 +131,13 @@ def create_profile(
 
 @app.command("switch")
 def use_profile(
+    ctx: typer.Context,
     profile_name: str = typer.Argument(
         None, help="Nombre del perfil a activar globalmente", metavar="PERFIL"
-    )
+    ),
 ):
     """Cambia el perfil activo."""
+    pm: ProfileManager = ctx.obj
     pm.get_registry()  # se usa para invocar a `_sync_registry_with_filesystem` y tener todo actualizado.
 
     if not profile_name:
@@ -153,7 +150,7 @@ def use_profile(
         UI.success(f"Ahora usando el perfil: [bold]{profile_name}[/]")
     except ValueError as e:
         console.print(f"[bold red]Error:[/bold red] {e}")
-        list_profiles(quiet=True)
+        list_profiles(ctx, quiet=True)
 
 
 def get_chat_name(settings: Settings) -> Optional[str]:
@@ -172,13 +169,14 @@ def get_chat_name(settings: Settings) -> Optional[str]:
 
 
 @app.command("delete")
-def delete_profile(name: str):
+def delete_profile(ctx: typer.Context, name: str):
     """Borra un perfil (archivo .env y .session)."""
     try:
+        pm: ProfileManager = ctx.obj
         pm.resolve_name(name)
     except ValueError as e:
         console.print(f"[bold red]Error:[/bold red] {e}")
-        list_profiles(quiet=True)
+        list_profiles(ctx, quiet=True)
         raise typer.Exit(code=1)
 
     if typer.confirm(

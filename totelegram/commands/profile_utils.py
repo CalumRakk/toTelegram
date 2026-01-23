@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 
     from totelegram.services.validator import ValidationService
 
-pm = ProfileManager()
+
 ui = ProfileUI(console)
 
 
@@ -44,16 +44,8 @@ def get_friendly_chat_name(settings: Settings) -> str:
     return "[Destino sin identificar]"
 
 
-def warn_if_override_active():
-    """Avisa si se está usando --use en un comando que no lo requiere."""
-    if pm._global_override:
-        console.print(
-            f"[dim yellow]Nota: El contexto activo por flag (--use {pm._global_override}) "
-            f"se ignorará para esta operación de gestión.[/dim yellow]\n"
-        )
-
-
 def handle_list_operation(
+    pm: ProfileManager,
     action: Literal["add", "remove"],
     key: str,
     values: List[str],
@@ -112,7 +104,7 @@ def _normalize_input_values(values: List[str]) -> List[str]:
     return cleaned
 
 
-def validate_profile_name(profile_name: str):
+def validate_profile_name(ctx: typer.Context, profile_name: str):
     def normalize_string(value: str):
         if not isinstance(value, str):
             return value
@@ -120,6 +112,7 @@ def validate_profile_name(profile_name: str):
 
     cleaned = normalize_string(profile_name)
     # TODO: un nombre como `mi-perfil` no es válido en isidentifier ¿es un error?
+    pm: ProfileManager = ctx.obj
 
     if not cleaned.isidentifier():
         raise typer.BadParameter(
@@ -143,7 +136,7 @@ def validate_profile_name(profile_name: str):
     raise typer.Exit(code=1)
 
 
-def suggest_profile_activation(profile_name: str):
+def suggest_profile_activation(pm: ProfileManager, profile_name: str):
     """Sugerencia de activación automática.
 
     Si el perfil activo es None, lo activa.
@@ -169,7 +162,9 @@ def suggest_profile_activation(profile_name: str):
         )
 
 
-def _finalize_profile(name, temp_file, final_file, api_id, api_hash, chat_id):
+def _finalize_profile(
+    pm: ProfileManager, name, temp_file, final_file, api_id, api_hash, chat_id
+):
     """Realiza el renombramiento y creación del archivo .env."""
     try:
         temp_file.rename(final_file)

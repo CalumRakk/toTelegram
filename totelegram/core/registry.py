@@ -16,17 +16,30 @@ logger = logging.getLogger(__name__)
 
 class ProfileManager:
     """
-    Gestiona el ciclo de vida de los perfiles (creación, activación, rutas)
-    y la persistencia de sus configuraciones.
+    Gestiona el ciclo de vida de los perfiles.
+    Ahora las rutas son inyectadas o calculadas por instancia, no globales.
     """
 
-    _global_override: Optional[str] = None
+    def __init__(self, base_dir: Optional[Path] = None):
+        self.config_dir = base_dir or Path(get_user_config_dir(APP_SESSION_NAME))
+        self.profiles_dir = self.config_dir / "profiles"
+        self.config_file = self.config_dir / "config.json"
+        self._override: Optional[str] = None
 
-    PROFILES_DIR = CONFIG_DIR / "profiles"
-    CONFIG_FILE = CONFIG_DIR / "config.json"
-
-    def __init__(self):
         self._ensure_structure()
+
+    def set_override(self, name: str):
+        """Establece un perfil como activo.
+        Util si usamos una instancia de Profile de forma global.
+        """
+        self._override = name
+
+    def _ensure_structure(self):
+        """Crea las carpetas necesarias solo cuando se instancia."""
+        self.config_dir.mkdir(parents=True, exist_ok=True)
+        self.profiles_dir.mkdir(parents=True, exist_ok=True)
+        if not self.config_file.exists():
+            self._save_registry(ProfileRegistry())
 
     def create(self, name: str, api_id: int, api_hash: str, chat_id: str) -> Path:
         """Crea un nuevo perfil físico y lo registra."""
@@ -37,15 +50,28 @@ class ProfileManager:
             f"PROFILE_NAME={name}\n"
         )
 
-        file_path = self.PROFILES_DIR / f"{name}.env"
+        file_path = self.profiles_dir / f"{name}.env"
         with open(file_path, "w") as f:
             f.write(env_content)
 
         registry = self._load_registry()
         registry.profiles[name] = str(file_path)
         self._save_registry(registry)
-
         return file_path
+
+    def _load_registry(self) -> ProfileRegistry:
+        """Carga el JSON raw sin lógica extra."""
+        if not self.config_file.exists():
+            return ProfileRegistry()
+        try:
+            with open(self.config_file, "r") as f:
+                return ProfileRegistry(**json.load(f))
+        except (json.JSONDecodeError, ValueError):
+            return ProfileRegistry()
+
+    def _save_registry(self, registry: ProfileRegistry):
+        with open(self.config_file, "w") as f:
+            f.write(registry.model_dump_json(indent=4))
 
     def resolve_name(self, override_name: Optional[str] = None) -> str:
         """
@@ -57,7 +83,7 @@ class ProfileManager:
         Si ninguna se cumple o el perfil resultante no existe, EXPLOTA.
         """
         # Intentamos obtener el nombre por jerarquía
-        target = override_name or self._global_override or self.active_name
+        target = override_name or self._override or self.active_name
 
         if not target:
             raise ValueError(
@@ -178,26 +204,6 @@ class ProfileManager:
         self._write_to_env(key, json.dumps(current_list), profile_name)
         return current_list
 
-    def _ensure_structure(self):
-        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-        self.PROFILES_DIR.mkdir(parents=True, exist_ok=True)
-        if not self.CONFIG_FILE.exists():
-            self._save_registry(ProfileRegistry())
-
-    def _load_registry(self) -> ProfileRegistry:
-        """Carga el JSON raw sin lógica extra."""
-        if not self.CONFIG_FILE.exists():
-            return ProfileRegistry()
-        try:
-            with open(self.CONFIG_FILE, "r") as f:
-                return ProfileRegistry(**json.load(f))
-        except (json.JSONDecodeError, ValueError):
-            return ProfileRegistry()
-
-    def _save_registry(self, registry: ProfileRegistry):
-        with open(self.CONFIG_FILE, "w") as f:
-            f.write(registry.model_dump_json(indent=4))
-
     def _sync_registry_with_filesystem(self) -> ProfileRegistry:
         """
         Lógica de 'Sanidad': Verifica que los archivos listados en config.json existan,
@@ -214,7 +220,7 @@ class ProfileManager:
                 logger.warning(f"Perfil roto eliminado del registro: '{name}'")
                 dirty = True
 
-        existing_env_files = glob.glob(str(self.PROFILES_DIR / "*.env"))
+        existing_env_files = glob.glob(str(self.config_dir / "*.env"))
         for env_path in existing_env_files:
             p_name = Path(env_path).stem
             if p_name not in valid_profiles:
@@ -265,7 +271,7 @@ class ProfileManager:
         if path.exists():
             path.unlink()
 
-        session_path = self.PROFILES_DIR / f"{name}.session"
+        session_path = self.config_dir / f"{name}.session"
         if session_path.exists():
             session_path.unlink()
 

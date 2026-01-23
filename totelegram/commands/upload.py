@@ -20,8 +20,6 @@ from totelegram.store.models import Job, SourceFile, TelegramChat
 from totelegram.telegram import TelegramSession
 from totelegram.utils import is_excluded
 
-pm = ProfileManager()
-
 
 def _handle_redundancy_interaction(
     job: Job, uploader: UploadService, plan: AskUserPlan
@@ -53,6 +51,7 @@ def _handle_redundancy_interaction(
 
 
 def upload_file(
+    ctx: typer.Context,
     target: Path = typer.Argument(
         ..., exists=True, help="Archivo o directorio a procesar."
     ),
@@ -73,12 +72,13 @@ def upload_file(
     Sube archivos o archivos de un directorio a Telegram.
     """
     try:
+        pm: ProfileManager = ctx.obj
         profile_name = pm.resolve_name()
         env_path = pm.get_path(profile_name)
         settings = get_settings(env_path)
     except ValueError as e:
         UI.error(f"Error de perfil: {e}")
-        list_profiles(quiet=True)
+        list_profiles(ctx, quiet=True)
         raise typer.Exit(code=1)
 
     exclusion_patterns = settings.exclude_files_default + settings.exclude_files
