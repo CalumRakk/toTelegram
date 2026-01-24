@@ -31,7 +31,7 @@ class TestCliProfile(unittest.TestCase):
         temp_session_name = "temp_12345678"
 
         @contextmanager
-        def side_effect_validate_session(session_name, api_id, api_hash):
+        def side_effect_validate_session(pm, session_name, api_id, api_hash):
             # El comando espera que se cree un archivo .session
             temp_file = self.pm.profiles_dir / f"{session_name}.session"
             temp_file.parent.mkdir(parents=True, exist_ok=True)
@@ -89,7 +89,7 @@ class TestCliProfile(unittest.TestCase):
 
         # Simulamos éxito en login pero luego el usuario cancela en el wizard
         @contextmanager
-        def side_effect_validate_session(session_name, api_id, api_hash):
+        def side_effect_validate_session(pm, session_name, api_id, api_hash):
             self.pm.profiles_dir.mkdir(parents=True, exist_ok=True)
             (self.pm.profiles_dir / f"{session_name}.session").touch()
             yield mock_client

@@ -70,7 +70,7 @@ def create_profile(
         UI.info(
             "[dim]Se solicitará tu número y código (OTP) para vincular la cuenta.[/dim]\n"
         )
-        with validator.validate_session(temp_name, api_id, api_hash) as _:
+        with validator.validate_session(pm, temp_name, api_id, api_hash) as _:
             # Una vez dentro ya no necesitamos la session temp, salimos para liberar el archivo
             pass
 

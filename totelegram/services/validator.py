@@ -33,12 +33,10 @@ class ValidationService:
 
     @contextmanager
     def validate_session(
-        self, profile_name: str, api_id: int, api_hash: str
+        self, pm: ProfileManager, profile_name: str, api_id: int, api_hash: str
     ) -> Generator[Client, None, None]:
         from pyrogram.errors import ApiIdInvalid, ApiIdPublishedFlood
         from pyrogram.types import Chat
-
-        ProfileManager.PROFILES_DIR.mkdir(parents=True, exist_ok=True)
 
         UI.info("Iniciando validación de credenciales...")
         try:
@@ -46,7 +44,7 @@ class ValidationService:
                 session_name=profile_name,
                 api_id=api_id,
                 api_hash=api_hash,
-                workdir=ProfileManager.PROFILES_DIR,
+                workdir=pm.profiles_dir,
             ) as client:
 
                 me = cast(Chat, client.get_me())
