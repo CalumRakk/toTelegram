@@ -93,7 +93,7 @@ def upload_file(
     _print_upload_summary(all_paths)
     if len(all_paths) > 7 and not force:
         if not typer.confirm(f"¿Deseas procesar estos {len(all_paths)} archivos?"):
-            raise typer.Exit(0)
+            return
 
     console.print(f"\n[bold cyan]Iniciando sesión:[/bold cyan] {profile_name}\n")
     with DatabaseSession(settings.database_path), TelegramSession(settings) as client:
@@ -101,9 +101,7 @@ def upload_file(
 
         tg_chat = cast(Chat, client.get_chat(settings.chat_id))
         chat_db, _ = TelegramChat.get_or_create_from_tg(tg_chat)
-        chunker = ChunkingService(
-            work_dir=settings.worktable, chunk_size=settings.max_filesize_bytes
-        )
+        chunker = ChunkingService(work_dir=settings.worktable)
         discovery = DiscoveryService(client)
         uploader = UploadService(
             client=client,
@@ -118,7 +116,7 @@ def upload_file(
             f"Destino: [bold cyan]{tg_chat.title or 'Privado'}[/] [dim]({settings.chat_id})[/dim]"
         )
         for path in all_paths:
-            source = SourceFile.get_or_create_from_path(path)
+            source = SourceFile.get_or_create_from_path(path)  # TODO: avisar
             job = Job.get_or_none(Job.source == source, Job.chat == chat_db)
 
             if not job:

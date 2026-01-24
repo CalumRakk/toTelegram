@@ -123,14 +123,13 @@ class FileChunker:
 
 
 class ChunkingService:
-    def __init__(self, work_dir: Path, chunk_size: int):
+    def __init__(self, work_dir: Path):
         """
         Args:
             work_dir: Directorio base donde se crearán las subcarpetas temporales.
             chunk_size: Tamaño de chunk a usar si la estrategia lo requiere.
         """
         self.work_dir = work_dir
-        self.chunk_size = chunk_size
 
     def process_job(self, job: Job) -> List[Payload]:
         """
@@ -161,7 +160,7 @@ class ChunkingService:
 
             chunks_paths = FileChunker.split_file(
                 file_path=job.path,
-                chunk_size=self.chunk_size,
+                chunk_size=job.config.tg_max_size,
                 output_folder=chunks_folder,
             )
 

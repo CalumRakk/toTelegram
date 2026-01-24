@@ -67,6 +67,7 @@ class TelegramSession:
             workdir=str(self.workdir),  # type: ignore
             lang_code=iso639,
             in_memory=False,
+            no_updates=True,
         )
 
         try:
