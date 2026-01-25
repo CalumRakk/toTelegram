@@ -197,7 +197,7 @@ class UploadService:
             )
 
         job.set_uploaded()
-        UI.success("¡Disponibilidad confirmada!")
+        UI.success("Subida completa.")
 
     def _upload_single_payload(
         self, payload: Payload, is_chunk: bool = False, index: int = 0

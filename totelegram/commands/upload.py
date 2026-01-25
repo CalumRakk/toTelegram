@@ -113,7 +113,7 @@ def upload_file(
         me = cast(User, client.get_me())
 
         UI.info(
-            f"Destino: [bold cyan]{tg_chat.title or 'Privado'}[/] [dim]({settings.chat_id})[/dim]"
+            f"Destino: [bold cyan]{tg_chat.title or 'Privado'}[/] [dim](Id: {settings.chat_id})[/dim]"
         )
         for path in all_paths:
             source = SourceFile.get_or_create_from_path(path)  # TODO: avisar
@@ -123,22 +123,21 @@ def upload_file(
                 job = Job.create_contract(source, chat_db, me.is_premium, settings)
                 UI.info(f"Estrategia fijada: [bold]{job.strategy.value}[/]")
                 if job.strategy == Strategy.SINGLE:
-                    UI.info(f"\n[bold]Archivo único:[/bold] [blue]{path.name}[/blue]")
+                    UI.info(f"[bold]Archivo único:[/bold] [blue]{path.name}[/blue]")
                 else:
                     parts_count = discovery._get_expected_count(job)
                     UI.info(
-                        f"\n[bold]Fragmentando en {parts_count} partes:[/bold] [blue]{path.name}[/blue]"
+                        f"[bold]Fragmentando en {parts_count} partes:[/bold] [blue]{path.name}[/blue]"
                     )
 
             report = discovery.investigate(job)
             plan = PolicyExpert.determine_plan(report, settings.duplicate_policy)
             if isinstance(plan, SkipPlan):
-                UI.info(f"[dim] {plan.reason}[/dim]")
+                UI.info(f"[dim]{plan.reason}[/dim]")
                 if plan.is_already_fulfilled:
                     job.set_uploaded()
 
             elif isinstance(plan, PhysicalUploadPlan):
-                UI.info(f"[bold] {plan.reason}[/bold]")
                 uploader.execute_physical_upload(job)
 
             elif isinstance(plan, AskUserPlan):
@@ -149,8 +148,6 @@ def upload_file(
                     _handle_redundancy_interaction(job, uploader, plan)
 
             SnapshotService.generate_snapshot(job)
-
-    UI.success(f"Tarea finalizada perfil [bold]{profile_name}[/].")
 
 
 def _print_skip_report(
@@ -240,7 +237,9 @@ def _resolver_target_paths(
     stats = {"total": 0, "snapshots": 0}
 
     def has_snapshot(file_path: Path) -> bool:
-        return file_path.with_name(f"{file_path.name}.json.xz").exists()
+        filename_plus_ext = file_path.with_name(f"{file_path.name}.json.xz")
+        stem_plus_ext = file_path.with_name(f"{file_path.stem}.json.xz")
+        return filename_plus_ext.exists() or stem_plus_ext.exists()
 
     with console.status(f"[dim]Escaneando {target}...[/dim]"):
 

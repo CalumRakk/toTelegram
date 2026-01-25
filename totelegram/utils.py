@@ -2,9 +2,12 @@ import hashlib
 import logging
 import re
 import sys
+from contextlib import nullcontext
 from pathlib import Path
 from time import sleep
 from typing import TYPE_CHECKING, Any, List
+
+from totelegram.console import console
 
 if TYPE_CHECKING:
     from totelegram.core.setting import Settings
@@ -51,10 +54,28 @@ def is_excluded(path: Path, patterns: List[str]) -> bool:
 
 
 def create_md5sum_by_hashlib(path: Path):
+    """
+    Calcula el MD5 de un archivo. Si el archivo es grande (>100MB),
+    muestra un mensaje de estado en la consola.
+    """
     hash_md5 = hashlib.md5()
-    with open(path, "rb") as f:
-        for chunk in iter(lambda: f.read(50 * 1024 * 1024), b""):
-            hash_md5.update(chunk)
+    file_size = path.stat().st_size
+
+    # Solo mostramos el status si el archivo es lo suficientemente grande
+    # 100MB
+    threshold = 100 * 1024 * 1024
+
+    status_context = (
+        console.status(f"[dim]Procesando firma digital (MD5): {path.name}...[/dim]")
+        if file_size > threshold
+        else nullcontext()
+    )
+
+    with status_context:
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(50 * 1024 * 1024), b""):
+                hash_md5.update(chunk)
+
     return hash_md5.hexdigest()
 
 
