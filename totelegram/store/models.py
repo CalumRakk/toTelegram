@@ -1,5 +1,6 @@
 import json
 import logging
+import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Generator, Optional, Tuple, cast
@@ -8,7 +9,7 @@ import peewee
 from playhouse.sqlite_ext import JSONField
 
 from totelegram import __version__
-from totelegram.core.enums import JobStatus, Strategy
+from totelegram.core.enums import ArchiveStatus, JobStatus, Strategy
 
 if TYPE_CHECKING:
     from totelegram.core.setting import Settings
@@ -189,6 +190,24 @@ class SourceFile(BaseModel):
         return source
 
 
+class ArchiveSession(BaseModel):
+    """
+    Representa una sesión de archivado
+    Es la entidad que agrupa varios volúmenes físicos (Jobs).
+    """
+
+    id = cast(uuid.UUID, peewee.UUIDField(primary_key=True, default=uuid.uuid4))
+    root_path = cast(str, peewee.CharField())
+    fingerprint = cast(str, peewee.CharField())
+
+    total_files = cast(int, peewee.IntegerField(default=0))
+    total_size = cast(int, peewee.BigIntegerField(default=0))
+
+    status = cast(ArchiveStatus, EnumField(ArchiveStatus))
+
+    app_version = cast(str, peewee.CharField())
+
+
 class Job(BaseModel):
     """Representa la intención de disponibilizar un SourceFile en un Chat específico."""
 
@@ -201,6 +220,11 @@ class Job(BaseModel):
     strategy = cast(Strategy, EnumField(Strategy))
     config = cast(StrategyConfig, PydanticJSONField(StrategyConfig))
     status = cast(JobStatus, EnumField(JobStatus))
+
+    archive_session = peewee.ForeignKeyField(
+        ArchiveSession, backref="volumes", null=True
+    )
+    volume_index = peewee.IntegerField(null=True)
 
     class Meta:  # type: ignore
         # Esto implementa la visión: "Si ya lo subí aquí, no lo subas de nuevo".
@@ -337,3 +361,29 @@ class RemotePayload(BaseModel):
     #         is_forward=True,
     #         json_metadata=json.loads(str(tg_message)),
     #     )
+
+
+class ArchiveEntry(BaseModel):
+    """
+    Representa la ubicación de un archivo específico dentro de una sesión.
+    Cumple con la Filosofía II: El acceso define la propiedad.
+    """
+
+    session = peewee.ForeignKeyField(
+        ArchiveSession, backref="entries", on_delete="CASCADE"
+    )
+    source_file = peewee.ForeignKeyField(SourceFile, backref="archive_locations")
+
+    relative_path = cast(str, peewee.CharField())
+
+    start_volume_index = cast(int, peewee.IntegerField())  # 0, 1, 2...
+    start_offset = cast(
+        int, peewee.BigIntegerField()
+    )  # Posición en bytes dentro del volumen
+    end_volume_index = cast(
+        int, peewee.IntegerField()
+    )  # Por si el archivo cruza volúmenes
+
+    class Meta:  # type: ignore
+        # Un archivo no puede estar dos veces en la misma ruta dentro de una sesión
+        indexes = ((("session", "relative_path"), True),)

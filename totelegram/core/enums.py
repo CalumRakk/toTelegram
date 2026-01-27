@@ -45,3 +45,9 @@ class DuplicatePolicy(str, enum.Enum):
 
     def __repr__(self):
         return self.value
+
+
+class ArchiveStatus(str, enum.Enum):
+    PENDING = "PENDING"
+    IN_PROGRESS = "IN_PROGRESS"
+    COMPLETED = "COMPLETED"
