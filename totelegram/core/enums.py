@@ -48,6 +48,6 @@ class DuplicatePolicy(str, enum.Enum):
 
 
 class ArchiveStatus(str, enum.Enum):
-    PENDING = "PENDING"
-    IN_PROGRESS = "IN_PROGRESS"
-    COMPLETED = "COMPLETED"
+    PENDING = "PENDING"  # Creada, escaneo inicial hecho
+    IN_PROGRESS = "IN_PROGRESS"  # Se han subido algunos volúmenes
+    COMPLETED = "COMPLETED"  # Todos los volúmenes y el manifiesto final están arriba

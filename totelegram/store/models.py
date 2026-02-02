@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from pyrogram.types import Chat as TgChat
     from pyrogram.types import Message
 
+from totelegram.core.enums import ArchiveStatus, JobStatus, Strategy
 from totelegram.core.schemas import StrategyConfig
 from totelegram.store.database import db_proxy
 from totelegram.store.fields import EnumField, PydanticJSONField
@@ -197,14 +198,12 @@ class ArchiveSession(BaseModel):
     """
 
     id = cast(uuid.UUID, peewee.UUIDField(primary_key=True, default=uuid.uuid4))
+
     root_path = cast(str, peewee.CharField())
     fingerprint = cast(str, peewee.CharField())
-
     total_files = cast(int, peewee.IntegerField(default=0))
     total_size = cast(int, peewee.BigIntegerField(default=0))
-
     status = cast(ArchiveStatus, EnumField(ArchiveStatus))
-
     app_version = cast(str, peewee.CharField())
 
 
@@ -366,7 +365,6 @@ class RemotePayload(BaseModel):
 class ArchiveEntry(BaseModel):
     """
     Representa la ubicación de un archivo específico dentro de una sesión.
-    Cumple con la Filosofía II: El acceso define la propiedad.
     """
 
     session = peewee.ForeignKeyField(
@@ -374,15 +372,12 @@ class ArchiveEntry(BaseModel):
     )
     source_file = peewee.ForeignKeyField(SourceFile, backref="archive_locations")
 
+    # Ruta relativa dentro del TAR (redundante con source_file.path_str, pero explícita para el TAR)
     relative_path = cast(str, peewee.CharField())
 
-    start_volume_index = cast(int, peewee.IntegerField())  # 0, 1, 2...
-    start_offset = cast(
-        int, peewee.BigIntegerField()
-    )  # Posición en bytes dentro del volumen
-    end_volume_index = cast(
-        int, peewee.IntegerField()
-    )  # Por si el archivo cruza volúmenes
+    start_volume_index = cast(int, peewee.IntegerField())
+    start_offset = cast(int, peewee.BigIntegerField())
+    end_volume_index = cast(int, peewee.IntegerField())
 
     class Meta:  # type: ignore
         # Un archivo no puede estar dos veces en la misma ruta dentro de una sesión
