@@ -206,6 +206,15 @@ class ArchiveSession(BaseModel):
     status = cast(ArchiveStatus, EnumField(ArchiveStatus))
     app_version = cast(str, peewee.CharField())
 
+    def set_root_path(self, path: Path | str):
+        self.root_path = str(path)
+        self.save(
+            only=[
+                ArchiveSession.root_path,
+                ArchiveSession.updated_at,
+            ]
+        )
+
 
 class Job(BaseModel):
     """Representa la intención de disponibilizar un SourceFile en un Chat específico."""

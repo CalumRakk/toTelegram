@@ -1,7 +1,9 @@
 import hashlib
 import json
 import logging
+import uuid
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import List, Optional, Tuple
 
 from tartape import TarTape
@@ -13,81 +15,98 @@ logger = logging.getLogger(__name__)
 
 
 class ArchiveDiscoveryService:
-    def __init__(self, root_path: Path, exclusion_patterns: Optional[List[str]] = None):
-        self.root_path = root_path
+    """
+    Responsable de identificar carpetas, gestionar su inventario (T0)
+    y validar su integridad para la reanudación.
+    """
+
+    def __init__(
+        self,
+        root_path: Path,
+        work_dir: Path,
+        exclusion_patterns: Optional[List[str]] = None,
+    ):
+        self.root_path = root_path.absolute()
+        self.work_dir = work_dir / "discovery"
         self.exclusion_patterns = exclusion_patterns or []
 
-    def run_initial_scan(self) -> Tuple[ArchiveSession, str]:
-        """
-        Realiza el inventario completo (T0) delegando en TarTape y genera el Fingerprint.
-        """
-        logger.info(f"Iniciando inventario T0 en: {self.root_path} usando TarTape")
-
-        # Usamos TarTape en memoria para obtener el fingerprint.
-        # No persistimos el DB: solo necesitamos una “foto”.
-        # Así garantizamos las mismas reglas que en la transmisión.
-        tape = TarTape(index_path=":memory:", anonymize=True)
-
         # TODO : Esto deberia sacarse de la config por defecto.
-        system_excludes = ["*.json.xz", "*.db", "*.db-wal", "*.db-shm"]
-        final_excludes = self.exclusion_patterns + system_excludes
+        self.system_excludes = [
+            "*.json.xz",
+            "*.db",
+            "*.db-wal",
+            "*.db-shm",
+            ".DS_Store",
+            "Thumbs.db",
+        ]
 
-        tape.add_folder(self.root_path, recursive=True, exclude=final_excludes)
-
-        fingerprint, total_files, total_size = self._compute_fingerprint_from_tape(tape)
-
-        logger.info(
-            f"Escaneo T0 completado. Archivos: {total_files}, Size: {total_size}, FP: {fingerprint[:10]}..."
-        )
-
-        session = ArchiveSession.create(
-            root_path=str(self.root_path),
-            fingerprint=fingerprint,
-            total_files=total_files,
-            total_size=total_size,
-            status=ArchiveStatus.PENDING,
-            app_version=__version__,
-        )
-
-        return session, fingerprint
-
-    def verify_fingerprint(self, session: ArchiveSession) -> bool:
+    def discover_or_create_session(self) -> Tuple[ArchiveSession, bool]:
         """
-        Verifica si la carpeta actual coincide con el Fingerprint guardado.
-        Re-escanea usando TarTape y compara hashes.
+        Punto de entrada principal.
+        - Escanea la carpeta para obtener la firma actual.
+        - Busca si ya existe una sesión con esa firma en la DB.
+        - Si existe, la devuelve (Resume). Si no, crea una nueva.
+
+        Returns: (Sesion, es_reanudacion)
         """
-        logger.info("Verificando integridad estructural...")
 
-        tape = TarTape(index_path=":memory:", anonymize=True)
-        system_excludes = ["*.json.xz", "*.db", "*.db-wal", "*.db-shm"]
-        # TODO: Asegurar que exclusion_patterns venga de la configuración guardada si es necesario
-        final_excludes = self.exclusion_patterns + system_excludes
+        with TemporaryDirectory() as tmpdirname:
+            temp_db_path = Path(tmpdirname) / "inventory.db"
 
-        tape.add_folder(self.root_path, recursive=True, exclude=final_excludes)
+            fingerprint, count, total_size = self._create_inventory(temp_db_path)
 
-        current_fingerprint, _, _ = self._compute_fingerprint_from_tape(tape)
-
-        is_valid = current_fingerprint == session.fingerprint
-        if not is_valid:
-            logger.warning(
-                f"Fingerprint Mismatch! Guardado: {session.fingerprint[:8]} vs Actual: {current_fingerprint[:8]}"
+            existing_session: Optional[ArchiveSession] = ArchiveSession.get_or_none(
+                ArchiveSession.fingerprint == fingerprint,
+                ArchiveSession.status != ArchiveStatus.COMPLETED,
             )
 
-        return is_valid
+            if existing_session:
+                logger.info(
+                    f"Carpeta identificada por firma: {fingerprint[:10]}... (Reanudando)"
+                )
 
-    def _compute_fingerprint_from_tape(self, tape: TarTape) -> Tuple[str, int, int]:
+                if existing_session.root_path != str(self.root_path):
+                    logger.info(
+                        f"Detectado cambio de ruta: {existing_session.root_path} -> {self.root_path}"
+                    )
+                    existing_session.set_root_path(self.root_path)
+                return existing_session, True
+
+            session_id = uuid.uuid4()
+            final_db_path = self.work_dir / f"inventory_{session_id.hex}.db"
+            final_db_path.parent.mkdir(parents=True, exist_ok=True)
+            temp_db_path.rename(final_db_path)
+
+            new_session = ArchiveSession.create(
+                id=session_id,
+                root_path=str(self.root_path),
+                fingerprint=fingerprint,
+                tartape_db_path=str(final_db_path),
+                total_files=count,
+                total_size=total_size,
+                status=ArchiveStatus.PENDING,
+                app_version=__version__,
+            )
+
+            return new_session, False
+
+    def _create_inventory(self, db_path: Path) -> Tuple[str, int, int]:
         """
-        Extrae la esencia estructural del inventario de TarTape.
-        Retorna (SHA256, count, total_size)
+        Ejecuta tartape para indexar la carpeta y genera el fingerprint.
         """
+        tape = TarTape(index_path=str(db_path), anonymize=True)
+
+        final_excludes = self.exclusion_patterns + self.system_excludes
+
+        tape.add_folder(self.root_path, recursive=True, exclude=final_excludes)
+
         struct_data = []
         total_size = 0
         count = 0
 
-        # get_entries() ya retorna ordenado (Determinismo estructural garantizado por tartape)
         for entry in tape._inventory.get_entries():
             item_summary = {
-                "p": entry.arc_path,  # Path relativo dentro del TAR
+                "p": entry.arc_path,
                 "s": entry.size,
                 "m": entry.mtime,
             }
@@ -99,3 +118,19 @@ class ArchiveDiscoveryService:
         fingerprint = hashlib.sha256(struct_json.encode()).hexdigest()
 
         return fingerprint, count, total_size
+
+    def verify_integrity(self, session: ArchiveSession) -> bool:
+        """
+        Verificación de seguridad antes de cada subida.
+        Compara la firma actual del disco con la de la sesión.
+        """
+        with TemporaryDirectory() as tmpdirname:
+            temp_db = Path(tmpdirname) / "integrity_check.db"
+
+            current_fp, _, _ = self._create_inventory(temp_db)
+            is_ok = current_fp == session.fingerprint
+            if not is_ok:
+                logger.error(
+                    "La estructura de la carpeta ha cambiado. La cinta de datos es invalida."
+                )
+            return is_ok
