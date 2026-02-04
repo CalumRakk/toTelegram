@@ -1,10 +1,10 @@
 import logging
+import math
 from pathlib import Path
 from typing import List, Tuple, Union
 
-from totelegram.core.enums import Strategy
+from totelegram.core.enums import SourceType, Strategy
 from totelegram.store.models import Job, Payload
-from totelegram.utils import create_md5sum_by_hashlib
 
 logger = logging.getLogger(__name__)
 
@@ -132,6 +132,53 @@ class ChunkingService:
         self.work_dir = work_dir
 
     def process_job(self, job: Job) -> List[Payload]:
+        """Decide la segmentación basándose en el tipo de recurso."""
+
+        if job.payloads.count() > 0:
+            logger.debug(f"El Job {job.id} ya tiene payloads. Saltando segmentación.")
+            return list(job.payloads.order_by(Payload.sequence_index))
+
+        if job.source.type == SourceType.FOLDER:
+            return self._plan_virtual_volumes(job)
+        else:
+            return self._process_physical_file(job)
+
+    def _plan_virtual_volumes(self, job: Job) -> List[Payload]:
+        """
+        Crea 'Promesas de Volumen' en la DB usando identificadores virtuales.
+        """
+        total_size = job.source.size
+        limit = job.config.tg_max_size
+        num_volumes = math.ceil(total_size / limit)
+
+        logger.info(
+            f"Planificando {num_volumes} volúmenes virtuales para carpeta: {job.source.path_str}"
+        )
+
+        payloads = []
+        for i in range(num_volumes):
+            start_offset = i * limit
+            current_size = min(limit, total_size - start_offset)
+
+            # Identificador virtual para que el Uploader sepa qué hacer
+            virtual_path = f"virtual://{job.id}/vol_{i}"
+
+            # MD5 Temporal (Placeholder determinista)
+            # Se actualizará con el valor real al finalizar la subida del volumen
+            pending_md5 = f"PENDING:{job.source.md5sum}:{i}"
+
+            payload = Payload.create(
+                job=job,
+                sequence_index=i,
+                temp_path=virtual_path,
+                md5sum=pending_md5,
+                size=current_size,
+            )
+            payloads.append(payload)
+
+        return payloads
+
+    def _process_physical_file(self, job: Job) -> List[Payload]:
         """
         Procesa un Job y devuelve una lista de Payloads listos para ser subidos.
 
@@ -156,34 +203,31 @@ class ChunkingService:
         elif job.strategy == Strategy.CHUNKED:
             logger.info(f"Job {job.id}: Estrategia CHUNKED. Iniciando división...")
 
-            chunks_folder = self.work_dir / "chunks"
-
+            chunks_folder = self.work_dir / "chunks" / job.source.md5sum
             chunks_paths = FileChunker.split_file(
                 file_path=job.path,
                 chunk_size=job.config.tg_max_size,
                 output_folder=chunks_folder,
             )
+            return Payload.create_payloads(job, chunks_paths)
 
-            payloads = Payload.create_payloads(job, chunks_paths)
-            return payloads
+        raise Exception("Estrategia de Job desconocida.")
 
-        return []
+    # def split_file_for_missing_payload(self, job: Job, payload: Payload):
+    #     """Re-genera los fragmentos del archivo original."""
+    #     chunks_folder = self.work_dir / "chunks"
 
-    def split_file_for_missing_payload(self, job: Job, payload: Payload):
-        """Re-genera los fragmentos del archivo original."""
-        chunks_folder = self.work_dir / "chunks"
+    #     FileChunker.split_file(
+    #         file_path=job.path,
+    #         chunk_size=job.config.tg_max_size,
+    #         output_folder=chunks_folder,
+    #     )
 
-        FileChunker.split_file(
-            file_path=job.path,
-            chunk_size=job.config.tg_max_size,
-            output_folder=chunks_folder,
-        )
+    #     if not payload.path.exists():
+    #         raise Exception("No se pudo reconstruir la pieza faltante.")
 
-        if not payload.path.exists():
-            raise Exception("No se pudo reconstruir la pieza faltante.")
-
-        new_md5 = create_md5sum_by_hashlib(payload.path)
-        if new_md5 != payload.md5sum:
-            raise Exception(
-                "Error de integridad: La pieza re-generada no coincide con el registro original."
-            )
+    #     new_md5 = create_md5sum_by_hashlib(payload.path)
+    #     if new_md5 != payload.md5sum:
+    #         raise Exception(
+    #             "Error de integridad: La pieza re-generada no coincide con el registro original."
+    #         )

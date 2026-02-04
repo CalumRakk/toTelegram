@@ -60,3 +60,12 @@ class ProfileRegistry(BaseModel):
 
     active: Optional[str] = None
     profiles: Dict[str, str] = Field(default_factory=dict)
+
+
+class Inventory(BaseModel):
+    fingerprint: str
+    total_size: int
+    total_files: int
+    scan_date: float
+    scan_version: str
+    # db_path: str

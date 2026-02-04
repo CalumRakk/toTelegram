@@ -1,6 +1,5 @@
 import json
 import logging
-import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Generator, Optional, Tuple, cast
@@ -9,15 +8,14 @@ import peewee
 from playhouse.sqlite_ext import JSONField
 
 from totelegram import __version__
-from totelegram.core.enums import ArchiveStatus, JobStatus, Strategy
+from totelegram.core.enums import JobStatus, SourceType, Strategy
 
 if TYPE_CHECKING:
     from totelegram.core.setting import Settings
     from pyrogram.types import Chat as TgChat
     from pyrogram.types import Message
 
-from totelegram.core.enums import ArchiveStatus, JobStatus, Strategy
-from totelegram.core.schemas import StrategyConfig
+from totelegram.core.schemas import Inventory, StrategyConfig
 from totelegram.store.database import db_proxy
 from totelegram.store.fields import EnumField, PydanticJSONField
 from totelegram.utils import create_md5sum_by_hashlib, get_mimetype
@@ -117,20 +115,30 @@ class TelegramUser(BaseModel):
 
 
 class SourceFile(BaseModel):
-    """Representa la existencia física de un archivo en el disco local."""
+    """Representa la identidad única de un recurso (Archivo o Carpeta)."""
 
     path_str = cast(str, peewee.CharField())
-    md5sum = cast(str, peewee.CharField(unique=True))  # El ancla de todo el sistema
-    size = cast(int, peewee.IntegerField())
-    # mtime : Unix timestamp. Es util para la identificar archivo en el disco con
+    md5sum = cast(str, peewee.CharField(unique=True))  # MD5 o Fingerprint
+    size = cast(int, peewee.BigIntegerField())
+    # mtime : Unix timestamp. Es util para la identificar archivo
     mtime = cast(float, peewee.FloatField())
     mimetype = cast(str, peewee.CharField())
+    type = cast(SourceType, EnumField(SourceType, default=SourceType.FILE))
+    inventory = cast(Optional[Inventory], PydanticJSONField(Inventory, null=True))
 
     @property
     def path(self) -> Path:
         return Path(self.path_str)
 
+    @property
+    def is_folder(self) -> bool:
+        return self.type == SourceType.FOLDER
+
     def update_if_needed(self, path: Path) -> bool:
+        if self.is_folder:
+            # TODO implementar para carpeta.
+            return False
+
         stat = path.stat()
         current_size = stat.st_size
         current_mtime = stat.st_mtime
@@ -159,61 +167,56 @@ class SourceFile(BaseModel):
         return changed
 
     @staticmethod
-    def get_or_create_from_path(path: Path) -> "SourceFile":
-        stat = path.stat()
-        current_size = stat.st_size
-        current_mtime = stat.st_mtime
-        path_str = str(path)
+    def get_or_create_from_path(path: Path, work_dir: Path) -> "SourceFile":
+        from totelegram.services.discovery_archive import ArchiveDiscoveryService
 
-        # Intento rápido por ruta y metadatos
-        cached = SourceFile.get_or_none(
-            (SourceFile.path_str == path_str)
-            & (SourceFile.size == current_size)
-            & (SourceFile.mtime == current_mtime)
-        )
-        if cached:
-            return cached
+        path = path.absolute()
 
-        # Si falló el rápido, calculamos MD5
-        md5sum = create_md5sum_by_hashlib(path)
-        source, created = SourceFile.get_or_create(
-            md5sum=md5sum,
-            defaults={
-                "path_str": path_str,
-                "size": current_size,
-                "mtime": current_mtime,
-                "mimetype": get_mimetype(path),
-            },
-        )
-        if not created:
-            source.update_if_needed(path)
+        if path.is_dir():
+            discovery = ArchiveDiscoveryService(path, work_dir=work_dir)
+            inventory = discovery._create_inventory(path)
 
-        return source
+            source, created = SourceFile.get_or_create(
+                md5sum=inventory.fingerprint,
+                defaults={
+                    "type": SourceType.FOLDER,
+                    "path_str": str(path),
+                    "size": inventory.total_size,
+                    "mtime": path.stat().st_mtime,
+                    "mimetype": "application/x-directory",
+                },
+            )
+            return source
+        else:
+            stat = path.stat()
+            current_size = stat.st_size
+            current_mtime = stat.st_mtime
+            path_str = str(path)
 
+            # Intento rápido por ruta y metadatos
+            cached = SourceFile.get_or_none(
+                (SourceFile.path_str == path_str)
+                & (SourceFile.size == current_size)
+                & (SourceFile.mtime == current_mtime)
+            )
+            if cached:
+                return cached
 
-class ArchiveSession(BaseModel):
-    """
-    Representa una sesión de archivado
-    Es la entidad que agrupa varios volúmenes físicos (Jobs).
-    """
+            # Si falló el rápido, calculamos MD5
+            md5sum = create_md5sum_by_hashlib(path)
+            source, created = SourceFile.get_or_create(
+                md5sum=md5sum,
+                defaults={
+                    "path_str": path_str,
+                    "size": current_size,
+                    "mtime": current_mtime,
+                    "mimetype": get_mimetype(path),
+                },
+            )
+            if not created:
+                source.update_if_needed(path)
 
-    id = cast(uuid.UUID, peewee.UUIDField(primary_key=True, default=uuid.uuid4))
-
-    root_path = cast(str, peewee.CharField())
-    fingerprint = cast(str, peewee.CharField())
-    total_files = cast(int, peewee.IntegerField(default=0))
-    total_size = cast(int, peewee.BigIntegerField(default=0))
-    status = cast(ArchiveStatus, EnumField(ArchiveStatus))
-    app_version = cast(str, peewee.CharField())
-
-    def set_root_path(self, path: Path | str):
-        self.root_path = str(path)
-        self.save(
-            only=[
-                ArchiveSession.root_path,
-                ArchiveSession.updated_at,
-            ]
-        )
+            return source
 
 
 class Job(BaseModel):
@@ -229,9 +232,6 @@ class Job(BaseModel):
     config = cast(StrategyConfig, PydanticJSONField(StrategyConfig))
     status = cast(JobStatus, EnumField(JobStatus))
 
-    archive_session = peewee.ForeignKeyField(
-        ArchiveSession, backref="volumes", null=True
-    )
     volume_index = peewee.IntegerField(null=True)
 
     class Meta:  # type: ignore
@@ -372,22 +372,13 @@ class RemotePayload(BaseModel):
 
 
 class ArchiveEntry(BaseModel):
-    """
-    Representa la ubicación de un archivo específico dentro de una sesión.
-    """
+    """El GPS de los archivos dentro de la cinta TAR."""
 
-    session = peewee.ForeignKeyField(
-        ArchiveSession, backref="entries", on_delete="CASCADE"
-    )
-    source_file = peewee.ForeignKeyField(SourceFile, backref="archive_locations")
-
-    # Ruta relativa dentro del TAR (redundante con source_file.path_str, pero explícita para el TAR)
+    source = peewee.ForeignKeyField(SourceFile, backref="entries")
     relative_path = cast(str, peewee.CharField())
 
-    start_volume_index = cast(int, peewee.IntegerField())
     start_offset = cast(int, peewee.BigIntegerField())
-    end_volume_index = cast(int, peewee.IntegerField())
+    end_offset = cast(int, peewee.BigIntegerField())
 
-    class Meta:  # type: ignore
-        # Un archivo no puede estar dos veces en la misma ruta dentro de una sesión
-        indexes = ((("session", "relative_path"), True),)
+    start_volume_index = cast(int, peewee.IntegerField())
+    end_volume_index = cast(int, peewee.IntegerField())

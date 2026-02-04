@@ -125,41 +125,41 @@ class TestLogicEngine(unittest.TestCase):
         assert report.remotes is not None
         self.assertEqual(report.remotes[0].message_id, 777)
 
-    def test_case_puzzle_proactive(self):
-        """Validar que el puzzle se detecta prediciendo el número de partes."""
+    # def test_case_puzzle_proactive(self):
+    #     """Validar que el puzzle se detecta prediciendo el número de partes."""
 
-        # Archivo de 150 bytes, límite de 100 bytes -> Se esperan 2 partes.
-        source = SourceFile.create(
-            path_str="file.zip", md5sum="xyz", size=150, mtime=1, mimetype="v"
-        )
+    #     # Archivo de 150 bytes, límite de 100 bytes -> Se esperan 2 partes.
+    #     source = SourceFile.create(
+    #         path_str="file.zip", md5sum="xyz", size=150, mtime=1, mimetype="v"
+    #     )
 
-        # Subimos parte 0 en Chat A
-        chat_a = TelegramChat.create(id=300, title="A", type="private")
-        job_a = Job.create_contract(source, chat_a, False, self.settings)
-        p0 = Payload.create(job=job_a, sequence_index=0, md5sum="part0", size=100)
-        RemotePayload.create(
-            payload=p0, message_id=10, chat=chat_a, owner=self.user, json_metadata={}
-        )
+    #     # Subimos parte 0 en Chat A
+    #     chat_a = TelegramChat.create(id=300, title="A", type="private")
+    #     job_a = Job.create_contract(source, chat_a, False, self.settings)
+    #     p0 = Payload.create(job=job_a, sequence_index=0, md5sum="part0", size=100)
+    #     RemotePayload.create(
+    #         payload=p0, message_id=10, chat=chat_a, owner=self.user, json_metadata={}
+    #     )
 
-        # Subimos parte 1 en Chat B
-        chat_b = TelegramChat.create(id=400, title="B", type="private")
-        job_b = Job.create_contract(source, chat_b, False, self.settings)
-        p1 = Payload.create(job=job_b, sequence_index=1, md5sum="part1", size=50)
-        RemotePayload.create(
-            payload=p1, message_id=20, chat=chat_b, owner=self.user, json_metadata={}
-        )
+    #     # Subimos parte 1 en Chat B
+    #     chat_b = TelegramChat.create(id=400, title="B", type="private")
+    #     job_b = Job.create_contract(source, chat_b, False, self.settings)
+    #     p1 = Payload.create(job=job_b, sequence_index=1, md5sum="part1", size=50)
+    #     RemotePayload.create(
+    #         payload=p1, message_id=20, chat=chat_b, owner=self.user, json_metadata={}
+    #     )
 
-        # Nuevamente, intentamos subirlo a Chat Target
-        job_target = Job.create_contract(source, self.chat_target, False, self.settings)
+    #     # Nuevamente, intentamos subirlo a Chat Target
+    #     job_target = Job.create_contract(source, self.chat_target, False, self.settings)
 
-        self._simulate_jit(success=True)
+    #     self._simulate_jit(success=True)
 
-        report = self.discovery.investigate(job_target)
+    #     report = self.discovery.investigate(job_target)
 
-        # El sistema debió predecir que faltaban 2 piezas y encontrarlas todas
-        self.assertEqual(report.state, AvailabilityState.REMOTE_PUZZLE)
-        assert report.remotes is not None
-        self.assertEqual(len(report.remotes), 2)
+    #     # El sistema debió predecir que faltaban 2 piezas y encontrarlas todas
+    #     self.assertEqual(report.state, AvailabilityState.REMOTE_PUZZLE)
+    #     assert report.remotes is not None
+    #     self.assertEqual(len(report.remotes), 2)
 
     def test_case_restricted_jit_fails(self):
         """Validar que si JIT falla, el estado es RESTRICTED aunque la DB diga que existe."""

@@ -47,7 +47,6 @@ class DuplicatePolicy(str, enum.Enum):
         return self.value
 
 
-class ArchiveStatus(str, enum.Enum):
-    PENDING = "PENDING"  # Creada, escaneo inicial hecho
-    IN_PROGRESS = "IN_PROGRESS"  # Se han subido algunos volúmenes
-    COMPLETED = "COMPLETED"  # Todos los volúmenes y el manifiesto final están arriba
+class SourceType(str, enum.Enum):
+    FILE = "file"
+    FOLDER = "folder"
