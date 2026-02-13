@@ -3,7 +3,9 @@ from collections import defaultdict
 from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, cast
 
+from tartape import TarTape
 from totelegram.console import UI
+from totelegram.services.tar_stream import TarVolumeStream
 from totelegram.store.database import db_proxy
 from totelegram.utils import batched
 
@@ -18,7 +20,13 @@ from totelegram.core.enums import (
 )
 from totelegram.services.chunking import ChunkingService
 from totelegram.services.discovery import DiscoveryService
-from totelegram.store.models import Job, Payload, RemotePayload, TelegramUser
+from totelegram.store.models import (
+    ArchiveEntry,
+    Job,
+    Payload,
+    RemotePayload,
+    TelegramUser,
+)
 from totelegram.streams import open_upload_source
 
 logger = logging.getLogger(__name__)
@@ -67,6 +75,144 @@ class UploadService:
         me = cast("User", client.get_me())
         self.current_user = TelegramUser.get_or_create_from_tg(me)
 
+    def execute_upload_strategy(self, job: Job):
+        """
+        Despachador Principal: Decide si sube archivos físicos o volúmenes virtuales.
+        """
+        if job.payloads.count() == 0:
+            payloads = self.chunker.process_job(job)
+        else:
+            payloads = list(job.payloads.order_by(Payload.sequence_index))
+
+        count = len(payloads)
+        label = "volúmenes virtuales" if job.source.is_folder else "fragmentos"
+
+        if job.strategy == Strategy.SINGLE:
+            UI.info(f"Subiendo archivo único...")
+        else:
+            UI.info(f"Iniciando subida de {count} {label}...")
+
+        for idx, payload in enumerate(payloads):
+            if RemotePayload.select().where(RemotePayload.payload == payload).exists():
+                logger.debug(f"Parte {idx} ya subida. Saltando.")
+                continue
+
+            if payload.temp_path and payload.temp_path.startswith("virtual://"):
+                self._upload_virtual_payload(job, payload, idx, count)
+            else:
+                self._upload_physical_payload(job, payload, idx, count)
+
+        job.set_uploaded()
+        UI.success("Subida completa.")
+
+    def _upload_physical_payload(
+        self, job: Job, payload: Payload, index: int, total: int
+    ):
+        """
+        Lógica clásica para archivos que existen en disco.
+        """
+        path = Path(payload.temp_path)
+        if not path.exists():
+            if job.strategy == Strategy.CHUNKED:
+                console.print(f"[yellow]Reconstruyendo pieza {index}...[/yellow]")
+                self.chunker.split_file_for_missing_payload(job, payload)
+            else:
+                raise FileNotFoundError(f"Archivo origen perdido: {path}")
+
+        filename, caption = self._build_tg_metadata(payload)
+        is_chunk = job.strategy == Strategy.CHUNKED
+
+        with open_upload_source(path, self.limit_rate_kbps) as doc_stream:
+            progress = UploadProgress(filename, is_chunk=is_chunk, part_index=index)
+
+            tg_message = self.client.send_document(
+                chat_id=job.chat.id,
+                document=doc_stream,
+                file_name=filename,
+                caption=caption or "",
+                progress=progress,
+            )
+
+            RemotePayload.register_upload(
+                payload=payload, tg_message=tg_message, owner=self.current_user
+            )
+
+            if is_chunk:
+                self._cleanup_temp_payload(path)
+
+    def _upload_virtual_payload(
+        self, job: Job, payload: Payload, index: int, total: int
+    ):
+        """
+        Maneja la subida de carpetas usando TarVolumeStream.
+        """
+        if not job.source.inventory:
+            raise ValueError(
+                "El Job es de tipo carpeta pero no tiene inventario asociado."
+            )
+        # Se ocupa la DB del inventario
+        # TODO: buscar una solucion para mejorar la necesita de la ruta de db tartape
+        tape = TarTape(index_path=str(job.source.inventory.db_path))
+
+        start_offset = payload.sequence_index * job.config.tg_max_size
+
+        generator = tape.stream()
+        stream = TarVolumeStream(
+            generator=generator,
+            start_offset=start_offset,
+            length=payload.size,
+            vol_index=payload.sequence_index,
+        )
+
+        folder_name = Path(job.source.path_str).name
+        filename = f"{folder_name}.tar.{str(index + 1).zfill(3)}"
+        caption = f"Volumen {index + 1}/{total} de {folder_name}"
+
+        progress = UploadProgress(filename, is_chunk=True, part_index=index)
+
+        try:
+            tg_message = self.client.send_document(
+                chat_id=job.chat.id,
+                document=stream,  # type: ignore
+                file_name=filename,
+                caption=caption,
+                progress=progress,
+            )
+
+            real_md5, entries = stream.get_results()
+
+            with db_proxy.atomic():
+                payload.md5sum = real_md5
+                payload.save()
+
+                RemotePayload.register_upload(
+                    payload=payload, tg_message=tg_message, owner=self.current_user
+                )
+
+                entries_to_create = []
+                for entry in entries:
+                    entries_to_create.append(
+                        {
+                            "source": job.source,
+                            "relative_path": entry["path"],
+                            "start_offset": entry["start_offset"],
+                            "end_offset": entry["end_offset"],
+                            "start_volume_index": entry["start_vol"],
+                            "end_volume_index": entry["end_vol"],
+                        }
+                    )
+
+                if entries_to_create:
+                    ArchiveEntry.insert_many(entries_to_create).execute()
+
+            logger.debug(f"Volumen virtual {index} subido y commiteado.")
+
+        except Exception as e:
+            logger.error(f"Fallo subiendo volumen virtual {index}: {e}")
+            raise e
+        finally:
+            stream.close()
+
     def execute_smart_forward(self, job: Job, source_remotes: List[RemotePayload]):
         """
         Reenvia de forma atomica los RemotePayloads específicados al chat de destino que contiene el job.
@@ -81,7 +227,7 @@ class UploadService:
         La tarea de esta funcion es recolectar piezas dispersas y reenviarlas al chat destino de forma atomica.
         """
         if job.payloads.count() < 1:
-            # Si no hay payloads, es la primera vez que estrucutramos este job para forward
+            # Si no hay payloads, es la primera vez que encontramos este job para forward
             # Debemos crearlos para tener el mapeo MD5 -> secuencia en este chain
             self.chunker.process_job(job)
 

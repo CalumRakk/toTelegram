@@ -68,4 +68,4 @@ class Inventory(BaseModel):
     total_files: int
     scan_date: float
     scan_version: str
-    # db_path: str
+    db_path: str

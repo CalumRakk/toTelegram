@@ -35,3 +35,7 @@ validate2.py
 script.py
 NOTES.md
 plan-comando.md
+tartape/
+.contextignore
+requirements.txt
+setup.py

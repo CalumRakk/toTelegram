@@ -34,6 +34,7 @@ class DatabaseSession:
         self.db.connect()
 
         from totelegram.store.models import (
+            ArchiveEntry,
             Job,
             Payload,
             RemotePayload,
@@ -43,7 +44,15 @@ class DatabaseSession:
         )
 
         db_proxy.create_tables(
-            [SourceFile, Job, Payload, RemotePayload, TelegramChat, TelegramUser],
+            [
+                SourceFile,
+                Job,
+                Payload,
+                RemotePayload,
+                TelegramChat,
+                TelegramUser,
+                ArchiveEntry,
+            ],
             safe=True,
         )
         return self.db

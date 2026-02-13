@@ -1,7 +1,6 @@
 import hashlib
 import json
 import logging
-import uuid
 from datetime import datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -9,6 +8,7 @@ from typing import List, Optional, Tuple
 
 from tartape import TarTape
 from totelegram import __version__
+from totelegram.core.enums import SourceType
 from totelegram.core.schemas import Inventory
 from totelegram.store.models import SourceFile
 
@@ -41,55 +41,52 @@ class ArchiveDiscoveryService:
             "Thumbs.db",
         ]
 
-    def discover_or_create_session(self) -> Tuple[SourceFile, bool]:
+    def discover_or_create_session(self) -> Tuple[SourceFile, bool, bool]:
         """
         Punto de entrada principal.
         - Escanea la carpeta para obtener la firma actual.
         - Busca si ya existe una sesión con esa firma en la DB.
         - Si existe, la devuelve (Resume). Si no, crea una nueva.
 
-        Returns: (Sesion, es_reanudacion)
+        Returns: (Sesion, es_reanudacion, is_ok)
         """
 
         with TemporaryDirectory() as tmpdirname:
-            temp_db_path = Path(tmpdirname) / "inventory.db"
 
-            fingerprint, count, total_size = self._create_inventory(temp_db_path)
-
-            existing_source: Optional[SourceFile] = SourceFile.get_or_none(
-                SourceFile.md5sum == fingerprint
+            existing_source = SourceFile.get_or_none(
+                (SourceFile.path_str == str(self.root_path))
             )
-
             if existing_source:
-                logger.info(
-                    f"Carpeta identificada por firma: {fingerprint[:10]}... (Reanudando)"
-                )
+                if not self.verify_integrity(existing_source):
+                    # Tomar decision que hacer aqui.
+                    raise ValueError(
+                        "La carpeta ha cambiado desde la última sesión. No se puede reanudar."
+                    )
+                return existing_source, True, True
 
-                # TODO:Aqui deberia haber una comprobacion si existe la db en la ruta determinista
-                return existing_source, True
+            temp_db_path = Path(tmpdirname) / "inventory.db"
+            inventory = self._create_inventory(temp_db_path)
 
-            session_id = uuid.uuid4()
-            final_db_path = self.work_dir / f"{fingerprint}.db"
+            final_db_path = self.work_dir / f"{inventory.fingerprint}.db"
             final_db_path.parent.mkdir(parents=True, exist_ok=True)
             temp_db_path.rename(final_db_path)
-
-            new_session = SourceFile.create(
-                id=session_id,
+            inventory.db_path = str(final_db_path)
+            source = SourceFile.create(
                 path_str=str(self.root_path),
-                fingerprint=fingerprint,
-                tartape_db_path=str(final_db_path),
-                total_files=count,
-                total_size=total_size,
+                md5sum=inventory.fingerprint,
+                size=inventory.total_files,
                 app_version=__version__,
+                mtime=inventory.scan_date,
+                mimetype="application/x-tar",
+                inventory=inventory,
+                type=SourceType.FOLDER,
             )
 
-            return new_session, False
+            return source, False, True
 
     def _create_inventory(self, db_path: Path) -> Inventory:
         """
         Ejecuta tartape para indexar la carpeta y genera el fingerprint.
-
-        Returns: (fingerprint, count, total_size)
         """
         tape = TarTape(index_path=str(db_path), anonymize=True)
 
@@ -120,9 +117,10 @@ class ArchiveDiscoveryService:
             total_files=count,
             scan_version=__version__,
             scan_date=scan_date,
+            db_path=str(db_path),
         )
 
-    def verify_integrity(self, session: SourceFile) -> bool:
+    def verify_integrity(self, source: SourceFile) -> bool:
         """
         Verificación de seguridad antes de cada subida.
         Compara la firma actual del disco con la de la sesión.
@@ -130,8 +128,8 @@ class ArchiveDiscoveryService:
         with TemporaryDirectory() as tmpdirname:
             temp_db = Path(tmpdirname) / "integrity_check.db"
 
-            current_fp, _, _ = self._create_inventory(temp_db)
-            is_ok = current_fp == session.md5sum
+            inventory = self._create_inventory(temp_db)
+            is_ok = inventory.fingerprint == source.md5sum
             if not is_ok:
                 logger.error(
                     "La estructura de la carpeta ha cambiado. La cinta de datos es invalida."

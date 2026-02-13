@@ -173,6 +173,7 @@ class SourceFile(BaseModel):
         path = path.absolute()
 
         if path.is_dir():
+            # TODO: Hay que diferenciar si es una carpeta nueva o ya existente.
             discovery = ArchiveDiscoveryService(path, work_dir=work_dir)
             inventory = discovery._create_inventory(path)
 
@@ -289,10 +290,10 @@ class Payload(BaseModel):
     payloads: Generator["Payload", None, None]
 
     job = cast(Job, peewee.ForeignKeyField(Job, backref="payloads"))
-    sequence_index = peewee.IntegerField()
+    sequence_index = cast(int, peewee.IntegerField())
     temp_path = cast(str, peewee.CharField(null=True))
-    md5sum = peewee.CharField()  # MD5 del trozo específico
-    size = peewee.IntegerField()
+    md5sum = cast(str, peewee.CharField())  # MD5 del trozo específico
+    size = cast(int, peewee.IntegerField())
 
     @property
     def path(self) -> Path:

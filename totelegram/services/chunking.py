@@ -5,6 +5,7 @@ from typing import List, Tuple, Union
 
 from totelegram.core.enums import SourceType, Strategy
 from totelegram.store.models import Job, Payload
+from totelegram.utils import create_md5sum_by_hashlib
 
 logger = logging.getLogger(__name__)
 
@@ -213,21 +214,21 @@ class ChunkingService:
 
         raise Exception("Estrategia de Job desconocida.")
 
-    # def split_file_for_missing_payload(self, job: Job, payload: Payload):
-    #     """Re-genera los fragmentos del archivo original."""
-    #     chunks_folder = self.work_dir / "chunks"
+    def split_file_for_missing_payload(self, job: Job, payload: Payload):
+        """Re-genera los fragmentos del archivo original."""
+        chunks_folder = self.work_dir / "chunks"
 
-    #     FileChunker.split_file(
-    #         file_path=job.path,
-    #         chunk_size=job.config.tg_max_size,
-    #         output_folder=chunks_folder,
-    #     )
+        FileChunker.split_file(
+            file_path=job.path,
+            chunk_size=job.config.tg_max_size,
+            output_folder=chunks_folder,
+        )
 
-    #     if not payload.path.exists():
-    #         raise Exception("No se pudo reconstruir la pieza faltante.")
+        if not payload.path.exists():
+            raise Exception("No se pudo reconstruir la pieza faltante.")
 
-    #     new_md5 = create_md5sum_by_hashlib(payload.path)
-    #     if new_md5 != payload.md5sum:
-    #         raise Exception(
-    #             "Error de integridad: La pieza re-generada no coincide con el registro original."
-    #         )
+        new_md5 = create_md5sum_by_hashlib(payload.path)
+        if new_md5 != payload.md5sum:
+            raise Exception(
+                "Error de integridad: La pieza re-generada no coincide con el registro original."
+            )
