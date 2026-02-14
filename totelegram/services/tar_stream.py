@@ -5,11 +5,13 @@ from typing import List
 
 from tartape import TarTape
 from tartape.enums import TarEventType
+from tartape.schemas import TarEvent
 
 logger = logging.getLogger(__name__)
 
 
 class TapeInspector:
+    # TODO: mover esta logica a tartape
     @staticmethod
     def get_total_size(tape: TarTape) -> int:
         """Calcula el tamaño final del TAR basándose en el inventario."""
@@ -22,63 +24,102 @@ class TapeInspector:
         return total + 1024  # Footer
 
 
-class TapeWindow:
+class TapeRecorder:
+    """
+    La grabadora de Cinta.
+    Su trabajo es observar la Cinta Maestra y presionar REC/STOP en los
+    momentos precisos para capturar un segmento exacto.
+    """
+
     def __init__(self, start: int, end: int):
         self.start = start
         self.end = end
-        self.cursor = 0  # Posición absoluta respecto al inicio de la cinta
+        self.cursor = 0  # El contador de la cinta (minutero de bytes)
 
-    def process_chunk(self, data: bytes) -> bytes:
-        """Toma un bloque de la cinta y devuelve solo lo que pertenece a la ventana."""
-        chunk_len = len(data)
-        current_offset = self.cursor
+    def capture(self, master_data: bytes) -> bytes:
+        """
+        Observa un bloque de la Cinta Maestra y recorta la porción
+        que pertenece al volumen actual.
+        """
+        chunk_len = len(master_data)
+        chunk_start = self.cursor
         self.cursor += chunk_len
 
-        # ¿Hay solapamiento?
-        overlap_start = max(current_offset, self.start)
-        overlap_end = min(current_offset + chunk_len, self.end)
+        # ¿El bloque actual toca nuestra ventana de grabación?
+        overlap_start = max(chunk_start, self.start)
+        overlap_end = min(chunk_start + chunk_len, self.end)
 
         if overlap_start < overlap_end:
-            return data[overlap_start - current_offset : overlap_end - current_offset]
-        return b""
+            # Calculamos el recorte (slice) relativo al bloque actual
+            slice_start = overlap_start - chunk_start
+            slice_end = overlap_end - chunk_start
+            return master_data[slice_start:slice_end]
 
-    @property
-    def is_finished(self) -> bool:
-        return self.cursor >= self.end
+        return b""
 
 
 class TarVolume(io.BufferedIOBase):
+    """
+    Representa un volumen específico de una cinta TAR virtual.
+
+    Esta clase actúa como un adaptador 'file-like' para Pyrogram, permitiendo que
+    una carpeta indexada sea enviada en múltiples mensajes de Telegram sin
+    necesidad de crear archivos temporales en el disco.
+    """
+
     def __init__(
         self,
-        vol_index: int,
-        tape: TarTape,
+        tape: "TarTape",
         start_offset: int,
-        length: int,
-        total_size: int,
+        max_volume_size: int,
+        total_tape_size: int,
+        vol_index: int,
     ):
+        """
+        Args:
+            tape: Instancia de TarTape que contiene el inventario y el generador.
+
+            start_offset: El punto de inicio (en bytes) dentro de la cinta global
+                          donde comienza este volumen.
+                          Comienza en 0 y se incrementa con el tamaño de cada volumen enviado.
+                          Ejemplo: Si es el segundo volumen de 2GB, será 2147483648.
+
+
+            max_volume_size: El tamaño máximo (en bytes) que queremos para este volumen.
+                             Normalmente definido por el límite de Telegram (2GB o 4GB).
+
+            total_tape_size: El tamaño total calculado de toda la cinta (todos los archivos
+                             sumados con sus cabeceras TAR). Sirve para que el último
+                             volumen sepa exactamente cuándo detenerse.
+
+            vol_index: Índice del volumen (0 para el primero, 1 para el segundo, etc.)
+        """
         self.tape = tape
         self.start_offset = start_offset
-        self.total_size = total_size
+        self.total_tape_size = total_tape_size
+
+        # El tamaño real de este volumen es el máximo solicitado, a menos que
+        # lo que quede de cinta sea menor (en cuyo caso, este es el último volumen).
+        self.size = min(max_volume_size, total_tape_size - start_offset)
 
         # Atributos para Pyrogram
-        self.size = min(length, total_size - start_offset)
         self.mode = "rb"
         self.name = f"volume_{vol_index}.tar"
+
         self.vol_index = vol_index
 
-        self._reset()
+        self._active_files = {}
+        self._completed_entries = []
 
-    def _reset(self):
-        """Prepara el estado inicial o reinicia para un seek(0)."""
-        self._generator = self.tape.stream()
-        self._segmenter = TapeWindow(self.start_offset, self.start_offset + self.size)
-        self._buffer = bytearray()
-        self._bytes_sent = 0
-        self._md5 = hashlib.md5()
-        self._completed_files = []
+        self._load_new_cassette()
+
+    @property
+    def has_recording_ended(self) -> bool:
+        """Indica si la cinta maestra ya finalizo."""
+        return self.total_tape_size >= self._recorder.cursor
 
     def read(self, n: int = -1, /) -> bytes:  # type: ignore
-        if self._bytes_sent >= self.size:
+        if self._bytes_recorded >= self.size:
             return b""
 
         n = self.size if n is None else n
@@ -87,57 +128,82 @@ class TarVolume(io.BufferedIOBase):
         # Llena el buffer desde el generador de la cinta
         while len(self._buffer) < limit:
             try:
-                event = next(self._generator)
-                self._handle_event(event)
+                event = next(self._master_stream)
+                self._record_event(event)
             except StopIteration:
                 break
 
         # Entrega solo lo que pide el consumidor y respeta el límite del volumen
-        to_send = min(len(self._buffer), limit, self.size - self._bytes_sent)
+        to_send = min(len(self._buffer), limit, self.size - self._bytes_recorded)
         chunk = bytes(self._buffer[:to_send])
 
         self._buffer = self._buffer[to_send:]
-        self._bytes_sent += len(chunk)
+        self._bytes_recorded += len(chunk)
         self._md5.update(chunk)
 
         return chunk
-
-    def _handle_event(self, event):
-        """Decide qué hacer con cada evento de la cinta."""
-        if event.type == TarEventType.FILE_DATA:
-            data = self._segmenter.process_chunk(event.data)
-            if data:
-                self._buffer.extend(data)
-        elif event.type == TarEventType.FILE_END:
-            # Si el archivo terminó y el segmentador ya pasó su offset,
-            # significa que este volumen contiene el final del archivo.
-            if self._segmenter.cursor >= self.start_offset:
-                self._completed_files.append(
-                    {
-                        "path": event.entry.path,
-                        "start_offset": event.entry.offset,
-                        "end_offset": self._segmenter.cursor,
-                        "start_vol": self._segmenter.start,
-                        "end_vol": self.vol_index,
-                    }
-                )
-
-    def tell(self) -> int:
-        return self._bytes_sent
-
-    def seekable(self) -> bool:
-        return True
-
-    def seek(self, offset: int, whence: int = 0) -> int:
-        if whence == io.SEEK_END:
-            return self.size
-        if whence == io.SEEK_SET and offset == 0:
-            self._reset()
-            return 0
-        raise io.UnsupportedOperation("Solo se soporta seek(0) o SEEK_END")
 
     def get_md5(self) -> str:
         return self._md5.hexdigest()
 
     def get_completed_files(self) -> tuple[str, List[dict]]:
         return self._md5.hexdigest(), self._completed_files
+
+    def _load_new_cassette(self):
+        """Prepara el equipo para grabar desde el principio del segmento."""
+        self._master_stream = self.tape.stream()
+        self._recorder = TapeRecorder(self.start_offset, self.start_offset + self.size)
+        self._buffer = bytearray()
+        self._bytes_recorded = 0
+        self._md5 = hashlib.md5()
+        self._completed_files = []
+
+    def _record_event(self, event: TarEvent):
+        """Procesa los eventos de la cinta maestra."""
+        if event.type == TarEventType.FILE_START:
+            self._active_files[event.entry.arc_path] = {
+                "offset": self._recorder.cursor,
+                "vol": self.vol_index,
+            }
+        elif event.type == TarEventType.FILE_DATA:
+            segment = self._recorder.capture(event.data)
+            if segment:
+                self._buffer.extend(segment)
+
+        elif event.type == TarEventType.FILE_END:
+            # Si el archivo terminó y el segmentador ya pasó su offset,
+            # significa que este volumen contiene el final del archivo.
+            path = event.entry.arc_path
+            if path in self._active_files:
+                info = self._active_files.pop(path)
+                if self._recorder.cursor >= self.start_offset:
+                    self._completed_files.append(
+                        {
+                            "path": event.entry.arc_path,
+                            "start_offset": info["offset"],
+                            "end_offset": self._recorder.cursor,
+                            "start_vol": self._recorder.start,
+                            "end_vol": self.vol_index,
+                        }
+                    )
+
+    # Métodos para cumplir con la interfaz de Pyrogram
+
+    def tell(self) -> int:
+        return self._bytes_recorded
+
+    def seekable(self) -> bool:
+        return True
+
+    def seek(self, offset: int, whence: int = 0) -> int:
+        """Permite a Pyrogram detectar el tamaño (SEEK_END) o reiniciar (seek 0)."""
+        if whence == io.SEEK_END:
+            return self.size
+        if whence == io.SEEK_SET and offset == 0:
+            # Rebobinar el casete implica reiniciar la grabación desde la cinta maestra
+            logger.info(f"Rebobinando {self.name}...")
+            self._load_new_cassette()
+            return 0
+        raise io.UnsupportedOperation(
+            "Solo se soporta rebobinado (seek 0) o consulta de tamaño (SEEK_END)"
+        )

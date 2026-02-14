@@ -156,13 +156,12 @@ class UploadService:
 
         start_offset = payload.sequence_index * job.config.tg_max_size
 
-        generator = tape.stream()
         total = TapeInspector.get_total_size(tape)
         stream = TarVolume(
             tape=tape,
             start_offset=start_offset,
-            length=payload.size,
-            total_size=total,
+            max_volume_size=payload.size,
+            total_tape_size=total,
             vol_index=payload.sequence_index,
         )
 
