@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, cast
 
 from tartape import TarTape
 from totelegram.console import UI
-from totelegram.services.tar_stream import TarVolumeStream
+from totelegram.services.tar_stream import TapeInspector, TarVolume
 from totelegram.store.database import db_proxy
 from totelegram.utils import batched
 
@@ -157,10 +157,12 @@ class UploadService:
         start_offset = payload.sequence_index * job.config.tg_max_size
 
         generator = tape.stream()
-        stream = TarVolumeStream(
-            generator=generator,
+        total = TapeInspector.get_total_size(tape)
+        stream = TarVolume(
+            tape=tape,
             start_offset=start_offset,
             length=payload.size,
+            total_size=total,
             vol_index=payload.sequence_index,
         )
 
@@ -179,7 +181,7 @@ class UploadService:
                 progress=progress,
             )
 
-            real_md5, entries = stream.get_results()
+            real_md5, entries = stream.get_completed_files()
 
             with db_proxy.atomic():
                 payload.md5sum = real_md5

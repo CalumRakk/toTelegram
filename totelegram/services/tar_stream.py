@@ -1,11 +1,25 @@
 import hashlib
 import io
 import logging
+from typing import List
 
+from tartape import TarTape
 from tartape.enums import TarEventType
-from tartape.schemas import TarFileEndEvent
 
 logger = logging.getLogger(__name__)
+
+
+class TapeInspector:
+    @staticmethod
+    def get_total_size(tape: TarTape) -> int:
+        """Calcula el tamaño final del TAR basándose en el inventario."""
+        total = 0
+        for entry in tape._inventory.get_entries():
+            total += 512  # Header
+            if not entry.is_dir and not entry.is_symlink:
+                padding = (512 - (entry.size % 512)) % 512
+                total += entry.size + padding
+        return total + 1024  # Footer
 
 
 class TapeWindow:
@@ -14,172 +28,116 @@ class TapeWindow:
         self.end = end
         self.cursor = 0  # Posición absoluta respecto al inicio de la cinta
 
-    def get_intersection(self, data: bytes) -> bytes:
-        """
-        Calcula la intersección entre el chunk de datos actual y la ventana.
-        Retorna bytes vacíos si no hay solapamiento.
-        """
+    def process_chunk(self, data: bytes) -> bytes:
+        """Toma un bloque de la cinta y devuelve solo lo que pertenece a la ventana."""
         chunk_len = len(data)
-        chunk_start = self.cursor
-        chunk_end = self.cursor + chunk_len
-
-        # El cursor siempre avanza, simulando el paso del tiempo/cinta
+        current_offset = self.cursor
         self.cursor += chunk_len
 
-        # Si el chunk es "historia antigua", lo ignoramos rápido
-        # Si el chunk es "futuro lejano", lo ignoramos rápido
-        if chunk_end <= self.start or chunk_start >= self.end:
-            return b""
-
-        # Cálculo de Recorte
-        overlap_start = max(chunk_start, self.start)
-        overlap_end = min(chunk_end, self.end)
+        # ¿Hay solapamiento?
+        overlap_start = max(current_offset, self.start)
+        overlap_end = min(current_offset + chunk_len, self.end)
 
         if overlap_start < overlap_end:
-            slice_start = overlap_start - chunk_start
-            slice_end = overlap_end - chunk_start
-            return data[slice_start:slice_end]
-
+            return data[overlap_start - current_offset : overlap_end - current_offset]
         return b""
 
-    def is_past(self, offset: int) -> bool:
-        """¿Este offset ya quedó atrás de nuestra ventana?"""
-        return offset >= self.start
+    @property
+    def is_finished(self) -> bool:
+        return self.cursor >= self.end
 
 
-class TarVolumeStream(io.BufferedIOBase):
-    """
-    La grabadora física. Maneja el estado, el buffer y el MD5.
-    Usa una TapeWindow para filtrar la cinta.
-    """
+class TarVolume(io.BufferedIOBase):
+    def __init__(
+        self,
+        vol_index: int,
+        tape: TarTape,
+        start_offset: int,
+        length: int,
+        total_size: int,
+    ):
+        self.tape = tape
+        self.start_offset = start_offset
+        self.total_size = total_size
 
-    def __init__(self, generator, start_offset: int, length: int, vol_index: int):
-        self.generator = generator
-        self.window = TapeWindow(start_offset, start_offset + length)
-        self.vol_limit = length
+        # Atributos para Pyrogram
+        self.size = min(length, total_size - start_offset)
+        self.mode = "rb"
+        self.name = f"volume_{vol_index}.tar"
         self.vol_index = vol_index
 
-        self.bytes_yielded = 0
+        self._reset()
+
+    def _reset(self):
+        """Prepara el estado inicial o reinicia para un seek(0)."""
+        self._generator = self.tape.stream()
+        self._segmenter = TapeWindow(self.start_offset, self.start_offset + self.size)
         self._buffer = bytearray()
+        self._bytes_sent = 0
         self._md5 = hashlib.md5()
-        self._eof = False
+        self._completed_files = []
 
-        self._active_files = {}
-        self._completed_entries = []
-
-        self.name = f"vol_{vol_index}.tar"
-        self._virtual_cursor = 0
-
-    def read(self, size: int | None = -1, /) -> bytes:
-        """Método estándar de Python para leer bytes (lo usa Pyrogram)."""
-        if self.bytes_yielded >= self.vol_limit or self._eof:
+    def read(self, n: int = -1, /) -> bytes:  # type: ignore
+        if self._bytes_sent >= self.size:
             return b""
 
-        assert size is not None
+        n = self.size if n is None else n
+        limit = n if n > 0 else self.size
 
-        wanted = size if size > 0 else self.vol_limit
+        # Llena el buffer desde el generador de la cinta
+        while len(self._buffer) < limit:
+            try:
+                event = next(self._generator)
+                self._handle_event(event)
+            except StopIteration:
+                break
 
-        # Llena el buffer si es necesario
-        while len(self._buffer) < wanted and not self._eof:
-            self._advance_tape()
+        # Entrega solo lo que pide el consumidor y respeta el límite del volumen
+        to_send = min(len(self._buffer), limit, self.size - self._bytes_sent)
+        chunk = bytes(self._buffer[:to_send])
 
-        # Recortar para no exceder el límite del volumen
-        remaining = self.vol_limit - self.bytes_yielded
-        take = min(wanted, len(self._buffer), remaining)
-
-        chunk = bytes(self._buffer[:take])
-        self._buffer = self._buffer[take:]  # Desplaza el buffer
-
-        self.bytes_yielded += len(chunk)
+        self._buffer = self._buffer[to_send:]
+        self._bytes_sent += len(chunk)
         self._md5.update(chunk)
+
         return chunk
 
-    def seekable(self) -> bool:
-        """
-        Decimos que sí somos 'seekable' para que Pyrogram
-        pueda ejecutar su lógica de cálculo de tamaño (seek al final -> tell -> seek al inicio).
-        """
-        return True
-
-    def seek(self, offset: int, whence: int = 0) -> int:
-        """
-        Implementación 'Fake' de seek.
-        Solo soporta la lógica de cálculo de tamaño antes de empezar a leer.
-        """
-        # SEEK_END (2): Pyrogram quiere ir al final para ver el tamaño
-        if whence == 2:
-            # Simulamos que estamos al final
-            self._virtual_cursor = self.vol_limit + offset
-            return self._virtual_cursor
-
-        # SEEK_SET (0): Pyrogram quiere volver al inicio
-        if whence == 0:
-            if offset == 0:
-                # Verificación de seguridad:
-                # Solo permitimos volver al inicio si NO hemos emitido datos reales aún.
-                if self.bytes_yielded > 0:
-                    raise io.UnsupportedOperation(
-                        "No se puede rebobinar un stream ya iniciado."
-                    )
-
-                self._virtual_cursor = 0
-                return 0
-
-        raise io.UnsupportedOperation(
-            f"Seek no soportado: offset={offset}, whence={whence}"
-        )
-
-    def tell(self) -> int:
-        """Devuelve la posición (real o simulada)."""
-        # Si estamos en medio de la danza del seek simulado, devolvemos el cursor virtual
-        if self._virtual_cursor > self.bytes_yielded:
-            return self._virtual_cursor
-
-        # Si estamos leyendo de verdad, devolvemos lo que hemos entregado
-        return self.bytes_yielded
-
-    def _advance_tape(self):
-        """Consume un evento y lo pasa por la ventana."""
-        try:
-            event = next(self.generator)
-
-            if event.type == TarEventType.FILE_START:
-                # Registramos dónde empieza este archivo en la cinta global
-                self._active_files[event.entry.arc_path] = {
-                    "offset": self.window.cursor,
-                    "vol": self.window.cursor // self.vol_limit,
-                }
-
-            elif event.type == TarEventType.FILE_DATA:
-                # La ventana decide si estos datos nos sirven
-                useful_data = self.window.get_intersection(event.data)
-                if useful_data:
-                    self._buffer.extend(useful_data)
-
-            elif event.type == TarEventType.FILE_END:
-                self._handle_file_completion(event)
-
-            elif event.type == TarEventType.TAPE_COMPLETED:
-                self._eof = True
-        except StopIteration:
-            self._eof = True
-
-    def _handle_file_completion(self, event: TarFileEndEvent):
-        """Si un archivo termina, verificamos si es relevante para el índice."""
-        path = event.entry.arc_path
-        if path in self._active_files:
-            info = self._active_files.pop(path)
-
-            if self.window.is_past(self.window.cursor):
-                self._completed_entries.append(
+    def _handle_event(self, event):
+        """Decide qué hacer con cada evento de la cinta."""
+        if event.type == TarEventType.FILE_DATA:
+            data = self._segmenter.process_chunk(event.data)
+            if data:
+                self._buffer.extend(data)
+        elif event.type == TarEventType.FILE_END:
+            # Si el archivo terminó y el segmentador ya pasó su offset,
+            # significa que este volumen contiene el final del archivo.
+            if self._segmenter.cursor >= self.start_offset:
+                self._completed_files.append(
                     {
-                        "path": path,
-                        "start_offset": info["offset"],
-                        "end_offset": self.window.cursor,
-                        "start_vol": info["vol"],
+                        "path": event.entry.path,
+                        "start_offset": event.entry.offset,
+                        "end_offset": self._segmenter.cursor,
+                        "start_vol": self._segmenter.start,
                         "end_vol": self.vol_index,
                     }
                 )
 
-    def get_results(self):
-        return self._md5.hexdigest(), self._completed_entries
+    def tell(self) -> int:
+        return self._bytes_sent
+
+    def seekable(self) -> bool:
+        return True
+
+    def seek(self, offset: int, whence: int = 0) -> int:
+        if whence == io.SEEK_END:
+            return self.size
+        if whence == io.SEEK_SET and offset == 0:
+            self._reset()
+            return 0
+        raise io.UnsupportedOperation("Solo se soporta seek(0) o SEEK_END")
+
+    def get_md5(self) -> str:
+        return self._md5.hexdigest()
+
+    def get_completed_files(self) -> tuple[str, List[dict]]:
+        return self._md5.hexdigest(), self._completed_files
