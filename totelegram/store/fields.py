@@ -29,7 +29,7 @@ class PydanticJSONField(Field):
     def python_value(self, value):
         """DB -> Python"""
         if value is None:
-            return self.schema_model()
+            return None
         try:
             # Si viene como string desde la DB
             if isinstance(value, str):

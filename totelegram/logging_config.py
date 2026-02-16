@@ -80,5 +80,11 @@ def setup_logging(path: str, level: int = logging.INFO) -> None:
         "pyrogram",
     ]
     warnings.filterwarnings("ignore", category=DeprecationWarning, module="pyrogram")
-    for lib_name in libraries_to_silence:
-        logging.getLogger(lib_name).setLevel(logging.CRITICAL)
+
+    if level > logging.DEBUG:
+        libraries_to_silence = ["pyrogram", "peewee", "urllib3"]
+        for lib_name in libraries_to_silence:
+            logging.getLogger(lib_name).setLevel(logging.CRITICAL)
+    else:
+        logging.getLogger("pyrogram").setLevel(logging.WARNING)
+        logging.getLogger("peewee").setLevel(logging.DEBUG)

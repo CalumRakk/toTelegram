@@ -9,7 +9,6 @@ from totelegram.console import UI, console
 from totelegram.core.enums import AvailabilityState, DuplicatePolicy, Strategy
 from totelegram.core.plans import AskUserPlan, PhysicalUploadPlan, SkipPlan
 from totelegram.core.registry import ProfileManager
-from totelegram.core.setting import get_settings
 from totelegram.services.chunking import ChunkingService
 from totelegram.services.discovery import DiscoveryService
 from totelegram.services.policy import PolicyExpert
@@ -74,8 +73,7 @@ def upload_file(
     try:
         pm: ProfileManager = ctx.obj
         profile_name = pm.resolve_name()
-        env_path = pm.get_path(profile_name)
-        settings = get_settings(env_path)
+        settings = pm.get_settings(profile_name)
     except ValueError as e:
         UI.error(f"Error de perfil: {e}")
         list_profiles(ctx, quiet=True)
@@ -116,7 +114,7 @@ def upload_file(
             f"Destino: [bold cyan]{tg_chat.title or 'Privado'}[/] [dim](Id: {settings.chat_id})[/dim]"
         )
         for path in all_paths:
-            source = SourceFile.get_or_create_from_path(path)  # TODO: avisar
+            source = SourceFile.get_or_create_from_path(path,settings.worktable)  # TODO: avisar
             job = Job.get_or_none(Job.source == source, Job.chat == chat_db)
 
             if not job:
@@ -142,6 +140,7 @@ def upload_file(
 
             elif isinstance(plan, AskUserPlan):
                 if plan.state == AvailabilityState.REMOTE_RESTRICTED:
+                    # TODO: ¿Si existe en varios lugares?¿como sé cual es el mejor?
                     if typer.confirm("Existe pero no tienes acceso. ¿Subir de nuevo?"):
                         uploader.execute_physical_upload(job)
                 else:

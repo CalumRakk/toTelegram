@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Literal, Optional, Tuple, get_origin
 from dotenv import dotenv_values, set_key, unset_key
 
 from totelegram.core.schemas import ProfileRegistry
-from totelegram.core.setting import Settings, get_settings, get_user_config_dir
+from totelegram.core.setting import Settings, get_user_config_dir
 
 APP_SESSION_NAME = "toTelegram"
 CONFIG_DIR = Path(get_user_config_dir(APP_SESSION_NAME))
@@ -20,11 +20,12 @@ class ProfileManager:
     Ahora las rutas son inyectadas o calculadas por instancia, no globales.
     """
 
-    def __init__(self, base_dir: Optional[Path] = None):
+    def __init__(self, base_dir: Optional[Path] = None, is_debug: bool = False):
         self.config_dir = base_dir or Path(get_user_config_dir(APP_SESSION_NAME))
         self.profiles_dir = self.config_dir / "profiles"
         self.config_file = self.config_dir / "config.json"
         self._override: Optional[str] = None
+        self._is_debug = is_debug
 
         self._ensure_structure()
 
@@ -147,8 +148,12 @@ class ProfileManager:
     def get_settings(self, profile_name: Optional[str] = None) -> Settings:
         if profile_name is None:
             profile_name = self.active_name
-        path = self.get_path(profile_name)
-        return get_settings(path)
+
+        env_path = self.get_path(profile_name)
+        settings= Settings(_env_file=env_path)   # type: ignore
+        if self._is_debug:
+            settings.database_name = "debug_inventory.sqlite"
+        return settings
 
     def update_config(self, key: str, value: str, profile_name: Optional[str] = None):
         """

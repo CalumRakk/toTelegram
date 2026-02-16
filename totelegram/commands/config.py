@@ -12,12 +12,7 @@ from totelegram.commands.profile_utils import (
 )
 from totelegram.console import UI, console
 from totelegram.core.registry import ProfileManager
-from totelegram.core.setting import (
-    CHAT_ID_NOT_SET,
-    Settings,
-    get_settings,
-    normalize_chat_id,
-)
+from totelegram.core.setting import CHAT_ID_NOT_SET, Settings, normalize_chat_id
 from totelegram.services.validator import ValidationService
 from totelegram.store.database import DatabaseSession
 from totelegram.store.models import TelegramChat
@@ -78,8 +73,7 @@ def main(ctx: typer.Context):
     try:
         pm: ProfileManager = ctx.obj
         active_name = pm.resolve_name()
-        path = pm.get_path(active_name)
-        settings = get_settings(path)
+        settings = pm.get_settings(active_name)
         chat_display_name = get_friendly_chat_name(settings)
     except (ValueError, FileNotFoundError):
         active_name = None

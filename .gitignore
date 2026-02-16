@@ -9,7 +9,6 @@ __pycache__
 /exiftool_.py
 /main.py
 /me.session
-/test.py
 *.txt
 /mkdocs.yml
 !toTelgram/
@@ -35,7 +34,11 @@ validate2.py
 script.py
 NOTES.md
 plan-comando.md
-tartape/
 .contextignore
 requirements.txt
 setup.py
+
+upload_state.json
+tartape/
+manual/
+build/
