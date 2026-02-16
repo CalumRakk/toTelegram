@@ -1,5 +1,4 @@
 import logging
-import os
 from decimal import __version__
 from typing import Optional
 
@@ -7,10 +6,10 @@ import typer
 
 logging.getLogger("dotenv").setLevel(logging.CRITICAL)
 
+from build.lib.totelegram.logging_config import setup_logging
 from totelegram.commands import config, profile, upload
 from totelegram.console import UI, console
 from totelegram.core.registry import ProfileManager
-from totelegram.logging_config import setup_logging
 
 COMMANDS_IGNORING_USE = ["profile", "version"]
 
@@ -33,9 +32,6 @@ def version_callback(value: bool):
 
 @app.callback()
 def main(
-    # verbose: bool = typer.Option(
-    #     False, "--verbose", "-v", help="Mostrar logs detallados"
-    # ),
     ctx: typer.Context,
     use: Optional[str] = typer.Option(
         None,
@@ -60,35 +56,24 @@ def main(
     Callback principal. Se ejecuta antes que cualquier comando.
     Útil para configurar logging global.
     """
-    is_debug = debug or os.getenv("TOTELEGRAM_DEBUG") == "1"
-
 
     # Si ctx.obj ya existe (porque lo inyectamos en un test), lo usamos.
     # Si no, creamos el de producción.
     if ctx.obj is None:
         ctx.obj = ProfileManager()
 
-    pm = ctx.obj
-
-    if use:
-        if not pm.exists(use):
-            UI.error(f"El perfil '[bold]{use}[/]' no existe.")
-            profile.list_profiles(pm, quiet=True)
-            raise typer.Exit(code=1)
-
-        pm.set_override(use)
-
-        if ctx.invoked_subcommand in COMMANDS_IGNORING_USE:
-            console.print(
-                f"[dim yellow]Nota: El flag --use '{use}' no tiene efecto en comandos de '{ctx.invoked_subcommand}'.[/dim yellow]"
-            )
-    if is_debug:
+    pm : ProfileManager = ctx.obj
+    if debug:
+        debug_profile = pm.setup_debug_context(use)
 
         setup_logging("debug_execution.log", logging.DEBUG)
-        console.print("[bold yellow]MODO DEBUG ACTIVADO[/] (Usando base de datos de pruebas)")
+        console.print(f"\n[bold yellow]MODO DEBUG ACTIVADO[/]")
+        console.print(f"[dim yellow]Perfil Shadow:[/][white] {debug_profile}\n")
+
+    elif use:
+        pm.set_override(use)
 
     ctx.obj = pm
-
 
 def run_script():
     """Entrada para setup.py"""

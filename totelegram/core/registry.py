@@ -1,6 +1,7 @@
 import glob
 import json
 import logging
+import shutil
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional, Tuple, get_origin
 
@@ -20,13 +21,13 @@ class ProfileManager:
     Ahora las rutas son inyectadas o calculadas por instancia, no globales.
     """
 
-    def __init__(self, base_dir: Optional[Path] = None, is_debug: bool = False):
+    def __init__(self, base_dir: Optional[Path] = None):
         self.config_dir = base_dir or Path(get_user_config_dir(APP_SESSION_NAME))
         self.profiles_dir = self.config_dir / "profiles"
         self.config_file = self.config_dir / "config.json"
         self._override: Optional[str] = None
-        self._is_debug = is_debug
 
+        self._is_debug = False
         self._ensure_structure()
 
     def set_override(self, name: str):
@@ -304,3 +305,58 @@ class ProfileManager:
         if field_info:
             return True, field_info.default
         return True, None
+
+    def fork_for_debug(self, source_name: str):
+
+        debug_name = f"{source_name}_debug"
+        debug_env_path = self.profiles_dir / f"{debug_name}.env"
+
+
+        values = self.get_config_values(source_name)
+        values["PROFILE_NAME"] = debug_name
+        values["DATABASE_NAME"] = "debug_inventory.sqlite"
+        values["CHAT_ID"] = "me" # chat_id por defecto.
+
+
+        with open(debug_env_path, "w") as f:
+            for k, v in values.items():
+                f.write(f"{k}={v}\n")
+
+        # Clona la session de producción
+        source_session = self.profiles_dir / f"{source_name}.session"
+        debug_session = self.profiles_dir / f"{debug_name}.session"
+        if source_session.exists():
+            shutil.copy2(source_session, debug_session)
+        else:
+            logger.warning(f"No se encontró session para '{source_name}'.")
+            raise FileNotFoundError(f"No se encontró session para '{source_name}'")
+
+
+        registry = self._load_registry()
+        registry.profiles[debug_name] = str(debug_env_path)
+        self._save_registry(registry)
+        return debug_name
+
+    def _set_debug(self):
+        self._is_debug = True
+
+    def setup_debug_context(self, base_profile_name: Optional[str] = None):
+        """
+        Asegura que exista un perfil shadow y lo activa para la sesión actual.
+        """
+        base = base_profile_name or self.active_name
+        if not base:
+            raise ValueError("No se puede iniciar modo debug sin un perfil base activo o especificado.")
+
+        if base.endswith("_debug"):
+            self.set_override(base)
+            return base
+
+        debug_name = f"{base}_debug"
+
+        if not self.exists(debug_name):
+            self.fork_for_debug(base)
+
+        self.set_override(debug_name)
+        self._set_debug()
+        return debug_name
