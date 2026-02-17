@@ -3,12 +3,17 @@ import json
 import logging
 import shutil
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional, Tuple, get_origin
+from typing import Any, Dict, List, Literal, Optional, Tuple
 
 from dotenv import dotenv_values, set_key, unset_key
 
 from totelegram.core.schemas import ProfileRegistry
-from totelegram.core.setting import Settings, get_user_config_dir
+from totelegram.core.setting import (
+    AccesField,
+    AccessLevel,
+    Settings,
+    get_user_config_dir,
+)
 
 APP_SESSION_NAME = "toTelegram"
 CONFIG_DIR = Path(get_user_config_dir(APP_SESSION_NAME))
@@ -123,6 +128,10 @@ class ProfileManager:
         """Devuelve el nombre del perfil activo (sin sincronizar disco innecesariamente)."""
         return self._load_registry().active
 
+    @property
+    def is_debug(self) -> bool:
+        return self._is_debug
+
     def get_path(self, name: Optional[str] = None) -> Path:
         """
         Resuelve la ruta del archivo .env.
@@ -142,45 +151,72 @@ class ProfileManager:
     def get_config_values(
         self, profile_name: Optional[str] = None
     ) -> Dict[str, Optional[str]]:
-        """Devuelve el contenido raw del .env."""
+        """Devuelve el contenido raw del .env.
+
+        Si una Key viene del .env en mayuscula, se minimiza.
+        """
         path = self.get_path(profile_name)
-        return dotenv_values(path)
+        data = dotenv_values(path)
+        return {k.lower(): v for k, v in data.items()}
 
     def get_settings(self, profile_name: Optional[str] = None) -> Settings:
         if profile_name is None:
             profile_name = self.active_name
 
         env_path = self.get_path(profile_name)
-        settings= Settings(_env_file=env_path)   # type: ignore
+        settings = Settings(_env_file=env_path)  # type: ignore
         if self._is_debug:
             settings.database_name = "debug_inventory.sqlite"
         return settings
 
-    def update_config(self, key: str, value: str, profile_name: Optional[str] = None):
+    def _validate_key_access(self, info: AccesField):
+        """Valida si el nivel de acceso permite la edición en el contexto actual."""
+        if info.level == AccessLevel.DEBUG_READONLY:
+            raise ValueError(
+                f"La configuracion '{info.field_name.upper()}' es de identidad (Solo Lectura)."
+            )
+
+        if info.level == AccessLevel.DEBUG_EDITABLE and not self._is_debug:
+            raise ValueError(
+                f"La configuracion '{info.field_name.upper()}' solo es modificable en modo --debug."
+            )
+
+    def update_config(self, key: str, value: Any, profile_name: Optional[str] = None):
         """
-        Valida y actualiza una configuración simple.
-        Maneja la conversión de tipos vía Pydantic (Settings).
+        Actualiza una configuracion de forma declarativa usando los metadatos de Settings.
         """
-        key = key.upper()
-        self._validate_key_is_modifiable(key)
+        key_lower = key.lower()
+        info = Settings.get_info(key_lower)
 
-        field_info = Settings.model_fields[key.lower()]
-        origin = get_origin(field_info.annotation)
+        if not info:
+            raise ValueError(f"La configuracion '{key.upper()}' no existe.")
 
-        if (origin is list or origin is List) and value.startswith("["):
+        self._validate_key_access(info)
 
-            try:
-                json_val = json.loads(value)
-                validated_val = Settings.validate_single_setting(key, json_val)
-                value_to_save = json.dumps(validated_val)
-            except json.JSONDecodeError:
-                raise ValueError(f"El valor para {key} debe ser un JSON válido.")
-        else:
+        # Si esperamos una lista y recibimos un string (ej. desde CLI), intentamos parsear
+        processed_value = value
+        if "list" in info.type_annotation.lower() and isinstance(value, str):
+            if value.startswith("["):
+                try:
+                    processed_value = json.loads(value)
+                except json.JSONDecodeError:
+                    raise ValueError(
+                        f"Formato JSON invalido para la lista '{key.upper()}'."
+                    )
+            else:
+                # Soporte para valores separados por coma: "val1, val2"
+                processed_value = [x.strip() for x in value.split(",") if x.strip()]
 
-            validated_val = Settings.validate_single_setting(key, value)
-            value_to_save = str(validated_val)
+        validated_val = Settings.validate_single_setting(key_lower, processed_value)
 
-        self._write_to_env(key, value_to_save, profile_name)
+        # Convertimos a formato apto para .env (JSON para listas, string para el resto)
+        value_to_save = (
+            json.dumps(validated_val)
+            if isinstance(validated_val, list)
+            else str(validated_val)
+        )
+
+        self._write_to_env(key.upper(), value_to_save, profile_name)
         return validated_val
 
     def update_config_list(
@@ -190,11 +226,8 @@ class ProfileManager:
         values: List[str],
         profile_name: Optional[str] = None,
     ):
-        """Gestiona la adición/remoción de elementos en configuraciones tipo lista."""
-        key = key.upper()
-        self._validate_key_is_modifiable(key)
 
-        current_list = self._parse_env_list(key, profile_name)
+        current_list = self._parse_env_list(key.upper(), profile_name)
 
         if action == "add":
             for val in values:
@@ -204,11 +237,7 @@ class ProfileManager:
             for val in values:
                 if val in current_list:
                     current_list.remove(val)
-
-        Settings.validate_single_setting(key, current_list)  # type: ignore
-
-        self._write_to_env(key, json.dumps(current_list), profile_name)
-        return current_list
+        return self.update_config(key, current_list, profile_name)
 
     def _sync_registry_with_filesystem(self) -> ProfileRegistry:
         """
@@ -243,10 +272,21 @@ class ProfileManager:
         return registry
 
     def _validate_key_is_modifiable(self, key: str):
-        if key in Settings.INTERNAL_FIELDS:
-            raise ValueError(f"La clave '{key}' es interna y no se puede modificar.")
-        if key.lower() not in Settings.model_fields:
-            raise ValueError(f"La configuración '{key}' no es válida.")
+        key = key.lower()
+        if key not in Settings.model_fields:
+            raise ValueError(f"La configuración '{key.upper()}' no es válida.")
+
+        level = Settings.get_info(key)
+        if level == AccessLevel.DEBUG_READONLY:
+            raise ValueError(
+                f"La clave '{key.upper()}' es de identidad y no puede modificarse."
+            )
+
+        if level == AccessLevel.DEBUG_EDITABLE and not self._is_debug:
+            raise ValueError(
+                f"La clave '{key.upper()}' es una constante del sistema. "
+                "Para modificarla con fines de prueba, usa el modo --debug."
+            )
 
     def _write_to_env(self, key: str, value: str, profile_name: Optional[str]):
         path = self.get_path(profile_name)
@@ -311,12 +351,10 @@ class ProfileManager:
         debug_name = f"{source_name}_debug"
         debug_env_path = self.profiles_dir / f"{debug_name}.env"
 
-
         values = self.get_config_values(source_name)
         values["PROFILE_NAME"] = debug_name
         values["DATABASE_NAME"] = "debug_inventory.sqlite"
-        values["CHAT_ID"] = "me" # chat_id por defecto.
-
+        values["CHAT_ID"] = "me"  # chat_id por defecto.
 
         with open(debug_env_path, "w") as f:
             for k, v in values.items():
@@ -330,7 +368,6 @@ class ProfileManager:
         else:
             logger.warning(f"No se encontró session para '{source_name}'.")
             raise FileNotFoundError(f"No se encontró session para '{source_name}'")
-
 
         registry = self._load_registry()
         registry.profiles[debug_name] = str(debug_env_path)
@@ -346,7 +383,9 @@ class ProfileManager:
         """
         base = base_profile_name or self.active_name
         if not base:
-            raise ValueError("No se puede iniciar modo debug sin un perfil base activo o especificado.")
+            raise ValueError(
+                "No se puede iniciar modo debug sin un perfil base activo o especificado."
+            )
 
         if base.endswith("_debug"):
             self.set_override(base)
@@ -360,3 +399,22 @@ class ProfileManager:
         self.set_override(debug_name)
         self._set_debug()
         return debug_name
+
+    def get_visible_settings(
+        self, profile_name: Optional[str] = None
+    ) -> List[Tuple[str, Any, AccesField]]:
+        """
+        Devuelve una tupla con field_name, value y nivel de acceso de las configuraciones visibles para el profile especificado.
+        """
+        all_values = self.get_config_values(profile_name)
+        visibles = []
+
+        for field_name, _ in Settings.model_fields.items():
+            info = Settings.get_info(field_name)
+            if info is None:
+                continue
+
+            current_value = all_values.get(field_name, info.default_value)
+            visibles.append((field_name, current_value, info))
+
+        return visibles

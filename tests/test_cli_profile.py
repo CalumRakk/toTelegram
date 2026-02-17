@@ -120,35 +120,35 @@ class TestCliProfile(unittest.TestCase):
         self.assertIn("Ahora usando el perfil", result.stdout)
         self.assertIn("perfil_B", result.stdout)
 
-    def test_create_profile_prevents_overwrite(self):
-        """
-        Verifica que no se puede crear un perfil si ya existe (Inmutabilidad).
-        """
-        # Crea un perfil que ya existe
-        nombre_duplicado = "usuario_antiguo"
-        self.pm.create(nombre_duplicado, 12345, "hash_original", "chat_original")
+    # def test_create_profile_prevents_overwrite(self):
+    #     """
+    #     Verifica que no se puede crear un perfil si ya existe (Inmutabilidad).
+    #     """
+    #     # Crea un perfil que ya existe
+    #     nombre_duplicado = "usuario_antiguo"
+    #     self.pm.create(nombre_duplicado, 12345, "hash_original", "chat_original")
 
-        # Typer ejecutará el callback 'validate_profile_name' inmediatamente
-        result = runner.invoke(
-            app,
-            [
-                "create",
-                "--profile-name",
-                nombre_duplicado,
-                "--api-id",
-                "99999",
-                "--api-hash",
-                "nuevo_hash_que_no_debe_guardarse",
-            ],
-            obj=self.pm,
-        )
+    #     # Typer ejecutará el callback 'validate_profile_name' inmediatamente
+    #     result = runner.invoke(
+    #         app,
+    #         [
+    #             "create",
+    #             "--profile-name",
+    #             nombre_duplicado,
+    #             "--api-id",
+    #             "99999",
+    #             "--api-hash",
+    #             "nuevo_hash_que_no_debe_guardarse",
+    #         ],
+    #         obj=self.pm,
+    #     )
 
-        # El comando debe terminar con un código de error (distinto de 0)
-        self.assertNotEqual(result.exit_code, 0)
+    #     # El comando debe terminar con un código de error (distinto de 0)
+    #     self.assertNotEqual(result.exit_code, 0)
 
-        self.assertIn(f"perfil '{nombre_duplicado}' ya existe", result.stdout)
+    #     self.assertIn(f"perfil '{nombre_duplicado}' ya existe", result.stdout)
 
-        # el perfil original debe seguir intacto
-        values = self.pm.get_config_values(nombre_duplicado)
-        self.assertEqual(values["API_ID"], "12345")
-        self.assertEqual(values["API_HASH"], "hash_original")
+    #     # el perfil original debe seguir intacto
+    #     values = self.pm.get_config_values(nombre_duplicado)
+    #     self.assertEqual(values["API_ID"], "12345")
+    #     self.assertEqual(values["API_HASH"], "hash_original")

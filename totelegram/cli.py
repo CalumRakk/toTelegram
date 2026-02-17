@@ -6,10 +6,10 @@ import typer
 
 logging.getLogger("dotenv").setLevel(logging.CRITICAL)
 
-from build.lib.totelegram.logging_config import setup_logging
 from totelegram.commands import config, profile, upload
 from totelegram.console import UI, console
 from totelegram.core.registry import ProfileManager
+from totelegram.logging_config import setup_logging
 
 COMMANDS_IGNORING_USE = ["profile", "version"]
 

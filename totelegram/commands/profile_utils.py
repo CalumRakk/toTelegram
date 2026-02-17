@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, List, Literal, Optional
+from typing import TYPE_CHECKING, List, Literal
 
 import typer
 from rich.panel import Panel
@@ -6,9 +6,10 @@ from rich.panel import Panel
 from totelegram.commands.profile_ui import ProfileUI
 from totelegram.console import UI, console
 from totelegram.core.registry import ProfileManager
-from totelegram.core.setting import CHAT_ID_NOT_SET, Settings, normalize_chat_id
+from totelegram.core.setting import CHAT_ID_NOT_SET, Settings
 from totelegram.store.database import DatabaseSession
 from totelegram.store.models import TelegramChat
+from totelegram.utils import normalize_chat_id
 
 if TYPE_CHECKING:
     from pyrogram import Client  # type: ignore
@@ -45,46 +46,41 @@ def get_friendly_chat_name(settings: Settings) -> str:
 
 
 def handle_list_operation(
-    pm: ProfileManager,
-    action: Literal["add", "remove"],
-    key: str,
-    values: List[str],
-    profile: Optional[str],
-    force: bool,
+    pm: ProfileManager, action: Literal["add", "remove"], key: str, value: str
 ):
-    """Controlador único para operaciones de lista (DRY)."""
-    # 1. Parsing (Esto se podría mover a utils.py después)
-    cleaned = _normalize_input_values(values)
-    if not cleaned:
-        console.print("[yellow]No se proporcionaron valores válidos.[/yellow]")
-        return
+    """
+    Orquesta la adicion o eliminacion de elementos en configuraciones tipo lista.
+    """
+    key_upper = key.upper()
 
-    # 2. Lógica específica de UI para EXCLUDE_FILES
-    if key.upper() == "EXCLUDE_FILES" and not force:
-        ui.print_tip_exclude_files()
-        if len(cleaned) > 1 and all("*" not in v for v in cleaned):
-            ui.print_warning_shell_expansion()
-
-    # 3. Confirmación
-    if not force:
-        title = "Agregar a" if action == "add" else "Remover de"
-        ui.render_preview_table(
-            f"{title} {key.upper()}",
-            cleaned,
-            style="green" if action == "add" else "red",
-        )
-        if not typer.confirm("\n¿Confirmas la operación?"):
-            raise typer.Exit(code=1)
-
-    # 4. Ejecución
     try:
-        new_list = pm.update_config_list(action, key, cleaned, profile)
-        console.print(
-            f"[green][OK] Operación exitosa. Lista actual: {new_list}[/green]"
-        )
+        # 1. Validacion rapida de metadatos (antes de procesar nada)
+        info = Settings.get_info(key_upper)
+        if not info or "list" not in info.type_annotation.lower():
+            UI.error(f"La configuracion '{key_upper}' no es una lista o no existe.")
+            return
+
+        value_parsed = value.split(",") if isinstance(value, str) else value
+        input_items = [v.strip() for v in value_parsed]
+        if not input_items:
+            UI.warn("No se proporcionaron valores validos para procesar.")
+            return
+
+        # 3. Delegacion al Manager (que ahora es declarativo y valida permisos/tipos)
+        # Nota: update_config_list ya se encarga de no duplicar items en 'add'
+        # y de ignorar inexistentes en 'remove'.
+        new_list = pm.update_config_list(action, key_upper, input_items)
+
+        # 4. Feedback visual consistente
+        verb = "añadidos a" if action == "add" else "eliminados de"
+        UI.success(f"Valores {verb} [bold]{key_upper}[/].")
+        UI.info(f"Estado actual: [white]{new_list}[/]")
+
+    except ValueError as e:
+        # Aqui caen errores de: AccessLevel (permisos), validacion de Pydantic, etc.
+        UI.error(str(e))
     except Exception as e:
-        console.print(f"[bold red]Error:[/bold red] {e}")
-        raise typer.Exit(code=1)
+        UI.error(f"Error inesperado actualizando lista: {e}")
 
 
 def _normalize_input_values(values: List[str]) -> List[str]:

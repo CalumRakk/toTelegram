@@ -3,6 +3,8 @@ from typing import TYPE_CHECKING, Optional
 import typer
 from click.core import Command
 from pydantic import ValidationError
+from rich.markup import escape
+from rich.table import Table
 
 from totelegram.commands.profile_ui import ProfileUI
 from totelegram.commands.profile_utils import (
@@ -12,11 +14,12 @@ from totelegram.commands.profile_utils import (
 )
 from totelegram.console import UI, console
 from totelegram.core.registry import ProfileManager
-from totelegram.core.setting import CHAT_ID_NOT_SET, Settings, normalize_chat_id
+from totelegram.core.setting import CHAT_ID_NOT_SET, AccessLevel
 from totelegram.services.validator import ValidationService
 from totelegram.store.database import DatabaseSession
 from totelegram.store.models import TelegramChat
 from totelegram.telegram import TelegramSession
+from totelegram.utils import normalize_chat_id
 
 if TYPE_CHECKING:
     from pyrogram import Client  # type: ignore
@@ -63,6 +66,62 @@ def resolve_and_store_chat_logic(
 
     return False
 
+def mark_sensitive(value: int | str)-> str:
+    if not isinstance(value, (str, int)):
+        raise ValueError("mark_sensitive solo admite valores de tipo str o int para enmascarar.")
+
+    value= str(value)
+    if len(value) <= 6:
+        display_val = "•" * len(value)
+    else:
+        display_val = value[:3] + "•" * (len(value) - 4) + value[-3:]
+
+    return display_val
+
+
+def display_config_table(pm: ProfileManager):
+    table = Table(title="Configuración del Perfil", show_header=True, header_style="bold blue")
+    table.add_column("Opción (Key)")
+    table.add_column("Tipo")
+    table.add_column("Valor Actual")
+    table.add_column("Descripción")
+
+    settings = pm.get_visible_settings()
+
+    for field_name, value, access in settings:
+
+        is_value_default= value != access.default_value
+        value_style = "bold green"  if is_value_default else "dim white"
+
+        if access.is_sensitive:
+            display_val= mark_sensitive(value)
+        else:
+            display_val= str(value)
+
+        if pm.is_debug and access.level == AccessLevel.DEBUG_READONLY:
+            table.add_row(
+                    f"[grey0]{field_name.lower()}[/]",
+                    f"[grey0]{escape(access.type_annotation)}[/]",
+                    f"[grey0]{display_val}[/]",
+                    f"[grey0]{access.description}[/]",
+                )
+        elif pm.is_debug:
+            table.add_row(
+                    field_name.lower(),
+                    escape(access.type_annotation),
+                    f"[{value_style}]{display_val}[/]",
+                    access.description,
+                )
+        elif access.level == AccessLevel.EDITABLE:
+            table.add_row(
+                    field_name.lower(),
+                    escape(access.type_annotation),
+                    f"[{value_style}]{display_val}[/]",
+                    access.description,
+                )
+
+    console.print(table)
+
 
 @app.callback(invoke_without_command=True)
 def main(ctx: typer.Context):
@@ -86,9 +145,7 @@ def main(ctx: typer.Context):
         title += f" (Perfil: [green]{active_name}[/green])"
 
     ui.announce_profile_used(active_name) if active_name else None
-    ui.render_options_table(
-        title, Settings.get_schema_info(), settings, chat_info=chat_display_name
-    )
+    display_config_table(pm)
     ui.print_options_help_footer()
 
 
@@ -196,7 +253,7 @@ def add_to_list(ctx: typer.Context, key: str, values: list[str], force: bool = F
     """Agrega valores a una lista (ej. EXCLUDE_FILES)."""
     pm: ProfileManager = ctx.obj
     profile_name = pm.resolve_name()
-    handle_list_operation(pm, "add", key, values, profile_name, force)
+    handle_list_operation(pm, "add", key, values)
 
 
 @app.command("remove")
@@ -206,7 +263,7 @@ def remove_from_list(
     """Elimina valores de una lista."""
     pm: ProfileManager = ctx.obj
     profile_name = pm.resolve_name()
-    handle_list_operation(pm, "remove", key, values, profile_name, force)
+    handle_list_operation(pm, "remove", key, values)
 
 
 if __name__ == "__main__":

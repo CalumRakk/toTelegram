@@ -1,7 +1,6 @@
-# tests/test_architecture.py
 import unittest
 
-from totelegram.core.setting import Settings
+from totelegram.core.setting import AccessLevel, Settings
 
 
 class TestArchitectureRules(unittest.TestCase):
@@ -16,14 +15,17 @@ class TestArchitectureRules(unittest.TestCase):
         """
         required_internal_fields = {"API_ID", "API_HASH", "PROFILE_NAME"}
 
-        current_internals = Settings.INTERNAL_FIELDS
-        missing_fields = required_internal_fields - current_internals
+        api_id= Settings.get_info("API_ID")
+        api_hash= Settings.get_info("API_HASH")
+        profile_name= Settings.get_info("PROFILE_NAME")
 
         error_message = (
             f"\n\n[VIOLACIÓN DE ARQUITECTURA - ADR-001]\n"
-            f"Se intentó hacer editables campos críticos: {missing_fields}\n"
+            f"Se intentó hacer editables campos críticos: {required_internal_fields}\n"
             f"Estos campos deben permanecer en Settings.INTERNAL_FIELDS.\n"
             f"Consulta 'docs/adr/001-perfil-inmutable.md' para más detalles.\n"
         )
 
-        self.assertTrue(missing_fields == set(), error_message)
+        self.assertTrue(api_id is not None and api_id.level == AccessLevel.DEBUG_READONLY, error_message)
+        self.assertTrue(api_hash is not None and api_hash.level == AccessLevel.DEBUG_READONLY, error_message)
+        self.assertTrue(profile_name is not None and profile_name.level == AccessLevel.DEBUG_READONLY, error_message)

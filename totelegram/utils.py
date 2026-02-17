@@ -1,11 +1,12 @@
 import hashlib
 import logging
+import os
 import re
 import sys
 from contextlib import nullcontext
 from pathlib import Path
 from time import sleep
-from typing import TYPE_CHECKING, Any, List
+from typing import TYPE_CHECKING, Any, List, Union, cast
 
 from totelegram.console import console
 
@@ -15,6 +16,7 @@ if TYPE_CHECKING:
 import filetype
 
 logger = logging.getLogger(__name__)
+CHAT_ID_NOT_SET = "NOT_SET"
 
 if sys.version_info >= (3, 12):
     from itertools import batched
@@ -113,3 +115,69 @@ def sleep_progress(seconds: float):
             logger.info(f"Faltan {mins_left} minutos...")
         elif i <= 10:  # Mostrar segundos finales
             logger.info(f"{i} segundos restantes...")
+
+
+
+def normalize_chat_id(value: str) -> Union[int, str]:
+    """
+    Normaliza un identificador de chat de Telegram.
+
+    Acepta alias ("me", "self"), IDs numéricos positivos o negativos,
+    y usernames con o sin "@". El resultado se devuelve en un formato
+    estándar compatible con la API de Telegram.
+
+    Logica:
+    - "me" / "self" -> "me"
+    - IDs numéricos -> int
+    - Usernames válidos -> "@username"
+
+    Args:
+        value (str): Identificador de destino a normalizar.
+
+    Returns:
+        Union[int, str]: Identificador normalizado.
+
+    Raises:
+        ValueError: Si el valor no corresponde a un destino válido.
+    """
+
+    raw = str(value).strip()
+    if raw.upper() == CHAT_ID_NOT_SET or not raw:
+        return CHAT_ID_NOT_SET
+
+    if raw.lower() in ["me", "self"]:
+        return "me"
+
+    clean_numeric = raw.replace("-", "")
+    if clean_numeric.isdigit():
+        return int(raw)
+
+    clean_username = raw.lstrip("@")
+
+    if re.match(r"^[a-zA-Z0-9_]+$", clean_username):
+        return f"@{clean_username}"
+
+    raise ValueError(
+        f"El destino '{raw}' no es válido. Debe ser 'me', un ID numérico "
+        "o un @username (ej: caracoltv)."
+    )
+
+
+def get_user_config_dir(app_name: str) -> Path:
+    if sys.platform.startswith("win"):
+        # En Windows se usa APPDATA → Roaming
+        return Path(cast(str, os.getenv("APPDATA"))) / app_name
+    elif sys.platform == "darwin":
+        # En macOS
+        return Path.home() / "Library" / "Application Support" / app_name
+    else:
+        # En Linux / Unix
+        return Path(os.getenv("XDG_CONFIG_HOME", Path.home() / ".config")) / app_name
+
+def normalize_windows_name(name: str) -> str:
+    invalid_chars = r'[<>:"/\\|?*\x00-\x1F]'
+    name = re.sub(invalid_chars, "_", name)
+    name = name.rstrip(" .")
+    if len(name) < 0:
+        raise ValueError("Invalid name")
+    return name
