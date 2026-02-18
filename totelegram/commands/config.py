@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Any, List, Literal, Optional, cast
+from typing import TYPE_CHECKING, Any, List, Literal, cast
 
 import typer
 from rich.markup import escape
@@ -12,6 +12,9 @@ from totelegram.console import UI, console
 from totelegram.core.registry import SettingsManager
 from totelegram.core.schemas import CLIState
 from totelegram.core.setting import AccessLevel, Settings
+from totelegram.services.chat_resolver import ChatMatch, ChatResolverService
+from totelegram.services.validator import ValidationService
+from totelegram.telegram import TelegramSession
 
 if TYPE_CHECKING:
     from pyrogram import Client  # type: ignore
@@ -21,42 +24,42 @@ app = typer.Typer(help="Configuración del perfil actual.")
 ui = ProfileUI(console)
 
 
-def resolve_and_store_chat_logic(
-    state: CLIState,
-    chat_alias: str,
-    profile_name: str,
-    client: Optional["Client"] = None,
-):
-    """
-    Valida que un chat exista y lo guarda en la base de datos. Y incluye un fallback de permisos por consola.
-    """
-    normalized_key = normalize_chat_id(chat_alias)
-    settings = pm.get_settings(profile_name)
-    validator = ValidationService()
+# def resolve_and_store_chat_logic(
+#     state: CLIState,
+#     chat_alias: str,
+#     profile_name: str,
+#     client: Optional["Client"] = None,
+# ):
+#     """
+#     Valida que un chat exista y lo guarda en la base de datos. Y incluye un fallback de permisos por consola.
+#     """
+#     normalized_key = normalize_chat_id(chat_alias)
+#     settings = pm.get_settings(profile_name)
+#     validator = ValidationService()
 
-    def _execute(c: "Client"):
-        chat_obj = validator.validate_chat_id(c, normalized_key)
-        if not chat_obj:
-            return False
+#     def _execute(c: "Client"):
+#         chat_obj = validator.validate_chat_id(c, normalized_key)
+#         if not chat_obj:
+#             return False
 
-        db_chat, created = TelegramChat.get_or_create_from_tg(chat_obj)
-        if created:
-            UI.success(f"Nuevo chat guardado: {db_chat.title} ({normalized_key})")
-        else:
-            db_chat.update_from_tg(chat_obj)
-            UI.success(f"Chat actualizado: {db_chat.title} ({normalized_key})")
+#         db_chat, created = TelegramChat.get_or_create_from_tg(chat_obj)
+#         if created:
+#             UI.success(f"Nuevo chat guardado: {db_chat.title} ({normalized_key})")
+#         else:
+#             db_chat.update_from_tg(chat_obj)
+#             UI.success(f"Chat actualizado: {db_chat.title} ({normalized_key})")
 
-        pm.update_config("CHAT_ID", str(normalized_key), profile_name=profile_name)
-        return True
+#         pm.update_config("CHAT_ID", str(normalized_key), profile_name=profile_name)
+#         return True
 
-    with DatabaseSession(settings.database_path):
-        if client:
-            return _execute(client)
-        else:
-            with TelegramSession(settings) as new_client:
-                return _execute(new_client)
+#     with DatabaseSession(settings.database_path):
+#         if client:
+#             return _execute(client)
+#         else:
+#             with TelegramSession(settings) as new_client:
+#                 return _execute(new_client)
 
-    return False
+#     return False
 
 
 def mark_sensitive(value: int | str) -> str:
@@ -154,6 +157,8 @@ def main(ctx: typer.Context):
 
 def parse_key_value_pairs(args: List[str]) -> dict[str, str]:
     """Convierte una lista de pares ([k1, v1, k2, v2]) a un diccionario: {k1: v1, k2: v2}."""
+
+    # TODO: Hacer más explicito que el valor del par puede ser Any, aunque normalmente se espera que sea un string.
     if not args or len(args) % 2 != 0:
         UI.error("Debes proporcionar pares de CLAVE y VALOR. Ej: 'set chat_id 12345'")
         raise typer.Exit(1)
@@ -290,9 +295,186 @@ def add_to_list(ctx: typer.Context, key: str, values: List[str]):
 
     ui.announce_profile_used(settings_name)
 
-    raw_data = parse_key_value_pairs([key, values])
+    raw_data = parse_key_value_pairs([key, values])  # type: ignore
     updates_to_apply = transform_values(raw_data)
     apply_changes("add", is_debug, settings_name, manager, updates_to_apply)
+
+
+# @app.command("wizard")
+# def config_wizard(ctx: typer.Context):
+#     """Asistente interactivo para encontrar y configurar el chat de destino."""
+#     state: CLIState = ctx.obj
+#     manager = state.manager
+#     is_debug = state.is_debug
+#     settings_name = cast(str, manager.resolve_settings_name(state.settings_name))
+#     ui.announce_profile_used(settings_name)
+
+#     settings = manager.get_settings(settings_name)
+#     validator = ValidationService()
+
+#     try:
+#         UI.info(f"Iniciando cliente de telegram con sesión de {settings_name}...")
+
+#         with TelegramSession(manager.worktable, settings) as client:
+#             UI.success("Cliente de telegram iniciado.")
+
+#             resolved_chat = _capture_chat_id_wizard(validator, client)
+
+#             if resolved_chat == "me":
+#                 pm.update_config("CHAT_ID", "me", profile_name=profile_name)
+#                 UI.success("Destino configurado: Mensajes Guardados")
+#             elif resolved_chat != CHAT_ID_NOT_SET:
+#                 resolve_and_store_chat_logic(
+#                     pm, resolved_chat, profile_name, client=client
+#                 )
+#             else:
+#                 UI.info("Operación cancelada. No se han realizado cambios.")
+
+#     except Exception as e:
+#         UI.error(f"Error en el asistente: {e}")
+#         raise typer.Exit(1)
+
+
+@app.command("check")
+def check(ctx: typer.Context):
+    """Verifica que el perfil actual esté listo para subir archivos."""
+    state: CLIState = ctx.obj
+    manager = state.manager
+    settings_name = cast(str, manager.resolve_settings_name(state.settings_name))
+
+    settings = state.manager.get_settings(settings_name)
+    UI.info(f"Comprobando integridad del perfil: [bold]{state.settings_name}[/]")
+
+    try:
+        with TelegramSession(state.manager.profiles_dir, settings=settings) as client:
+            from pyrogram.types import Chat, User
+
+            with UI.loading("Validando usuario..."):
+                me = cast(User, client.get_me())
+
+            UI.success(f"Conectado como: {me.first_name} (@{me.username})")
+
+            if settings.chat_id == "NOT_SET":
+                UI.warn("CHAT_ID no configurado.")
+                raise typer.Exit(code=1)
+
+            with UI.loading("Validando chat destino..."):
+                chat = cast(Chat, client.get_chat(settings.chat_id))
+
+            UI.success(f"Destino válido: {chat.title} ({chat.type})")
+
+            with UI.loading("Verificando permisos..."):
+                validator = ValidationService()
+                has_permissions = validator._verify_permissions(client, chat)
+
+            if not has_permissions:
+                UI.warn("No tienes permisos de escritura en el chat.")
+                raise typer.Exit(code=1)
+
+            UI.success("Perfil listo para subir archivos.")
+
+    except Exception as e:
+        UI.error(f"Error de configuracion: {str(e)}")
+        raise typer.Exit(code=1)
+
+
+@app.command("resolve")
+def resolve(
+    ctx: typer.Context,
+    query: str = typer.Argument(
+        ...,
+        help="Nombre, @username o ID. Si el ID empieza con '-', úsalo así: resolve id:-100...",
+    ),
+    contains: bool = typer.Option(
+        False, "--contains", "-c", help="Busqueda parcial (inexacta)."
+    ),
+    depth: int = typer.Option(
+        100, "--depth", "-d", help="Profundidad de busqueda en chats recientes."
+    ),
+    apply: bool = typer.Option(
+        False, "--apply", "-a", help="Guardar automaticamente si el resultado es unico."
+    ),
+):
+    """
+    Busca y resuelve un destino en Telegram.
+    """
+    state: CLIState = ctx.obj
+    manager = state.manager
+    settings_name = cast(str, manager.resolve_settings_name(state.settings_name))
+    settings = manager.get_settings(settings_name)
+
+    query = query.replace("ID:", "").strip()
+    search_desc = (
+        f"que contenga '[bold]{query}[/]' (parcial)"
+        if contains
+        else f"llamado exactamente '[bold]{query}[/]'"
+    )
+    with TelegramSession(manager.profiles_dir, settings=settings) as client:
+        resolver = ChatResolverService(client)
+
+        with UI.loading(f"Buscando chat {search_desc}..."):
+            # is_exact es lo opuesto a contains
+            result = resolver.resolve(query, is_exact=not contains, depth=depth)
+
+        # Si se encontro un ganador sin ambiguedad.
+        if result.is_resolved:
+            match = cast(ChatMatch, result.winner)
+            UI.success(f"¡Encontrado! [bold]{match.title}[/] [dim](ID: {match.id})[/]")
+
+            if apply:
+                changed, config_value = manager.set_setting(
+                    settings_name, "chat_id", str(match.id)
+                )
+                if changed:
+                    UI.info(
+                        f"Configuracion chat_id de '{settings_name}' se actualizada a {match.id}."
+                    )
+                else:
+                    if str(config_value) == str(match.id):
+                        UI.info(
+                            f"Configuracion chat_id de '{settings_name}' ya estaba configurada a {match.id}."
+                        )
+                    else:
+                        UI.error("No se pudo configurar la chat_id.")
+                        raise typer.Exit(1)
+            return
+
+        # Se encontraron varios ganadores, asi que el resultado es ambiguo.
+        if result.is_ambiguous:
+            UI.warn(f"Ambigüedad: Hay {len(result.conflicts)} chats con ese nombre.")
+            _print_chat_table(result.conflicts, "Conflictos Encontrados")
+            UI.info(
+                "Usa el ID exacto para configurar: [bold]config set chat_id <ID>[/]"
+            )
+            raise typer.Exit(1)
+
+        # No se encontro ningun ganador, pero se encontraron sugerencias.
+        if result.needs_help:
+            UI.error(f"No se encontro ningun chat {search_desc}.")
+            _print_chat_table(result.suggestions, "Quizas quisiste decir:")
+            UI.info(
+                "Tip: Si no encuentras lo que buscas, intenta aumentar la profundidad con --depth."
+            )
+            raise typer.Exit(1)
+
+        # No se encontro ningun ganador ni sugerencias.
+        UI.error(f"No se encontro ningun chat relacionado con '{query}'.")
+        raise typer.Exit(1)
+
+
+def _print_chat_table(matches: list[ChatMatch], title: str):
+    """Helper para mostrar resultados de chats en formato tabla."""
+    table = Table(title=title, show_header=True, header_style="bold magenta")
+    table.add_column("ID", style="dim")
+    table.add_column("Titulo")
+    table.add_column("Username")
+    table.add_column("Tipo")
+
+    for m in matches:
+        table.add_row(
+            str(m.id), m.title, f"@{m.username}" if m.username else "-", m.type
+        )
+    console.print(table)
 
 
 # @app.command("remove")

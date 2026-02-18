@@ -42,7 +42,7 @@ def get_friendly_chat_name(chat_id: str, database_path: str) -> str:
             if chat:
                 return f"{chat.title}"
 
-    return "[Destino sin identificar]"
+    return chat_id
 
 
 def handle_list_operation(

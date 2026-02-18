@@ -91,17 +91,14 @@ class SettingsManager:
         - Si se proporciona `settings_name`, verifica que exista.
         - Si no se proporciona, utiliza el perfil activo.
         - Si la validación falla y `error` es True, lanza ValueError;
-        de lo contrario, solo registra devuelve None.
+        de lo contrario, devuelve None.
 
         Args:
             settings_name (Optional[str]): Nombre del perfil a validar.
             error (bool): Indica si se debe lanzar una excepción en caso de error.
 
-        Returns:
-            str: Nombre del perfil validado o del perfil activo.
-
         Raises:
-            ValueError: Si el perfil no existe o no hay perfil activo y `error` es True.
+            ValueError: Si no se logra resolver el perfil y `error` es True.
         """
 
         if settings_name:

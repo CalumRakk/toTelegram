@@ -24,11 +24,11 @@ class TelegramSession:
 
     def __init__(
         self,
+        worktable: Path | str,
         settings: Optional[Settings] = None,
         session_name: Optional[str] = None,
         api_id: Optional[int] = None,
         api_hash: Optional[str] = None,
-        workdir: Optional[Path] = None,
     ):
         self.client: Optional[Client] = None
 
@@ -36,10 +36,9 @@ class TelegramSession:
             self.name = settings.profile_name
             self.api_id = settings.api_id
             self.api_hash = settings.api_hash
-            self.workdir = settings.profile_path
-
+            self.workdir = worktable
         else:
-            if not all([session_name, api_id, api_hash, workdir]):
+            if not all([session_name, api_id, api_hash, worktable]):
                 raise ValueError(
                     "Debes proveer 'settings' O 'session_name, api_id, api_hash, workdir'"
                 )
@@ -47,7 +46,7 @@ class TelegramSession:
             self.name = session_name
             self.api_id = api_id
             self.api_hash = api_hash
-            self.workdir = workdir
+            self.workdir = worktable
 
     def start(self) -> Client:
         """Inicia la conexión manualmente."""

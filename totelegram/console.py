@@ -1,3 +1,5 @@
+from contextlib import contextmanager
+
 from rich.console import Console
 from rich.theme import Theme
 
@@ -30,3 +32,9 @@ class UI:
     @staticmethod
     def error(message: str, **kwargs):
         console.print(f"[error]X[/] {message}", **kwargs)
+
+    @classmethod
+    @contextmanager
+    def loading(cls, message: str):
+        with console.status(f"[bold green]{message}"):
+            yield

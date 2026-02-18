@@ -133,11 +133,11 @@ class ValidationService:
         from pyrogram.errors import ChatWriteForbidden
         from pyrogram.types import ChatMember
 
-        UI.info(f"[dim]Verificando permisos de escritura en {chat.type.value}...[/dim]")
+        logger.debug(f"Verificando permisos de escritura en {chat.type.value}...")
 
         # Chat Privado (Mensajes guardados o DM)
         if chat.type == enums.ChatType.PRIVATE:
-            UI.info("[green][OK] Permiso de escritura verificado.[/green]")
+            logger.debug("Permiso de escritura verificado.")
             return True
 
         try:
@@ -160,7 +160,7 @@ class ValidationService:
             # Miembro normal
             if member.status == enums.ChatMemberStatus.MEMBER:
                 if chat.type == enums.ChatType.CHANNEL:
-                    UI.warn("[red]Los miembros no pueden escribir en canales.[/red]")
+                    logger.warning("Los miembros no pueden escribir en canales.")
                     return False
 
                 # En grupos, verificar restricciones globales o del chat

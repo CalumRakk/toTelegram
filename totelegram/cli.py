@@ -1,4 +1,6 @@
 import logging
+import re
+import sys
 from decimal import __version__
 from typing import Optional
 
@@ -9,7 +11,7 @@ from totelegram.core.schemas import CLIState
 logging.getLogger("dotenv").setLevel(logging.CRITICAL)
 
 from totelegram.commands import config, profile, upload
-from totelegram.console import UI, console
+from totelegram.console import console
 from totelegram.core.registry import SettingsManager
 from totelegram.logging_config import setup_logging
 
@@ -78,12 +80,21 @@ def main(
 
 
 def run_script():
-    """Entrada para setup.py"""
+    # Buscamos argumentos que sean exactamente números negativos (IDs de Telegram)
+    # "-1001809082497" -> "ID:-1001809082497"
+    regex = re.compile(r"^-?\d+$")
+    if len(sys.argv) > 1:
+        sys.argv = [f"ID:{arg}" if regex.match(arg) else arg for arg in sys.argv]
+
     try:
+        from totelegram.cli import app
+
         app()
     except Exception as e:
+        from totelegram.console import UI
+
         UI.error(str(e))
-        raise e
+        sys.exit(1)
 
 
 if __name__ == "__main__":
