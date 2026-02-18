@@ -6,7 +6,7 @@ from rich.panel import Panel
 from totelegram.commands.profile_ui import ProfileUI
 from totelegram.console import UI, console
 from totelegram.core.registry import ProfileManager
-from totelegram.core.setting import CHAT_ID_NOT_SET, Settings
+from totelegram.core.setting import Settings
 from totelegram.store.database import DatabaseSession
 from totelegram.store.models import TelegramChat
 from totelegram.utils import normalize_chat_id
@@ -20,12 +20,12 @@ if TYPE_CHECKING:
 ui = ProfileUI(console)
 
 
-def get_friendly_chat_name(settings: Settings) -> str:
+def get_friendly_chat_name(chat_id: str, database_path: str) -> str:
     """
     Aplica las reglas heurísticas para devolver un nombre amigable
     sin necesariamente golpear la red o la DB.
     """
-    val = str(settings.chat_id).lower().strip()
+    val = str(chat_id).lower().strip()
 
     if val.lower() in ["me", "self"]:
         return "Mensajes Guardados"
@@ -37,7 +37,7 @@ def get_friendly_chat_name(settings: Settings) -> str:
 
     # IDs Numéricos
     if val.replace("-", "").isdigit():
-        with DatabaseSession(settings.database_path):
+        with DatabaseSession(database_path):
             chat = TelegramChat.get_or_none(TelegramChat.id == int(val))
             if chat:
                 return f"{chat.title}"

@@ -1,420 +1,270 @@
-import glob
 import json
 import logging
-import shutil
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional, Tuple
+from typing import Any, Dict, List, NamedTuple, Optional, cast
 
-from dotenv import dotenv_values, set_key, unset_key
+from dotenv import dotenv_values
+from pydantic import ValidationError
 
-from totelegram.core.schemas import ProfileRegistry
 from totelegram.core.setting import (
-    AccesField,
-    AccessLevel,
+    APP_SESSION_NAME,
+    InfoField,
     Settings,
-    get_user_config_dir,
 )
+from totelegram.utils import VALUE_NOT_SET, get_user_config_dir
 
-APP_SESSION_NAME = "toTelegram"
-CONFIG_DIR = Path(get_user_config_dir(APP_SESSION_NAME))
 logger = logging.getLogger(__name__)
 
 
-class ProfileManager:
-    """
-    Gestiona el ciclo de vida de los perfiles.
-    Ahora las rutas son inyectadas o calculadas por instancia, no globales.
-    """
+class settings:
+    name: str
+    is_debug: bool
 
-    def __init__(self, base_dir: Optional[Path] = None):
-        self.config_dir = base_dir or Path(get_user_config_dir(APP_SESSION_NAME))
-        self.profiles_dir = self.config_dir / "profiles"
-        self.config_file = self.config_dir / "config.json"
-        self._override: Optional[str] = None
 
-        self._is_debug = False
-        self._ensure_structure()
+class Result(NamedTuple):
+    changed: bool
+    value: Any
 
-    def set_override(self, name: str):
-        """Establece un perfil como activo.
-        Util si usamos una instancia de Profile de forma global.
-        """
-        self._override = name
 
-    def _ensure_structure(self):
-        """Crea las carpetas necesarias solo cuando se instancia."""
-        self.config_dir.mkdir(parents=True, exist_ok=True)
-        self.profiles_dir.mkdir(parents=True, exist_ok=True)
-        if not self.config_file.exists():
-            self._save_registry(ProfileRegistry())
+class SettingsManager:
+    def __init__(self, worktable: Optional[Path] = None):
+        self.app_name = APP_SESSION_NAME
+        self.worktable = worktable or Path(get_user_config_dir(self.app_name))
+        self.settings_active_path = self.worktable / "settings_active"
+        self.profiles_dir = self.worktable / "profiles"
+        self.database_path = self.profiles_dir / f"{self.app_name}.sqlite"
 
-    def create(self, name: str, api_id: int, api_hash: str, chat_id: str) -> Path:
-        """Crea un nuevo perfil físico y lo registra."""
-        env_content = (
-            f"API_ID={api_id}\n"
-            f"API_HASH={api_hash}\n"
-            f"CHAT_ID={chat_id}\n"
-            f"PROFILE_NAME={name}\n"
-        )
+    def get_settings_path(self, name: str) -> Path:
+        """nombre -> profiles/nombre.json"""
+        return self.profiles_dir / f"{name.lower()}.env"
 
-        file_path = self.profiles_dir / f"{name}.env"
-        with open(file_path, "w") as f:
-            f.write(env_content)
+    def list_available_profiles(self) -> List[str]:
+        """Escanea el disco para ver qué perfiles hay realmente"""
+        return [f.stem for f in self.profiles_dir.glob("*.env")]
 
-        registry = self._load_registry()
-        registry.profiles[name] = str(file_path)
-        self._save_registry(registry)
-        return file_path
+    def settings_exists(self, name: str) -> bool:
+        return self.get_settings_path(name).exists()
 
-    def _load_registry(self) -> ProfileRegistry:
-        """Carga el JSON raw sin lógica extra."""
-        if not self.config_file.exists():
-            return ProfileRegistry()
+    def set_settings_name_as_active(self, name: str):
+        path = self.get_settings_path(name)
+        if not path.exists():
+            raise IOError(f"Se intentó activar el perfil '{name}', pero no existe.")
+
+        self.settings_active_path.parent.mkdir(parents=True, exist_ok=True)
+        self.settings_active_path.write_text(name)
+
+    def get_active_settings_name(self) -> str:
+        if not self.settings_active_path.exists():
+            raise IOError("No hay un perfil activo.")
+        return self.settings_active_path.read_text()
+
+    def active_settings_exists(self) -> bool:
+        return self.settings_active_path.exists()
+
+    def get_settings(self, settings_name: str) -> Settings:
+        settings_path = self.get_settings_path(settings_name)
+        if not settings_path.exists():
+            raise IOError(
+                f"El archivo de configuracion '{settings_path.name}' no existe."
+            )
+
         try:
-            with open(self.config_file, "r") as f:
-                return ProfileRegistry(**json.load(f))
-        except (json.JSONDecodeError, ValueError):
-            return ProfileRegistry()
+            settings = Settings(_env_file=settings_path)  # type: ignore
+            return settings
+        except (ValueError, ValidationError) as e:
+            logger.error(
+                f"El archivo de configuracion '{settings_path.name}' contiene errores:"
+            )
+            raise ValueError(f"Error de validacion: {e}")
 
-    def _save_registry(self, registry: ProfileRegistry):
-        with open(self.config_file, "w") as f:
-            f.write(registry.model_dump_json(indent=4))
+    @staticmethod
+    def get_default_settings() -> Settings:
+        return Settings(profile_name=VALUE_NOT_SET)
 
-    def resolve_name(self, override_name: Optional[str] = None) -> str:
+    def resolve_settings_name(
+        self, settings_name: Optional[str] = None, error: bool = True
+    ) -> Optional[str]:
         """
-        Resuelve el nombre del perfil con una jerarquía estricta:
-        1. Si se pasa override_name por parámetro (prioridad absoluta del programador).
-        2. Si se seteó el flag global --use en el CLI (_global_override).
-        3. Si existe un perfil activo en el registro (config.json).
+        Valida y resuelve el perfil de configuración a utilizar.
+        La operacion simplifica estos tres escenarios:
 
-        Si ninguna se cumple o el perfil resultante no existe, EXPLOTA.
+        - Si se proporciona `settings_name`, verifica que exista.
+        - Si no se proporciona, utiliza el perfil activo.
+        - Si la validación falla y `error` es True, lanza ValueError;
+        de lo contrario, solo registra devuelve None.
+
+        Args:
+            settings_name (Optional[str]): Nombre del perfil a validar.
+            error (bool): Indica si se debe lanzar una excepción en caso de error.
+
+        Returns:
+            str: Nombre del perfil validado o del perfil activo.
+
+        Raises:
+            ValueError: Si el perfil no existe o no hay perfil activo y `error` es True.
         """
-        # Intentamos obtener el nombre por jerarquía
-        target = override_name or self._override or self.active_name
 
-        if not target:
+        if settings_name:
+            if not self.settings_exists(settings_name):
+                logger.error(f"El perfil {settings_name} no existe.")
+                if error:
+                    raise ValueError(f"El perfil {settings_name} no existe.")
+            return settings_name
+
+        if not self.active_settings_exists():
+            logger.error("No hay un perfil activo.")
+            if error:
+                raise ValueError("No hay un perfil activo.")
+
+        try:
+            return self.get_active_settings_name()
+        except IOError:
+            logger.error("Error al obtener el perfil activo.")
+            if error:
+                raise ValueError("No hay un perfil activo.")
+
+    # --------------------------------
+    #  Métodos de escritura y sanidad
+    # --------------------------------
+
+    def _load_and_sanitize(self, settings_name: str) -> Dict[str, Any]:
+        """
+         Carga el contenido crudo del perfil y normaliza sus claves.
+
+        ¿Por qué este método y no usar Settings()? por:
+
+         1. Evita la contaminacion del archivo: Settings cargaría todos los valores por defecto
+            del sistema. Al guardar, el archivo (.model_dump()) pasaría de tener 3 líneas
+            a tener +20, dificultando la lectura humana.
+         2. Resiliencia: Si al archivo le faltan campos obligatorios (ej. profile_name),
+            Settings() lanzaría una validación fallida impidiendo incluso la lectura.
+            Este método permite cargar archivos "rotos" para repararlos.
+         3. Integridad: Evita que Pydantic descarte variables o metadatos presentes
+            en el archivo que no estén mapeados en el modelo actual.
+        """
+        path = self.get_settings_path(settings_name)
+        if not path.exists():
+            return {}
+
+        # dotenv_values devuelve todos los valores como strings.
+        raw_values = dotenv_values(path)
+        return {
+            k.lower(): Settings.validate_single_setting(k, v)
+            for k, v in raw_values.items()
+            if v is not None
+        }
+
+    def _write_all_settings(self, settings_name: str, data: Dict[str, Any]) -> None:
+        """Vuelca un diccionario completo al archivo .env
+
+        No verifica claves ni valor.
+        Se espera que el valor sea un objeto estandar de python.
+        """
+        path = self.get_settings_path(settings_name)
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        lines = [
+            f"{k.lower()}={json.dumps(v, ensure_ascii=False)}" for k, v in data.items()
+        ]
+
+        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    def set_setting(
+        self, settings_name: str, field_name: str, field_value: Any
+    ) -> Result:
+        """
+        Establece un valor de configuración especifico.
+
+        Returns:
+            Tuple[bool, Any]: (True si el valor cambió físicamente, Valor actual/final)
+        """
+        key_normalized = field_name.lower().strip()
+
+        new_value = Settings.validate_single_setting(key_normalized, field_value)
+
+        current_data = self._load_and_sanitize(settings_name)
+        if key_normalized in current_data:
+            old_value = current_data[key_normalized]
+            try:
+                old_value = Settings.validate_single_setting(key_normalized, old_value)
+            except Exception:
+                # Si el valor en el archivo estaba corrupto, forzamos el valor por defecto
+                return self.unset_setting(settings_name, key_normalized)
+
+            if old_value == new_value:
+                return Result(False, old_value)
+
+        current_data[key_normalized] = new_value
+        self._write_all_settings(settings_name, current_data)
+        return Result(True, new_value)
+
+    def unset_setting(self, settings_name: str, field_name: str):
+        """
+        Restablece un valor de configuración especifico a su valor por defecto.
+
+        Returns:
+            Tuple[bool, Any]: (True si el valor cambió físicamente, Valor por defecto)
+
+        """
+        key_normalized = field_name.lower().strip()
+
+        info = cast(InfoField, Settings.validate_key_access(False, key_normalized))
+
+        current_data = self._load_and_sanitize(settings_name)
+        if key_normalized in current_data:
+            del current_data[key_normalized]
+            self._write_all_settings(settings_name, current_data)
+            # Si la clave existia, fue elimina y ahora se usará el valor por defecto.
+            return Result(True, info.default_value)
+
+        # Si la clave no estaba en el archivo, es porque se está usando el valor por defecto.
+        return Result(False, info.default_value)
+
+    def add_setting(
+        self, settings_name: str, field_name: str, field_values: List[str]
+    ) -> Result:
+        """
+        Agrega elementos a una configuración de tipo lista sin duplicarlos.
+
+        Returns:
+            Tuple[bool, List[str]]: (True si se añadieron elementos nuevos, Lista final resultante)
+        """
+        key_normalized = field_name.lower().strip()
+        new_elements = Settings.validate_single_setting(key_normalized, field_values)
+        if not isinstance(field_values, list):
             raise ValueError(
-                "Operación fallida: No se especificó un perfil con '--use' "
-                "ni existe un perfil activo globalmente. "
-                "Usa 'totelegram profile switch <nombre>' para activar uno."
+                f"El campo '{key_normalized}' no es una lista, no se puede usar 'add'."
             )
 
-        # Validación de existencia (Strict)
-        if not self.exists(target):
-            raise ValueError(f"El perfil '{target}' no existe en el sistema.")
+        # Obtenemos el valor el valor del archivo (si lo hay) para comparar con el nuevo.
+        current_data = self._load_and_sanitize(settings_name)
 
-        return target
-
-    def activate(self, name: str):
-        """Establece un perfil como activo."""
-        registry = self._load_registry()
-        if name not in registry.profiles:
-            raise ValueError(f"El perfil '{name}' no existe.")
-
-        registry.active = name
-        self._save_registry(registry)
-
-    def get_registry(self) -> ProfileRegistry:
-        """Devuelve el registro completo, sincronizando archivos huérfanos si es necesario."""
-        return self._sync_registry_with_filesystem()
-
-    def exists(self, name: str) -> bool:
-        """Verifica si un perfil existe en el registro."""
-        registry = self._load_registry()
-        return name in registry.profiles
-
-    @property
-    def active_name(self) -> Optional[str]:
-        """Devuelve el nombre del perfil activo (sin sincronizar disco innecesariamente)."""
-        return self._load_registry().active
-
-    @property
-    def is_debug(self) -> bool:
-        return self._is_debug
-
-    def get_path(self, name: Optional[str] = None) -> Path:
-        """
-        Resuelve la ruta del archivo .env.
-        Si name es None, usa el activo.
-        """
-        registry = self.get_registry()
-        target = name or registry.active
-
-        if not target:
-            raise ValueError("No hay perfil activo ni especificado.")
-
-        if target not in registry.profiles:
-            raise ValueError(f"El perfil '{target}' no se encuentra en el registro.")
-
-        return Path(registry.profiles[target])
-
-    def get_config_values(
-        self, profile_name: Optional[str] = None
-    ) -> Dict[str, Optional[str]]:
-        """Devuelve el contenido raw del .env.
-
-        Si una Key viene del .env en mayuscula, se minimiza.
-        """
-        path = self.get_path(profile_name)
-        data = dotenv_values(path)
-        return {k.lower(): v for k, v in data.items()}
-
-    def get_settings(self, profile_name: Optional[str] = None) -> Settings:
-        if profile_name is None:
-            profile_name = self.active_name
-
-        env_path = self.get_path(profile_name)
-        settings = Settings(_env_file=env_path)  # type: ignore
-        if self._is_debug:
-            settings.database_name = "debug_inventory.sqlite"
-        return settings
-
-    def _validate_key_access(self, info: AccesField):
-        """Valida si el nivel de acceso permite la edición en el contexto actual."""
-        if info.level == AccessLevel.DEBUG_READONLY:
-            raise ValueError(
-                f"La configuracion '{info.field_name.upper()}' es de identidad (Solo Lectura)."
-            )
-
-        if info.level == AccessLevel.DEBUG_EDITABLE and not self._is_debug:
-            raise ValueError(
-                f"La configuracion '{info.field_name.upper()}' solo es modificable en modo --debug."
-            )
-
-    def update_config(self, key: str, value: Any, profile_name: Optional[str] = None):
-        """
-        Actualiza una configuracion de forma declarativa usando los metadatos de Settings.
-        """
-        key_lower = key.lower()
-        info = Settings.get_info(key_lower)
-
-        if not info:
-            raise ValueError(f"La configuracion '{key.upper()}' no existe.")
-
-        self._validate_key_access(info)
-
-        # Si esperamos una lista y recibimos un string (ej. desde CLI), intentamos parsear
-        processed_value = value
-        if "list" in info.type_annotation.lower() and isinstance(value, str):
-            if value.startswith("["):
-                try:
-                    processed_value = json.loads(value)
-                except json.JSONDecodeError:
-                    raise ValueError(
-                        f"Formato JSON invalido para la lista '{key.upper()}'."
+        current_list = []
+        if key_normalized in current_data:
+            try:
+                current_list = list(
+                    Settings.validate_single_setting(
+                        key_normalized, current_data[key_normalized]
                     )
-            else:
-                # Soporte para valores separados por coma: "val1, val2"
-                processed_value = [x.strip() for x in value.split(",") if x.strip()]
+                )
+            except (ValueError, TypeError):
+                # El valor en el archivo estaba corrupto, forzamos el valor por defecto
+                info = cast(InfoField, Settings.get_info(key_normalized))
+                current_list = info.default_value
 
-        validated_val = Settings.validate_single_setting(key_lower, processed_value)
+        # Solo se agregan los elementos que no estan ya en la lista
+        initial_count = len(current_list)
+        for item in new_elements:
+            if item not in current_list:
+                current_list.append(item)
 
-        # Convertimos a formato apto para .env (JSON para listas, string para el resto)
-        value_to_save = (
-            json.dumps(validated_val)
-            if isinstance(validated_val, list)
-            else str(validated_val)
-        )
+        changed = len(current_list) > initial_count
+        if changed:
+            current_data[key_normalized] = current_list
+            self._write_all_settings(settings_name, current_data)
 
-        self._write_to_env(key.upper(), value_to_save, profile_name)
-        return validated_val
+        return Result(changed, current_list)
 
-    def update_config_list(
-        self,
-        action: Literal["add", "remove"],
-        key: str,
-        values: List[str],
-        profile_name: Optional[str] = None,
-    ):
 
-        current_list = self._parse_env_list(key.upper(), profile_name)
-
-        if action == "add":
-            for val in values:
-                if val not in current_list:
-                    current_list.append(val)
-        elif action == "remove":
-            for val in values:
-                if val in current_list:
-                    current_list.remove(val)
-        return self.update_config(key, current_list, profile_name)
-
-    def _sync_registry_with_filesystem(self) -> ProfileRegistry:
-        """
-        Lógica de 'Sanidad': Verifica que los archivos listados en config.json existan,
-        y busca archivos .env nuevos que no estén registrados.
-        """
-        registry = self._load_registry()
-        dirty = False
-        valid_profiles = {}
-
-        for name, path_str in registry.profiles.items():
-            if Path(path_str).exists():
-                valid_profiles[name] = path_str
-            else:
-                logger.warning(f"Perfil roto eliminado del registro: '{name}'")
-                dirty = True
-
-        existing_env_files = glob.glob(str(self.config_dir / "*.env"))
-        for env_path in existing_env_files:
-            p_name = Path(env_path).stem
-            if p_name not in valid_profiles:
-                valid_profiles[p_name] = str(env_path)
-                dirty = True
-                logger.info(f"Perfil recuperado: '{p_name}'")
-
-        if dirty:
-            registry.profiles = valid_profiles
-            if registry.active and registry.active not in valid_profiles:
-                registry.active = None
-            self._save_registry(registry)
-
-        return registry
-
-    def _validate_key_is_modifiable(self, key: str):
-        key = key.lower()
-        if key not in Settings.model_fields:
-            raise ValueError(f"La configuración '{key.upper()}' no es válida.")
-
-        level = Settings.get_info(key)
-        if level == AccessLevel.DEBUG_READONLY:
-            raise ValueError(
-                f"La clave '{key.upper()}' es de identidad y no puede modificarse."
-            )
-
-        if level == AccessLevel.DEBUG_EDITABLE and not self._is_debug:
-            raise ValueError(
-                f"La clave '{key.upper()}' es una constante del sistema. "
-                "Para modificarla con fines de prueba, usa el modo --debug."
-            )
-
-    def _write_to_env(self, key: str, value: str, profile_name: Optional[str]):
-        path = self.get_path(profile_name)
-        success, _, _ = set_key(path, key, value, quote_mode="never")
-        if not success:
-            raise IOError(f"No se pudo escribir en {path}")
-
-    def _parse_env_list(self, key: str, profile_name: Optional[str]) -> List[str]:
-        raw = self.get_config_values(profile_name).get(key, "")
-        if not raw:
-            return []
-        try:
-            val = json.loads(raw)
-            return val if isinstance(val, list) else [str(val)]
-        except json.JSONDecodeError:
-            return [x.strip() for x in raw.split(",") if x.strip()]
-
-    def delete_profile(self, name: str):
-        """Elimina un perfil del registro y borra su archivo físico."""
-        registry = self._load_registry()
-        if name not in registry.profiles:
-            raise ValueError(f"El perfil '{name}' no existe.")
-
-        path_str = registry.profiles.pop(name)
-        self._save_registry(registry)
-
-        path = Path(path_str)
-        if path.exists():
-            path.unlink()
-
-        session_path = self.config_dir / f"{name}.session"
-        if session_path.exists():
-            session_path.unlink()
-
-    def unset_config(
-        self, key: str, profile_name: Optional[str] = None
-    ) -> Tuple[bool, Any]:
-        """
-        Elimina una clave del archivo .env para que Pydantic use el valor por defecto.
-        Retorna el valor por defecto que ha quedado activo.
-        """
-        key = key.upper()
-
-        self._validate_key_is_modifiable(key)
-
-        path = self.get_path(profile_name)
-
-        # intenta eliminar la clave del archivo físico
-        succes, _ = unset_key(path, key, quote_mode="never")
-        if not succes:
-            return False, None
-
-        # Instanciamos Settings para averiguar cuál es el default
-        field_info = Settings.model_fields.get(key.lower())
-
-        if field_info:
-            return True, field_info.default
-        return True, None
-
-    def fork_for_debug(self, source_name: str):
-
-        debug_name = f"{source_name}_debug"
-        debug_env_path = self.profiles_dir / f"{debug_name}.env"
-
-        values = self.get_config_values(source_name)
-        values["PROFILE_NAME"] = debug_name
-        values["DATABASE_NAME"] = "debug_inventory.sqlite"
-        values["CHAT_ID"] = "me"  # chat_id por defecto.
-
-        with open(debug_env_path, "w") as f:
-            for k, v in values.items():
-                f.write(f"{k}={v}\n")
-
-        # Clona la session de producción
-        source_session = self.profiles_dir / f"{source_name}.session"
-        debug_session = self.profiles_dir / f"{debug_name}.session"
-        if source_session.exists():
-            shutil.copy2(source_session, debug_session)
-        else:
-            logger.warning(f"No se encontró session para '{source_name}'.")
-            raise FileNotFoundError(f"No se encontró session para '{source_name}'")
-
-        registry = self._load_registry()
-        registry.profiles[debug_name] = str(debug_env_path)
-        self._save_registry(registry)
-        return debug_name
-
-    def _set_debug(self):
-        self._is_debug = True
-
-    def setup_debug_context(self, base_profile_name: Optional[str] = None):
-        """
-        Asegura que exista un perfil shadow y lo activa para la sesión actual.
-        """
-        base = base_profile_name or self.active_name
-        if not base:
-            raise ValueError(
-                "No se puede iniciar modo debug sin un perfil base activo o especificado."
-            )
-
-        if base.endswith("_debug"):
-            self.set_override(base)
-            return base
-
-        debug_name = f"{base}_debug"
-
-        if not self.exists(debug_name):
-            self.fork_for_debug(base)
-
-        self.set_override(debug_name)
-        self._set_debug()
-        return debug_name
-
-    def get_visible_settings(
-        self, profile_name: Optional[str] = None
-    ) -> List[Tuple[str, Any, AccesField]]:
-        """
-        Devuelve una tupla con field_name, value y nivel de acceso de las configuraciones visibles para el profile especificado.
-        """
-        all_values = self.get_config_values(profile_name)
-        visibles = []
-
-        for field_name, _ in Settings.model_fields.items():
-            info = Settings.get_info(field_name)
-            if info is None:
-                continue
-
-            current_value = all_values.get(field_name, info.default_value)
-            visibles.append((field_name, current_value, info))
-
-        return visibles
+class ProfileManager:
+    pass

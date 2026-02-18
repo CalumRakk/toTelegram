@@ -16,7 +16,9 @@ if TYPE_CHECKING:
 import filetype
 
 logger = logging.getLogger(__name__)
-CHAT_ID_NOT_SET = "NOT_SET"
+
+VALUE_NOT_SET = "NOT_SET"
+VALUE_NOT_SET = "NOT_SET"
 
 if sys.version_info >= (3, 12):
     from itertools import batched
@@ -117,7 +119,6 @@ def sleep_progress(seconds: float):
             logger.info(f"{i} segundos restantes...")
 
 
-
 def normalize_chat_id(value: str) -> Union[int, str]:
     """
     Normaliza un identificador de chat de Telegram.
@@ -142,8 +143,8 @@ def normalize_chat_id(value: str) -> Union[int, str]:
     """
 
     raw = str(value).strip()
-    if raw.upper() == CHAT_ID_NOT_SET or not raw:
-        return CHAT_ID_NOT_SET
+    if raw.upper() == VALUE_NOT_SET or not raw:
+        return VALUE_NOT_SET
 
     if raw.lower() in ["me", "self"]:
         return "me"
@@ -173,11 +174,3 @@ def get_user_config_dir(app_name: str) -> Path:
     else:
         # En Linux / Unix
         return Path(os.getenv("XDG_CONFIG_HOME", Path.home() / ".config")) / app_name
-
-def normalize_windows_name(name: str) -> str:
-    invalid_chars = r'[<>:"/\\|?*\x00-\x1F]'
-    name = re.sub(invalid_chars, "_", name)
-    name = name.rstrip(" .")
-    if len(name) < 0:
-        raise ValueError("Invalid name")
-    return name

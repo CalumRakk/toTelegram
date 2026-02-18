@@ -4,7 +4,6 @@ from typing import Optional
 import typer
 from rich.rule import Rule
 
-from totelegram.commands.config import resolve_and_store_chat_logic
 from totelegram.commands.profile_ui import ProfileUI
 from totelegram.commands.profile_utils import (
     _capture_chat_id_wizard,
@@ -12,8 +11,7 @@ from totelegram.commands.profile_utils import (
     validate_profile_name,
 )
 from totelegram.console import UI, console
-from totelegram.core.registry import ProfileManager
-from totelegram.core.setting import CHAT_ID_NOT_SET, Settings
+from totelegram.core.setting import VALUE_NOT_SET, Settings
 from totelegram.services.validator import ValidationService
 from totelegram.store.database import DatabaseSession
 from totelegram.store.models import TelegramChat
@@ -37,7 +35,7 @@ def list_profiles(
     quiet: bool = typer.Option(False, "--quiet", "-q", help="Salida silenciosa"),
 ):
     """Muestra la lista de perfiles si no se pasa un subcomando."""
-    pm: ProfileManager = ctx.obj
+    env: Env = ctx.obj
     registry = pm.get_registry()
     if not registry.profiles:
         UI.warn("No hay perfiles registrados.")
@@ -58,7 +56,9 @@ def create_profile(
         None, help="Chat ID (opcional para saltar asistente)"
     ),
 ):
-    pm: ProfileManager = ctx.obj
+    from totelegram.commands.config import resolve_and_store_chat_logic
+
+    env: Env = ctx.obj
     final_session = pm.profiles_dir / f"{profile_name}.session"
     temp_name = f"temp_{uuid.uuid4().hex[:8]}"
     temp_session = pm.profiles_dir / f"{temp_name}.session"
@@ -83,7 +83,7 @@ def create_profile(
 
         temp_session.rename(final_session)
         pm.create(
-            name=profile_name, api_id=api_id, api_hash=api_hash, chat_id=CHAT_ID_NOT_SET
+            name=profile_name, api_id=api_id, api_hash=api_hash, chat_id=VALUE_NOT_SET
         )
         UI.success(
             f"[green][v] Identidad salvada correctamente en {profile_name}.session[/green]"
@@ -106,13 +106,13 @@ def create_profile(
                     pm, resolved_chat, profile_name, client=client
                 )
                 if not success:
-                    resolved_chat = CHAT_ID_NOT_SET
+                    resolved_chat = VALUE_NOT_SET
             elif resolved_chat == "me":
                 pm.update_config("CHAT_ID", "me", profile_name=profile_name)
                 UI.success("[green][v] Destino configurado: Mensajes Guardados[/green]")
 
         console.print(Rule(style="dim"))
-        if resolved_chat != CHAT_ID_NOT_SET:
+        if resolved_chat != VALUE_NOT_SET:
             UI.success(
                 f"[bold green]Perfil '{profile_name}' listo para usar.[/bold green]"
             )
@@ -137,7 +137,7 @@ def use_profile(
     ),
 ):
     """Cambia el perfil activo."""
-    pm: ProfileManager = ctx.obj
+    env: Env = ctx.obj
     pm.get_registry()  # se usa para invocar a `_sync_registry_with_filesystem` y tener todo actualizado.
 
     if not profile_name:
@@ -172,7 +172,7 @@ def get_chat_name(settings: Settings) -> Optional[str]:
 def delete_profile(ctx: typer.Context, name: str):
     """Borra un perfil (archivo .env y .session)."""
     try:
-        pm: ProfileManager = ctx.obj
+        env: Env = ctx.obj
         pm.resolve_name(name)
     except ValueError as e:
         console.print(f"[bold red]Error:[/bold red] {e}")

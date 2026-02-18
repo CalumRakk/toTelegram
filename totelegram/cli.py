@@ -4,13 +4,16 @@ from typing import Optional
 
 import typer
 
+from totelegram.core.schemas import CLIState
+
 logging.getLogger("dotenv").setLevel(logging.CRITICAL)
 
 from totelegram.commands import config, profile, upload
 from totelegram.console import UI, console
-from totelegram.core.registry import ProfileManager
+from totelegram.core.registry import SettingsManager
 from totelegram.logging_config import setup_logging
 
+logger = logging.getLogger(__name__)
 COMMANDS_IGNORING_USE = ["profile", "version"]
 
 app = typer.Typer(
@@ -49,31 +52,30 @@ def main(
         help="Muestra la versión de la aplicación.",
     ),
     debug: bool = typer.Option(
-        False, "--debug", help="Activa el modo debug (DB independiente y logs detallados)."
-    )
+        False,
+        "--debug",
+        help="Activa el modo debug (DB independiente y logs detallados).",
+    ),
 ):
     """
     Callback principal. Se ejecuta antes que cualquier comando.
     Útil para configurar logging global.
     """
 
-    # Si ctx.obj ya existe (porque lo inyectamos en un test), lo usamos.
-    # Si no, creamos el de producción.
-    if ctx.obj is None:
-        ctx.obj = ProfileManager()
+    config_manager = SettingsManager()
+    active_profile = use or config_manager.get_active_settings_name()
 
-    pm : ProfileManager = ctx.obj
-    if debug:
-        debug_profile = pm.setup_debug_context(use)
+    if not active_profile:
+        logger.info("No se ha especificado ni hay un perfil activo en el sistema.")
 
+    if debug is True:
         setup_logging("debug_execution.log", logging.DEBUG)
         console.print(f"\n[bold yellow]MODO DEBUG ACTIVADO[/]")
-        console.print(f"[dim yellow]Perfil Shadow:[/][white] {debug_profile}\n")
 
-    elif use:
-        pm.set_override(use)
+    ctx.obj = CLIState(
+        manager=config_manager, settings_name=active_profile, is_debug=debug
+    )
 
-    ctx.obj = pm
 
 def run_script():
     """Entrada para setup.py"""

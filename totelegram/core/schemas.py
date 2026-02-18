@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 
 from totelegram import __version__
 from totelegram.core.enums import Strategy
+from totelegram.core.registry import SettingsManager
 
 MANIFEST_VERSION = "4.0"
 
@@ -69,3 +70,11 @@ class Inventory(BaseModel):
     scan_date: float
     scan_version: str
     db_path: str
+
+
+class CLIState(BaseModel):
+    manager: "SettingsManager"
+    settings_name: Optional[str]
+    is_debug: bool = False
+
+    model_config = {"arbitrary_types_allowed": True}
