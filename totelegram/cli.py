@@ -81,7 +81,7 @@ def main(
 
 def run_script():
     # Buscamos argumentos que sean exactamente números negativos (IDs de Telegram)
-    # "-1001809082497" -> "ID:-1001809082497"
+    # "-1001309586477" -> "ID:-1001309586477"
     regex = re.compile(r"^-?\d+$")
     if len(sys.argv) > 1:
         sys.argv = [f"ID:{arg}" if regex.match(arg) else arg for arg in sys.argv]
