@@ -39,6 +39,7 @@ def get_type_annotation(field: FieldInfo) -> str:
 
 def parse_comma_list(value):
     """Convierte 'a, b, c' o '["a", "b"]' en una lista real."""
+    # TODO: esta pensado para valores que esta en el archivo de configuracion. Para valores del cli no deberia ser tan permisivo.
     if isinstance(value, list):
         return value
 

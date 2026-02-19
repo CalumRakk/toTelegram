@@ -1,18 +1,16 @@
 from typing import TYPE_CHECKING, List, cast
 
 import typer
-from rich.markup import escape
-from rich.table import Table
 
-from totelegram.commands.config_logic import ConfigResolutionLogic, ConfigUpdateLogic
-from totelegram.commands.profile_ui import ProfileUI
-from totelegram.commands.profile_utils import (
-    get_friendly_chat_name,
+from totelegram.commands.config_logic import (
+    ConfigResolutionLogic,
+    ConfigUpdateLogic,
+    display_config_table,
 )
+from totelegram.commands.profile_ui import ProfileUI
 from totelegram.console import UI, console
-from totelegram.core.registry import SettingsManager
 from totelegram.core.schemas import CLIState
-from totelegram.core.setting import AccessLevel, Settings
+from totelegram.core.setting import Settings
 from totelegram.services.chat_resolver import ChatResolverService
 from totelegram.services.validator import ValidationService
 from totelegram.telegram import TelegramSession
@@ -23,76 +21,6 @@ if TYPE_CHECKING:
 
 app = typer.Typer(help="Configuración del perfil actual.")
 ui = ProfileUI(console)
-
-
-def mark_sensitive(value: int | str) -> str:
-    if not isinstance(value, (str, int)):
-        raise ValueError(
-            "mark_sensitive solo admite valores de tipo str o int para enmascarar."
-        )
-
-    value = str(value)
-    if len(value) <= 6:
-        display_val = "•" * len(value)
-    else:
-        display_val = value[:3] + "•" * (len(value) - 4) + value[-3:]
-
-    return display_val
-
-
-def display_config_table(maneger: SettingsManager, is_debug: bool, settings: Settings):
-    table = Table(
-        title="Configuración del Perfil", show_header=True, header_style="bold blue"
-    )
-    table.add_column("Opción (Key)")
-    table.add_column("Tipo")
-    table.add_column("Valor Actual")
-    table.add_column("Descripción")
-
-    default_settings = maneger.get_default_settings()
-    for field_name, default_value in default_settings.model_dump().items():
-        info = Settings.get_info(field_name)
-        if info is None:
-            continue
-
-        value = getattr(settings, field_name)
-        is_value_default = value != default_value
-        value_style = "bold green" if is_value_default else "dim white"
-
-        # Si es CHAT_ID, lo hace amigable.
-        if field_name.lower() == "chat_id":
-            value = get_friendly_chat_name(value, str(maneger.database_path))
-
-        # Oculta value sencille
-        if info.is_sensitive:
-            display_val = mark_sensitive(value)
-        else:
-            display_val = str(value)
-
-        # Agrega a la tabla los campo segun el nivel de acceso.
-        if is_debug and info.level == AccessLevel.DEBUG_READONLY:
-            table.add_row(
-                f"[grey0]{field_name.lower()}[/]",
-                f"[grey0]{escape(info.type_annotation)}[/]",
-                f"[grey0]{display_val}[/]",
-                f"[grey0]{info.description}[/]",
-            )
-        elif is_debug:
-            table.add_row(
-                field_name.lower(),
-                escape(info.type_annotation),
-                f"[{value_style}]{display_val}[/]",
-                info.description,
-            )
-        elif info.level == AccessLevel.EDITABLE:
-            table.add_row(
-                field_name.lower(),
-                escape(info.type_annotation),
-                f"[{value_style}]{display_val}[/]",
-                info.description,
-            )
-
-    console.print(table)
 
 
 @app.callback(invoke_without_command=True)
@@ -148,7 +76,7 @@ def set_configs(
 
     ui.announce_profile_used(settings_name)
 
-    logic = ConfigUpdateLogic(manager, state.is_debug)
+    logic = ConfigUpdateLogic(settings_name, manager, state.is_debug)
     updates = logic.parse_and_transform(args)
     logic.apply(settings_name, updates, action="set")
 
@@ -182,8 +110,21 @@ def unset_config(
         UI.info(f"La configuración [bold]{key}[/] esta usando su valor por defecto.")
 
 
+def validate_item(value: str) -> str:
+    if "," in value or value.strip().startswith("["):
+        UI.error("Formato no soportado. Usa: config <key> add 1 2 3")
+        raise typer.Exit()
+    return value
+
+
 @app.command("add")
-def add_to_list(ctx: typer.Context, key: str, values: List[str]):
+def add_to_list(
+    ctx: typer.Context,
+    key: str,
+    values: List[str] = typer.Argument(
+        ..., min=1, callback=lambda x: [validate_item(i) for i in x]
+    ),
+):
     """Agrega valores a una lista (ej. EXCLUDE_FILES)."""
     # TODO: agregar soporte a multiples configuraciones ¿deberia?
 
@@ -194,7 +135,8 @@ def add_to_list(ctx: typer.Context, key: str, values: List[str]):
 
     ui.announce_profile_used(settings_name)
 
-    logic = ConfigUpdateLogic(manager, state.is_debug)
+    logic = ConfigUpdateLogic(settings_name, manager, state.is_debug)
+
     updates_to_apply = logic.parse_and_transform([key, values])  # type: ignore
     logic.apply(settings_name, updates_to_apply, action="add")
 
