@@ -80,14 +80,13 @@ class SettingsManager:
     def get_profile(self, name: str) -> Optional[Profile]:
         return next((p for p in self.get_all_profiles() if p.name == name), None)
 
-    def delete_settings_profile(self, name: str) -> List[Path]:
+    def delete_profile(self, profile: Profile) -> List[Path]:
         """
         Elimina físicamente el conjunto de archivos del perfil.
         Retorna una lista de los archivos que fueron eliminados.
         """
-        name_lower = name.lower()
-        env_path = self.get_settings_path(name_lower)
-        session_path = self.profiles_dir / f"{name_lower}.session"
+        env_path = profile.path_env
+        session_path = profile.path_session
 
         deleted_files = []
 
@@ -100,7 +99,7 @@ class SettingsManager:
             deleted_files.append(session_path)
 
         if self.active_settings_exists():
-            if self.get_active_settings_name() == name_lower:
+            if self.get_active_settings_name() == profile.name:
                 self.settings_active_path.unlink()
 
         return deleted_files
@@ -116,9 +115,9 @@ class SettingsManager:
         self.settings_active_path.parent.mkdir(parents=True, exist_ok=True)
         self.settings_active_path.write_text(name)
 
-    def get_active_settings_name(self) -> str:
+    def get_active_settings_name(self) -> Optional[str]:
         if not self.settings_active_path.exists():
-            raise IOError("No hay un perfil activo.")
+            return None
         return self.settings_active_path.read_text()
 
     def active_settings_exists(self) -> bool:
@@ -145,7 +144,7 @@ class SettingsManager:
         return Settings(profile_name=VALUE_NOT_SET)
 
     def resolve_settings_name(
-        self, settings_name: Optional[str] = None, error: bool = True
+        self, settings_name: Optional[str] = None, strict: bool = True
     ) -> Optional[str]:
         """
         Valida y resuelve el perfil de configuración a utilizar.
@@ -153,7 +152,7 @@ class SettingsManager:
 
         - Si se proporciona `settings_name`, verifica que exista.
         - Si no se proporciona, utiliza el perfil activo.
-        - Si la validación falla y `error` es True, lanza ValueError;
+        - Si la validación falla y `strict` es True, lanza ValueError;
         de lo contrario, devuelve None.
 
         Args:
@@ -167,21 +166,21 @@ class SettingsManager:
         if settings_name:
             if not self.settings_exists(settings_name):
                 logger.error(f"El perfil {settings_name} no existe.")
-                if error:
+                if strict:
                     raise ValueError(f"El perfil {settings_name} no existe.")
             return settings_name
 
         if not self.active_settings_exists():
             logger.error("No hay un perfil activo.")
-            if error:
+            if strict:
                 raise ValueError("No hay un perfil activo.")
 
-        try:
-            return self.get_active_settings_name()
-        except IOError:
-            logger.error("Error al obtener el perfil activo.")
-            if error:
-                raise ValueError("No hay un perfil activo.")
+        active = self.get_active_settings_name()
+        if active:
+            return active
+
+        if strict:
+            raise ValueError("No hay un perfil activo.")
 
     # --------------------------------
     #  Métodos de escritura y sanidad

@@ -20,8 +20,6 @@
 # from totelegram.telegram import TelegramSession
 
 
-from typing import cast
-
 import typer
 
 from totelegram.commands.profile_logic import render_profiles_table
@@ -49,7 +47,6 @@ def list_profiles(
     """Muestra la lista de perfiles si no se pasa un subcomando."""
     state: CLIState = ctx.obj
     manager = state.manager
-    settings_name = cast(str, manager.resolve_settings_name(state.settings_name))
 
     profiles = manager.get_all_profiles()
     if not profiles:
@@ -57,11 +54,7 @@ def list_profiles(
         UI.info("Usa 'totelegram profile create' para empezar.")
         return
 
-    try:
-        active_profile = manager.get_active_settings_name()
-    except Exception:
-        active_profile = None
-
+    active_profile = manager.get_active_settings_name()
     render_profiles_table(manager, active_profile, profiles, quiet)
 
 
@@ -163,28 +156,66 @@ def list_profiles(
 #         raise typer.Exit(1)
 
 
-# @app.command("switch")
-# def use_profile(
-#     ctx: typer.Context,
-#     profile_name: str = typer.Argument(
-#         None, help="Nombre del perfil a activar globalmente", metavar="PERFIL"
-#     ),
-# ):
-#     """Cambia el perfil activo."""
-#     env: Env = ctx.obj
-#     pm.get_registry()  # se usa para invocar a `_sync_registry_with_filesystem` y tener todo actualizado.
+@app.command("switch")
+def switch_profile(
+    ctx: typer.Context,
+    name: str = typer.Argument(
+        ..., help="Nombre del perfil a activar globalmente", metavar="PERFIL"
+    ),
+):
+    """
+    Cambia el perfil activo del sistema.
+    Solo permite activar perfiles que estén completos (Configuración + Sesión).
+    """
+    state: CLIState = ctx.obj
+    manager = state.manager
 
-#     if not profile_name:
-#         raise typer.BadParameter(
-#             "Debes indicar un perfil. Ejemplo: totelegram profile switch <PROFILE-NAME>"
-#         )
+    profile = manager.get_profile(name)
+    if profile is None:
+        UI.error(f"El perfil '[bold]{name}[/]' no existe.")
+        UI.info(
+            "Usa [cyan]totelegram profile list[/cyan] para ver los perfiles disponibles."
+        )
+        raise typer.Exit(code=1)
 
-#     try:
-#         pm.activate(profile_name)
-#         UI.success(f"Ahora usando el perfil: [bold]{profile_name}[/]")
-#     except ValueError as e:
-#         console.print(f"[bold red]Error:[/bold red] {e}")
-#         list_profiles(ctx, quiet=True)
+    if not profile.is_trinity:
+        UI.error(
+            f"No se puede activar el perfil '[bold]{name}[/]' porque está incompleto."
+        )
+
+        if not profile.has_env:
+            UI.info("Falta el archivo de configuración (.env).")
+        if not profile.has_session:
+            UI.info("Falta el archivo de sesión de Telegram (.session).")
+
+        UI.warn(
+            f"Debes reparar o eliminar este perfil "
+            f"([cyan]totelegram profile delete {name}[/cyan]) antes de usarlo."
+        )
+        raise typer.Exit(code=1)
+
+    current_active = manager.get_active_settings_name()
+    if str(current_active).lower() == name.lower():
+        UI.info(f"El perfil '[bold]{name}[/]' ya es el perfil activo.")
+        return
+
+    try:
+        manager.set_settings_name_as_active(name)
+        UI.success(
+            f"Perfil cambiado exitosamente. Ahora usando: [bold green]{name}[/bold green]"
+        )
+
+        settings = manager.get_settings(name)
+        destino = (
+            settings.chat_id
+            if settings.chat_id != "NOT_SET"
+            else "[yellow]Sin configurar[/yellow]"
+        )
+        UI.info(f"Destino actual: {destino}")
+
+    except Exception as e:
+        UI.error(f"Ocurrió un error al intentar activar el perfil: {e}")
+        raise typer.Exit(code=1)
 
 
 # def get_chat_name(settings: Settings) -> Optional[str]:
@@ -200,24 +231,6 @@ def list_profiles(
 
 #         if chat:
 #             return chat.title
-
-
-# @app.command("delete")
-# def delete_profile(ctx: typer.Context, name: str):
-#     """Borra un perfil (archivo .env y .session)."""
-#     try:
-#         env: Env = ctx.obj
-#         pm.resolve_name(name)
-#     except ValueError as e:
-#         console.print(f"[bold red]Error:[/bold red] {e}")
-#         list_profiles(ctx, quiet=True)
-#         raise typer.Exit(code=1)
-
-#     if typer.confirm(
-#         f"¿Estás seguro de que deseas borrar el perfil '{name}' y su configuración?"
-#     ):
-#         pm.delete_profile(name)
-#         UI.success(f"Perfil '[bold]{name}[/]' eliminado.")
 
 
 @app.command("delete")
@@ -249,7 +262,7 @@ def delete_profile(
             return
 
     try:
-        deleted = manager.delete_settings_profile(name)
+        deleted = manager.delete_profile(profile)
 
         if deleted:
             UI.success(f"Perfil '{name}' eliminado correctamente.")

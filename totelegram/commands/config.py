@@ -31,7 +31,7 @@ def main(ctx: typer.Context):
 
     state: CLIState = ctx.obj
     manager = state.manager
-    settings_name = manager.resolve_settings_name(state.settings_name, error=False)
+    settings_name = manager.resolve_settings_name(state.settings_name, strict=False)
 
     title = "Configuración"
     if settings_name:
