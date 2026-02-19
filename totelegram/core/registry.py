@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any, Dict, List, NamedTuple, Optional, cast
 
 from dotenv import dotenv_values
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from totelegram.core.setting import (
     APP_SESSION_NAME,
@@ -14,6 +14,25 @@ from totelegram.core.setting import (
 from totelegram.utils import VALUE_NOT_SET, get_user_config_dir
 
 logger = logging.getLogger(__name__)
+
+
+class Profile(BaseModel):
+    name: str
+    path_env: Path
+    path_session: Path
+
+    @property
+    def has_env(self):
+        return self.path_env.exists()
+
+    @property
+    def has_session(self):
+        return self.path_session.exists()
+
+    @property
+    def is_trinity(self):
+        """Un perfil es trinity si tiene ambos archivos y su nombre."""
+        return self.has_env and self.has_session
 
 
 class settings:
@@ -38,7 +57,7 @@ class SettingsManager:
         """nombre -> profiles/nombre.json"""
         return self.profiles_dir / f"{name.lower()}.env"
 
-    def get_all_profile_stems(self) -> List[str]:
+    def _get_all_profile_stems(self) -> List[str]:
         """Busca todos los nombres únicos que tienen un .env o un .session"""
         if not self.profiles_dir.exists():
             return []
@@ -48,6 +67,43 @@ class SettingsManager:
             if f.suffix in [".env", ".session"]:
                 stems.add(f.stem)
         return sorted(list(stems))
+
+    def get_all_profiles(self) -> List[Profile]:
+        profiles = []
+        for name in self._get_all_profile_stems():
+            path_env = self.profiles_dir / f"{name}.env"
+            path_session = self.profiles_dir / f"{name}.session"
+            profile = Profile(name=name, path_env=path_env, path_session=path_session)
+            profiles.append(profile)
+        return profiles
+
+    def get_profile(self, name: str) -> Optional[Profile]:
+        return next((p for p in self.get_all_profiles() if p.name == name), None)
+
+    def delete_settings_profile(self, name: str) -> List[Path]:
+        """
+        Elimina físicamente el conjunto de archivos del perfil.
+        Retorna una lista de los archivos que fueron eliminados.
+        """
+        name_lower = name.lower()
+        env_path = self.get_settings_path(name_lower)
+        session_path = self.profiles_dir / f"{name_lower}.session"
+
+        deleted_files = []
+
+        if env_path.exists():
+            env_path.unlink()
+            deleted_files.append(env_path)
+
+        if session_path.exists():
+            session_path.unlink()
+            deleted_files.append(session_path)
+
+        if self.active_settings_exists():
+            if self.get_active_settings_name() == name_lower:
+                self.settings_active_path.unlink()
+
+        return deleted_files
 
     def settings_exists(self, name: str) -> bool:
         return self.get_settings_path(name).exists()

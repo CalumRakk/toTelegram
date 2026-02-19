@@ -24,7 +24,7 @@ from typing import cast
 
 import typer
 
-from totelegram.commands.profile_logic import Profile, render_profiles_table
+from totelegram.commands.profile_logic import render_profiles_table
 from totelegram.commands.profile_ui import ProfileUI
 from totelegram.console import UI, console
 from totelegram.core.schemas import CLIState
@@ -50,10 +50,9 @@ def list_profiles(
     state: CLIState = ctx.obj
     manager = state.manager
     settings_name = cast(str, manager.resolve_settings_name(state.settings_name))
-    settings = manager.get_settings(settings_name)
 
-    stems = manager.get_all_profile_stems()
-    if not stems:
+    profiles = manager.get_all_profiles()
+    if not profiles:
         UI.warn("No se encontraron perfiles en el sistema.")
         UI.info("Usa 'totelegram profile create' para empezar.")
         return
@@ -62,13 +61,6 @@ def list_profiles(
         active_profile = manager.get_active_settings_name()
     except Exception:
         active_profile = None
-
-    profiles = []
-    for name in stems:
-        path_env = manager.profiles_dir / f"{name}.env"
-        path_session = manager.profiles_dir / f"{name}.session"
-        profile = Profile(name=name, path_env=path_env, path_session=path_session)
-        profiles.append(profile)
 
     render_profiles_table(manager, active_profile, profiles, quiet)
 
@@ -226,3 +218,48 @@ def list_profiles(
 #     ):
 #         pm.delete_profile(name)
 #         UI.success(f"Perfil '[bold]{name}[/]' eliminado.")
+
+
+@app.command("delete")
+def delete_profile(
+    ctx: typer.Context,
+    name: str = typer.Argument(..., help="Nombre del perfil a eliminar"),
+    force: bool = typer.Option(
+        False, "--yes", "-y", help="Confirmar borrado sin preguntar"
+    ),
+):
+    state: CLIState = ctx.obj
+    manager = state.manager
+
+    profile = manager.get_profile(name)
+    if profile is None:
+        UI.error(f"No se encontró perfil con el nombre '{name}'.")
+        raise typer.Exit(code=1)
+
+    if not profile.has_env and not profile.has_session:
+        UI.error("No se encontraron archivos para el perfil.")
+        raise typer.Exit(code=1)
+
+    if not force:
+        console.print()
+        UI.warn(f"¿Estás seguro de que deseas eliminar el perfil '{name}'? \n")
+        confirm = typer.confirm("Confirmar")
+        if not confirm:
+            UI.info("Operación cancelada.")
+            return
+
+    try:
+        deleted = manager.delete_settings_profile(name)
+
+        if deleted:
+            UI.success(f"Perfil '{name}' eliminado correctamente.")
+            for f in deleted:
+                UI.info(f"Archivo eliminado: [dim]{f.name}[/dim]")
+        else:
+            UI.warn(
+                f"No se encontraron archivos físicos para '{name}', pero el sistema se aseguró de limpiar el rastro."
+            )
+
+    except Exception as e:
+        UI.error(f"Error al eliminar el perfil: {e}")
+        raise typer.Exit(code=1)

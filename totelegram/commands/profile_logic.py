@@ -1,31 +1,10 @@
-from pathlib import Path
 from typing import List, Optional
 
-from pydantic import BaseModel
 from rich.table import Table
 
 from totelegram.console import UI, console
-from totelegram.core.registry import SettingsManager
+from totelegram.core.registry import Profile, SettingsManager
 from totelegram.utils import VALUE_NOT_SET
-
-
-class Profile(BaseModel):
-    name: str
-    path_env: Path
-    path_session: Path
-
-    @property
-    def has_env(self):
-        return self.path_env.exists()
-
-    @property
-    def has_session(self):
-        return self.path_session.exists()
-
-    @property
-    def is_trinity(self):
-        """Un perfil es trinity si tiene ambos archivos y su nombre."""
-        return self.has_env and self.has_session
 
 
 def render_profiles_table(
