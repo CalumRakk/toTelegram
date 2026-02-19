@@ -1,10 +1,10 @@
-from typing import TYPE_CHECKING, Any, List, Literal, cast
+from typing import TYPE_CHECKING, List, cast
 
 import typer
 from rich.markup import escape
 from rich.table import Table
 
-from totelegram.commands.config_logic import ConfigResolutionLogic
+from totelegram.commands.config_logic import ConfigResolutionLogic, ConfigUpdateLogic
 from totelegram.commands.profile_ui import ProfileUI
 from totelegram.commands.profile_utils import (
     get_friendly_chat_name,
@@ -118,81 +118,6 @@ def main(ctx: typer.Context):
     ui.print_options_help_footer()
 
 
-def parse_key_value_pairs(args: List[str]) -> dict[str, str]:
-    """Convierte una lista de pares ([k1, v1, k2, v2]) a un diccionario: {k1: v1, k2: v2}."""
-
-    # TODO: Hacer más explicito que el valor del par puede ser Any, aunque normalmente se espera que sea un string.
-    if not args or len(args) % 2 != 0:
-        UI.error("Debes proporcionar pares de CLAVE y VALOR. Ej: 'set chat_id 12345'")
-        raise typer.Exit(1)
-
-    # [k1, v1, k2, v2] -> {k1: v1, k2: v2}
-    raw_data = {args[i].lower(): args[i + 1] for i in range(0, len(args), 2)}
-    return raw_data
-
-
-def transform_values(raw_data: dict[str, str]) -> dict[str, Any]:
-    """Transforma los valores a los tipos correctos."""
-    updates_to_apply = {}
-    errors = []
-
-    UI.info("Procesando cambios...")
-    for key, raw_value in raw_data.items():
-        try:
-            clean_value = Settings.validate_single_setting(key, raw_value)
-            updates_to_apply[key] = clean_value
-        except ValueError as e:
-            errors.append(f"[bold red]{key.upper()}[/]: {str(e)}")
-
-    if errors:
-        UI.error("Se encontraron errores de validacion. No se aplico ningun cambio:")
-        for err in errors:
-            console.print(f"  - {err}")
-        raise typer.Exit(1)
-
-    return updates_to_apply
-
-
-def apply_changes(
-    action: Literal["set", "add"],
-    is_debug: bool,
-    settings_name: str,
-    manager: SettingsManager,
-    updates_to_apply: dict[str, Any],
-):
-    """Aplica los cambios a la configuración.
-
-    Solo aplica los cambios a los campos a los que se le tiene permiso de edicion.
-    """
-    results = []
-    for field_name, field_value in updates_to_apply.items():
-        try:
-            Settings.validate_key_access(is_debug, field_name)
-            if action == "set":
-                result = manager.set_setting(settings_name, field_name, field_value)
-            elif action == "add":
-                result = manager.add_setting(settings_name, field_name, field_value)
-            else:
-                raise ValueError(f"Invalid action: {action}")
-
-            results.append((field_name, result))
-        except Exception as e:
-            UI.error(f"Error persistiendo {field_name}: {e}")
-
-    # if action == "set":
-    #     UI.success("Cambios guardados.")
-    # else:
-    #     UI.success("Cambios añadidos.")
-
-    for field_name, result in results:
-        changed = result[0]
-        value = result[1]
-        if changed:
-            UI.info(f"{field_name.upper()} -> '{value}'")
-        else:
-            UI.info(f"{field_name.upper()} -> No se modifico.")
-
-
 @app.command(name="set")
 def set_configs(
     ctx: typer.Context,
@@ -219,15 +144,13 @@ def set_configs(
     """
     state: CLIState = ctx.obj
     manager = state.manager
-    is_debug = state.is_debug
     settings_name = cast(str, manager.resolve_settings_name(state.settings_name))
 
     ui.announce_profile_used(settings_name)
 
-    raw_data = parse_key_value_pairs(args)
-    updates_to_apply = transform_values(raw_data)
-
-    apply_changes("set", is_debug, settings_name, manager, updates_to_apply)
+    logic = ConfigUpdateLogic(manager, state.is_debug)
+    updates = logic.parse_and_transform(args)
+    logic.apply(settings_name, updates, action="set")
 
 
 @app.command("unset")
@@ -271,9 +194,9 @@ def add_to_list(ctx: typer.Context, key: str, values: List[str]):
 
     ui.announce_profile_used(settings_name)
 
-    raw_data = parse_key_value_pairs([key, values])  # type: ignore
-    updates_to_apply = transform_values(raw_data)
-    apply_changes("add", is_debug, settings_name, manager, updates_to_apply)
+    logic = ConfigUpdateLogic(manager, state.is_debug)
+    updates_to_apply = logic.parse_and_transform([key, values])  # type: ignore
+    logic.apply(settings_name, updates_to_apply, action="add")
 
 
 # @app.command("wizard")

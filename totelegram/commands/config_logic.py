@@ -1,10 +1,11 @@
-from typing import List
+from typing import Any, Dict, List, Literal
 
 import typer
 from rich.table import Table
 
 from totelegram.console import UI, console
 from totelegram.core.registry import SettingsManager
+from totelegram.core.setting import Settings
 from totelegram.services.chat_resolver import ChatMatch
 from totelegram.services.validator import ValidationService
 
@@ -22,6 +23,80 @@ def print_chat_table(matches: List[ChatMatch], title: str):
             str(m.id), m.title, f"@{m.username}" if m.username else "-", str(m.type)
         )
     console.print(table)
+
+
+class ConfigUpdateLogic:
+    def __init__(self, manager: SettingsManager, is_debug: bool):
+        self.manager = manager
+        self.is_debug = is_debug
+
+    def _parse_key_value_pairs(self, args: List[str]) -> dict[str, str]:
+        """Convierte una lista de pares ([k1, v1, k2, v2]) a un diccionario: {k1: v1, k2: v2}."""
+
+        # TODO: Hacer más explicito que el valor del par puede ser Any, aunque normalmente se espera que sea un string.
+        if not args or len(args) % 2 != 0:
+            UI.error(
+                "Debes proporcionar pares de CLAVE y VALOR. Ej: 'set chat_id 12345'"
+            )
+            raise typer.Exit(1)
+
+        # [k1, v1, k2, v2] -> {k1: v1, k2: v2}
+        raw_data = {args[i].lower(): args[i + 1] for i in range(0, len(args), 2)}
+        return raw_data
+
+    def parse_and_transform(self, args: List[str]) -> Dict[str, Any]:
+        """Convierte lista de argumentos en un diccionario validado y tipado."""
+        if not args or len(args) % 2 != 0:
+            UI.error(
+                "Debes proporcionar pares de CLAVE y VALOR. Ej: 'set chat_id 12345'"
+            )
+            raise typer.Exit(1)
+
+        raw_data = self._parse_key_value_pairs(args)
+        updates_to_apply = {}
+        errors = []
+
+        UI.info("Procesando cambios...")
+        for key, raw_value in raw_data.items():
+            try:
+                Settings.validate_key_access(self.is_debug, key)
+                clean_value = Settings.validate_single_setting(key, raw_value)
+                updates_to_apply[key] = clean_value
+            except ValueError as e:
+                errors.append(f"[bold red]{key.upper()}[/]: {str(e)}")
+
+        if errors:
+            UI.error("Se encontraron errores de validación:")
+            for err in errors:
+                console.print(f"  - {err}")
+            raise typer.Exit(1)
+
+        return updates_to_apply
+
+    def apply(
+        self,
+        settings_name: str,
+        updates: Dict[str, Any],
+        action: Literal["set", "add"] = "set",
+    ):
+        """Persiste los cambios en el perfil indicado."""
+        for field_name, field_value in updates.items():
+            try:
+                if action == "set":
+                    changed, final_val = self.manager.set_setting(
+                        settings_name, field_name, field_value
+                    )
+                else:  # action == "add"
+                    changed, final_val = self.manager.add_setting(
+                        settings_name, field_name, field_value
+                    )
+
+                if changed:
+                    UI.info(f"{field_name.upper()} -> '{final_val}'")
+                else:
+                    UI.info(f"{field_name.upper()} -> No se modificó (mismo valor).")
+            except Exception as e:
+                UI.error(f"Error persistiendo {field_name}: {e}")
 
 
 class ConfigResolutionLogic:

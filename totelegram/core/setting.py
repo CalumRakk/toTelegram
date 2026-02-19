@@ -5,7 +5,6 @@ from typing import Annotated, Any, ClassVar, List, Optional, Union, cast, get_or
 
 from pydantic import BaseModel, BeforeValidator, Field, TypeAdapter, ValidationError
 from pydantic.fields import FieldInfo
-from pydantic_core import PydanticUndefined
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from totelegram.core.enums import DuplicatePolicy
@@ -151,10 +150,12 @@ class Settings(BaseSettings):
 
         description = field.description or "Sin descripción"
 
-        # Si un campo no tiene un valor por defecto, se considera requerido.
-        default_value = (
-            "Required" if field.default is PydanticUndefined else field.default
-        )
+        if field.is_required():
+            default_value = "Required"
+        elif field.default_factory is not None:
+            default_value = field.default_factory()  # type: ignore
+        else:
+            default_value = field.default
 
         if not isinstance(field.json_schema_extra, dict):
             return None

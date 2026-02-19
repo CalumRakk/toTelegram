@@ -66,7 +66,7 @@ class TestCliConfig(unittest.TestCase):
         )
 
         self.assertEqual(result.exit_code, 1)
-        self.assertIn("Se encontraron errores de validacion", result.stdout)
+        self.assertIn("debe ser de tipo \n'<class 'int'>'", result.stdout)
 
         # El valor original no debería haber cambiado
         settings = self.manager.get_settings(self.settings_name)
