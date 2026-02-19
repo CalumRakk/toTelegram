@@ -4,7 +4,7 @@ from typing import List, Optional
 from pydantic import BaseModel
 from rich.table import Table
 
-from totelegram.console import console
+from totelegram.console import UI, console
 from totelegram.core.registry import SettingsManager
 from totelegram.utils import VALUE_NOT_SET
 
@@ -51,6 +51,7 @@ def render_profiles_table(
     table.add_column("Config (.env)", style="green")
     table.add_column("Destino (Chat ID)", style="green")
 
+    was_orphan = False
     for profile in profiles:
         is_active = profile.name == active
 
@@ -73,8 +74,18 @@ def render_profiles_table(
             config_status = "[red][ MISSING ][/]"
             target_desc = "[dim]--[/]"
 
+        if not profile.is_trinity:
+            was_orphan = True
+
         table.add_row(
             active_marker, profile.name, auth_status, config_status, target_desc
         )
 
     console.print(table)
+
+    if was_orphan:
+        console.print()
+        UI.warn("Se detecto al menos un perfil huérfano.")
+        UI.info(
+            f"Usa 'totelegram profile delete <PERFIL>' para limpiar archivos huérfanos"
+        )
