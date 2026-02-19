@@ -38,9 +38,16 @@ class SettingsManager:
         """nombre -> profiles/nombre.json"""
         return self.profiles_dir / f"{name.lower()}.env"
 
-    def list_available_profiles(self) -> List[str]:
-        """Escanea el disco para ver qué perfiles hay realmente"""
-        return [f.stem for f in self.profiles_dir.glob("*.env")]
+    def get_all_profile_stems(self) -> List[str]:
+        """Busca todos los nombres únicos que tienen un .env o un .session"""
+        if not self.profiles_dir.exists():
+            return []
+
+        stems = set()
+        for f in self.profiles_dir.glob("*"):
+            if f.suffix in [".env", ".session"]:
+                stems.add(f.stem)
+        return sorted(list(stems))
 
     def settings_exists(self, name: str) -> bool:
         return self.get_settings_path(name).exists()

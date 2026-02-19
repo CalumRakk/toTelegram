@@ -5,7 +5,6 @@ from contextlib import contextmanager
 from typing import TYPE_CHECKING, Dict, Generator, List, Optional, Union, cast
 
 from totelegram.console import UI, console
-from totelegram.core.schemas import CLIState
 from totelegram.telegram import TelegramSession
 
 if TYPE_CHECKING:
@@ -33,7 +32,7 @@ class ValidationService:
 
     @contextmanager
     def validate_session(
-        self, state: CLIState, profile_name: str, api_id: int, api_hash: str
+        self, worktable, profile_name: str, api_id: int, api_hash: str
     ) -> Generator[Client, None, None]:
         from pyrogram.errors import ApiIdInvalid, ApiIdPublishedFlood
         from pyrogram.types import Chat
@@ -44,7 +43,7 @@ class ValidationService:
                 session_name=profile_name,
                 api_id=api_id,
                 api_hash=api_hash,
-                worktable=state.manager.worktable,
+                worktable=worktable,
             ) as client:
 
                 me = cast(Chat, client.get_me())

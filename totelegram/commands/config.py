@@ -239,11 +239,12 @@ def resolve(
 
             resolver = ChatResolverService(client)
 
+            # TODO: mejorar el mensaje. Si se especifica un ID aparece como "chat llamado..."
             query_clean = query.replace("ID:", "").replace("id:", "").strip()
             search_desc = (
-                f"que contenga '[bold]{query}[/]' (sin distinción de mayúsculas y minúsculas)"
+                f"que contenga '[bold]{query_clean}[/]' (sin distinción de mayúsculas y minúsculas)"
                 if contains
-                else f"llamado exactamente '[bold]{query}[/]'"
+                else f"llamado exactamente '[bold]{query_clean}[/]'"
             )
 
             UI.info(f"Buscando chat {search_desc}")
