@@ -1,11 +1,11 @@
 from typing import TYPE_CHECKING, List, Literal
 
 import typer
-from rich.panel import Panel
 
 from totelegram.commands.profile_ui import ProfileUI
 from totelegram.console import UI, console
 from totelegram.core.registry import ProfileManager
+from totelegram.core.schemas import CLIState
 from totelegram.core.setting import Settings
 from totelegram.store.database import DatabaseSession
 from totelegram.store.models import TelegramChat
@@ -108,28 +108,30 @@ def validate_profile_name(ctx: typer.Context, profile_name: str):
 
     cleaned = normalize_string(profile_name)
     # TODO: un nombre como `mi-perfil` no es válido en isidentifier ¿es un error?
-    pm: ProfileManager = ctx.obj
+    state: CLIState = ctx.obj
+    manager = state.manager
 
     if not cleaned.isidentifier():
         raise typer.BadParameter(
             "El nombre del perfil solo puede contener letras, números y guiones bajos, y no puede comenzar con un número."
         )
-    profile_name = cleaned
 
-    if not pm.exists(cleaned):
-        return profile_name
+    existing_profile = manager.get_profile(profile_name)
+    if existing_profile is not None:
+        UI.error(f"No se puede crear el perfil '{profile_name}'.")
 
-    console.print(
-        Panel(
-            f"[bold red]El perfil '{profile_name}' ya existe.[/bold red]\n\n"
-            "Por seguridad y consistencia de datos (ADR-001), los perfiles son inmutables.\n"
-            f"Si deseas reutilizar este nombre, primero debes eliminar el perfil existente:\n\n"
-            f"   [yellow]totelegram profile delete {profile_name}[/yellow]",
-            title="Operación no permitida",
-            border_style="red",
-        )
-    )
-    raise typer.Exit(code=1)
+        if existing_profile.is_trinity:
+            UI.warn("El perfil existe.")
+        elif existing_profile.has_session:
+            UI.warn("Existe una sesión de Telegram huérfana con este nombre.")
+        elif existing_profile.has_env:
+            UI.warn("Existe un archivo de configuración (.env) sin sesión asociada.")
+
+        UI.info("Para empezar de cero, elimina los rastros primero usando:")
+        UI.info(f"[cyan]totelegram profile delete {profile_name}[/cyan]")
+        raise typer.Exit(code=1)
+
+    return cleaned
 
 
 def suggest_profile_activation(pm: ProfileManager, profile_name: str):
