@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Literal
+from typing import Any, Dict, List, Literal, Union
 
 import typer
 from rich.markup import escape
@@ -9,9 +9,9 @@ from totelegram.commands.profile_utils import (
 )
 from totelegram.console import UI, console
 from totelegram.core.registry import SettingsManager
-from totelegram.core.setting import AccessLevel, Settings
-from totelegram.services.chat_resolver import ChatMatch
-from totelegram.services.validator import ValidationService
+from totelegram.core.schemas import ChatMatch, CLIState, IntentType
+from totelegram.core.setting import SELF_CHAT_ALIASES, AccessLevel, Settings
+from totelegram.services.chat_access import ChatAccessService
 
 
 def mark_sensitive(value: int | str) -> str:
@@ -97,6 +97,23 @@ def display_config_table(maneger: SettingsManager, is_debug: bool, settings: Set
             )
 
     console.print(table)
+
+
+def classify_intent(query: Union[str, int]) -> IntentType:
+    if isinstance(query, int):
+        return IntentType.DIRECT_ID
+
+    clean = str(query).strip()
+    if clean.startswith("@"):
+        return IntentType.DIRECT_USERNAME
+
+    if "t.me/" in clean or "telegram.me/" in clean:
+        return IntentType.DIRECT_LINK
+
+    if clean.lower() in SELF_CHAT_ALIASES:
+        return IntentType.DIRECT_ALIAS
+
+    return IntentType.SEARCH_QUERY
 
 
 class ConfigUpdateLogic:
@@ -190,47 +207,26 @@ class ConfigUpdateLogic:
 
 
 class ConfigResolutionLogic:
-    def __init__(self, manager: SettingsManager):
-        self.manager = manager
-        self.validator = ValidationService()
+    def __init__(self, state: CLIState, chat_access: ChatAccessService):
+        self.state = state
+        self.manager = state.manager
+        self.chat_access = chat_access
 
-    def handle_search_result(self, client, result, settings_name, apply):
-        if result.is_resolved:
-            return self._process_winner(client, result.winner, settings_name, apply)
-
-        if result.is_ambiguous:
-            return self._process_ambiguity(result.conflicts)
-
-        if result.needs_help:
-            return self._process_suggestions(result.suggestions, result.query)
-
-        UI.error(f"No se encontró ningún chat relacionado con '{result.query}'.")
-        raise typer.Exit(1)
-
-    def _process_winner(self, client, match, settings_name, apply):
+    def process_winner(self, match, apply):
         UI.success(f"¡Encontrado! [bold]{match.title}[/] [dim](ID: {match.id})[/]")
-
-        with UI.loading("Verificando permisos..."):
-            can_write = self.validator.validate_send_action(client, match.id)
-
-        if not can_write:
-            UI.warn("No tienes permisos de escritura en el chat.")
-            raise typer.Exit(1)
-
         UI.success("Tienes permisos de escritura.")
-
         if apply:
-            self.manager.set_setting(settings_name, "chat_id", str(match.id))
-            UI.info(f"Configuración 'chat_id' actualizada.")
+            assert self.state.settings_name is not None
+            self.manager.set_setting(self.state.settings_name, "chat_id", str(match.id))
+            UI.success(f"Configuración 'chat_id' actualizada.")
 
-    def _process_ambiguity(self, conflicts):
+    def process_ambiguity(self, conflicts):
         UI.warn(f"Ambigüedad: Hay {len(conflicts)} chats con ese nombre.")
         print_chat_table(conflicts, "Conflictos Encontrados")
         UI.info("Usa el ID exacto: [bold]config set chat_id <ID>[/]")
         raise typer.Exit(1)
 
-    def _process_suggestions(self, suggestions, query):
-        UI.error(f"No se encontró el chat '{query}'.")
+    def process_suggestions(self, suggestions, query):
         print_chat_table(suggestions, "Quizás quisiste decir:")
         UI.info(
             "Tip: Si no encuentras lo que buscas, intenta aumentar la profundidad con --depth."

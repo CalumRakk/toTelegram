@@ -3,7 +3,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Optional, Union, cast
 
-from totelegram.core.schemas import AccessReport, AccessStatus
+from totelegram.console import UI
+from totelegram.core.schemas import AccessReport, AccessStatus, ChatMatch
 from totelegram.core.setting import normalize_chat_id
 
 if TYPE_CHECKING:
@@ -183,39 +184,40 @@ class ChatAccessService:
 
         Devuelve un AccessReport con el resultado del análisis.
         """
-        normalized_id = normalize_chat_id(query)
-        chat = self.get_chat(normalized_id)
-        if not chat:
+        with UI.loading("Verificando permisos..."):
+            normalized_id = normalize_chat_id(query)
+            chat = self.get_chat(normalized_id)
+            if not chat:
+                return AccessReport(
+                    status=AccessStatus.NOT_FOUND,
+                    reason=f"Telegram no reconoce el destino '{query}'.",
+                    hint="Tip: Si es un ID, asegúrate de haber interactuado con él. Si no, busca por nombre con 'config resolve'.",
+                )
+
+            from pyrogram.enums import ChatType
+
+            if chat.type != ChatType.PRIVATE:
+                # Nota:
+                # _get_membership puede ser llamado más de una vez durante el flujo.
+                # Asumo el costo a cambio de un código más legible.
+                if not self._get_membership(chat):
+                    return AccessReport(
+                        status=AccessStatus.NOT_MEMBER,
+                        chat=ChatMatch.from_chat(chat),
+                        reason=f"Encontré '{chat.title}', pero no eres miembro.",
+                        hint="Tip: Únete al grupo/canal en tu app de Telegram y vuelve a intentarlo.",
+                    )
+
+                if not self.can_interact(chat):
+                    return AccessReport(
+                        status=AccessStatus.RESTRICTED,
+                        chat=ChatMatch.from_chat(chat),
+                        reason=f"Eres miembro de '{chat.title}', pero no tienes permiso para enviar archivos.",
+                        hint="Tip: Solicita a un administrador que te otorgue permisos de escritura.",
+                    )
+
             return AccessReport(
-                status=AccessStatus.NOT_FOUND,
-                reason=f"Telegram no reconoce el destino '{query}'.",
-                hint="Tip: Si es un ID, asegúrate de haber interactuado con él. Si no, busca por nombre con 'config resolve'.",
+                status=AccessStatus.READY,
+                chat=ChatMatch.from_chat(chat),
+                reason="Acceso verificado correctamente.",
             )
-
-        from pyrogram.enums import ChatType
-
-        if chat.type != ChatType.PRIVATE:
-            # Nota:
-            # _get_membership puede ser llamado más de una vez durante el flujo.
-            # Asumo el costo a cambio de un código más legible.
-            if not self._get_membership(chat):
-                return AccessReport(
-                    status=AccessStatus.NOT_MEMBER,
-                    chat=chat,
-                    reason=f"Encontré '{chat.title}', pero no eres miembro.",
-                    hint="Tip: Únete al grupo/canal en tu app de Telegram y vuelve a intentarlo.",
-                )
-
-            if not self.can_interact(chat):
-                return AccessReport(
-                    status=AccessStatus.RESTRICTED,
-                    chat=chat,
-                    reason=f"Eres miembro de '{chat.title}', pero no tienes permiso para enviar archivos.",
-                    hint="Tip: Solicita a un administrador que te otorgue permisos de escritura.",
-                )
-
-        return AccessReport(
-            status=AccessStatus.READY,
-            chat=chat,
-            reason="Acceso verificado correctamente.",
-        )

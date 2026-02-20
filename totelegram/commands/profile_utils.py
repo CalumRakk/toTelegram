@@ -9,12 +9,9 @@ from totelegram.core.schemas import CLIState
 from totelegram.core.setting import Settings
 from totelegram.store.database import DatabaseSession
 from totelegram.store.models import TelegramChat
-from totelegram.utils import normalize_chat_id
 
 if TYPE_CHECKING:
     from pyrogram import Client  # type: ignore
-
-    from totelegram.services.validator import ValidationService
 
 
 ui = ProfileUI(console)

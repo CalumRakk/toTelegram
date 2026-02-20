@@ -5,14 +5,15 @@ import typer
 from totelegram.commands.config_logic import (
     ConfigResolutionLogic,
     ConfigUpdateLogic,
+    classify_intent,
     display_config_table,
 )
 from totelegram.commands.profile_ui import ProfileUI
 from totelegram.console import UI, console
 from totelegram.core.schemas import CLIState
-from totelegram.core.setting import Settings
-from totelegram.services.chat_resolver import ChatResolverService
-from totelegram.services.validator import ValidationService
+from totelegram.core.setting import Settings, normalize_chat_id
+from totelegram.services.chat_access import ChatAccessService
+from totelegram.services.chat_search import ChatSearchService
 from totelegram.telegram import TelegramSession
 
 if TYPE_CHECKING:
@@ -177,7 +178,7 @@ def add_to_list(
 
 
 @app.command("check")
-def check(ctx: typer.Context):
+def check_config(ctx: typer.Context):
     """Verifica que el perfil actual esté listo para subir archivos."""
     state: CLIState = ctx.obj
     manager = state.manager
@@ -187,73 +188,103 @@ def check(ctx: typer.Context):
     UI.info(f"Comprobando integridad del perfil: [bold]{state.settings_name}[/]")
 
     try:
-        with TelegramSession(state.manager.profiles_dir, settings=settings) as client:
-            from pyrogram.types import Chat, User
-
-            with UI.loading("Validando usuario..."):
-                me = cast(User, client.get_me())
-
-            UI.success(f"Conectado como: {me.first_name} (@{me.username})")
+        with TelegramSession(
+            session_name=settings_name,
+            api_hash=settings.api_hash,
+            api_id=settings.api_id,
+            worktable=manager.profiles_dir,
+        ) as client:
+            from pyrogram.types import Chat
 
             if settings.chat_id == "NOT_SET":
+                display_config_table(manager, state.is_debug, settings)
                 UI.warn("CHAT_ID no configurado.")
                 raise typer.Exit(code=1)
 
-            with UI.loading("Validando chat destino..."):
-                chat = cast(Chat, client.get_chat(settings.chat_id))
-
-            UI.success(f"Destino válido: {chat.title} ({chat.type})")
-
             with UI.loading("Verificando permisos..."):
-                validator = ValidationService()
-                has_permissions = validator._verify_permissions(client, chat)
+                validator = ChatAccessService(client)
+                access_report = validator.verify_access(settings.chat_id)
 
-            if not has_permissions:
+            if not access_report.is_ready:
                 UI.warn("No tienes permisos de escritura en el chat.")
                 raise typer.Exit(code=1)
 
             UI.success("Perfil listo para subir archivos.")
 
     except Exception as e:
-        UI.error(f"Error de configuracion: {str(e)}")
+        UI.error(f"Error de configuracion {str(e)}")
         raise typer.Exit(code=1)
 
 
-@app.command("resolve")
-def resolve(
+@app.command("search")
+def resolve_config(
     ctx: typer.Context,
     query: str = typer.Argument(..., help="Nombre, @username o ID."),
     contains: bool = typer.Option(False, "--contains", "-c"),
     depth: int = typer.Option(100, "--depth", "-d"),
     apply: bool = typer.Option(False, "--apply", "-a"),
 ):
+    """Busca y configura el chat de destino."""
     state: CLIState = ctx.obj
     manager = state.manager
     settings_name = cast(str, manager.resolve_settings_name(state.settings_name))
+
+    ui.announce_profile_used(settings_name)
+
     settings = manager.get_settings(settings_name)
 
-    logic = ConfigResolutionLogic(manager)
-    with console.status("Iniciando cliente de telegram...") as status:
-        with TelegramSession(manager.profiles_dir, settings=settings) as client:
-            status.stop()
+    chat_id = normalize_chat_id(query)
+    intent_type = classify_intent(chat_id)
 
-            resolver = ChatResolverService(client)
+    with TelegramSession(
+        session_name=settings_name,
+        api_id=settings.api_id,
+        api_hash=settings.api_hash,
+        worktable=manager.profiles_dir,
+    ) as client:
 
-            # TODO: mejorar el mensaje. Si se especifica un ID aparece como "chat llamado..."
-            query_clean = query.replace("ID:", "").replace("id:", "").strip()
-            search_desc = (
-                f"que contenga '[bold]{query_clean}[/]' (sin distinción de mayúsculas y minúsculas)"
-                if contains
-                else f"llamado exactamente '[bold]{query_clean}[/]'"
-            )
+        chat_access = ChatAccessService(client)
+        chat_searcher = ChatSearchService(client)
+        logic = ConfigResolutionLogic(state, chat_access)
 
-            UI.info(f"Buscando chat {search_desc}")
-            with UI.loading("Resolviendo..."):
-                result = resolver.resolve(
-                    query_clean, is_exact=not contains, depth=depth
-                )
+        if intent_type.is_direct:
+            report = chat_access.verify_access(chat_id)
+            if not report.is_ready:
+                UI.warn("No tienes permisos de escritura en el chat.")
+                UI.warn("Corrige los permisos antes de intentar cualquier subida.")
+                UI.warn("Configuración 'chat_id' no actualizada.")
+                raise typer.Exit(1)
 
-            logic.handle_search_result(client, result, settings_name, apply)
+            assert report.chat is not None
+            logic.process_winner(report.chat, apply)
+            raise typer.Exit(0)
+
+        print(chat_id, type(chat_id))
+        assert isinstance(chat_id, str), "chat_id is not a string"
+
+        is_exact = not contains
+        result = chat_searcher.search_by_name(chat_id, depth, is_exact)
+
+        if result.is_resolved:
+            report = chat_access.verify_access(chat_id)
+            if not report.is_ready:
+                UI.warn("No tienes permisos de escritura en el chat.")
+                UI.warn("Corrige los permisos antes de intentar cualquier subida.")
+                UI.warn("Configuración 'chat_id' no actualizada.")
+                raise typer.Exit(1)
+            assert report.chat is not None
+            logic.process_winner(report.chat, apply)
+            raise typer.Exit(0)
+
+        elif result.is_ambiguous:
+            logic.process_ambiguity(result.conflicts)
+
+        elif result.needs_help:
+            logic.process_suggestions(result.suggestions, result.query)
+
+        else:
+            UI.error(f"No se encontró ningún chat relacionado con '{result.query}'.")
+            raise typer.Exit(1)
 
 
 # @app.command("remove")

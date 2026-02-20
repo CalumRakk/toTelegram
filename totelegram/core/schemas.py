@@ -1,6 +1,9 @@
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Dict, List, Optional
+
+if TYPE_CHECKING:
+    from pyrogram.types import Chat
 
 from pydantic import BaseModel, Field
 
@@ -88,17 +91,6 @@ class AccessStatus(str, Enum):
     RESTRICTED = "restricted"  # Sin permisos de escritura
 
 
-class AccessReport(BaseModel):
-    status: AccessStatus
-    chat: Optional[Any] = None
-    reason: str  # Mensaje técnico/explicativo
-    hint: Optional[str] = None  # El "Tip" de UX para el usuario
-
-    @property
-    def is_ready(self) -> bool:
-        return self.status == AccessStatus.READY
-
-
 class ChatMatch(BaseModel):
     """Representación simplificada de un chat encontrado."""
 
@@ -106,6 +98,26 @@ class ChatMatch(BaseModel):
     title: str
     username: Optional[str] = None
     type: str
+
+    @staticmethod
+    def from_chat(chat: "Chat") -> "ChatMatch":
+        return ChatMatch(
+            id=chat.id,
+            title=chat.title or chat.first_name or "Sin Titulo",
+            username=chat.username,
+            type=str(chat.type),
+        )
+
+
+class AccessReport(BaseModel):
+    status: AccessStatus
+    chat: Optional[ChatMatch] = None
+    reason: str  # Mensaje técnico/explicativo
+    hint: Optional[str] = None  # El "Tip" de UX para el usuario
+
+    @property
+    def is_ready(self) -> bool:
+        return self.status == AccessStatus.READY
 
 
 class ChatResolution(BaseModel):

@@ -6,7 +6,7 @@ import sys
 from contextlib import nullcontext
 from pathlib import Path
 from time import sleep
-from typing import TYPE_CHECKING, Any, List, Union, cast
+from typing import TYPE_CHECKING, Any, List, cast
 
 from totelegram.console import console
 
@@ -117,51 +117,6 @@ def sleep_progress(seconds: float):
             logger.info(f"Faltan {mins_left} minutos...")
         elif i <= 10:  # Mostrar segundos finales
             logger.info(f"{i} segundos restantes...")
-
-
-def normalize_chat_id(value: str) -> Union[int, str]:
-    """
-    Normaliza un identificador de chat de Telegram.
-
-    Acepta alias ("me", "self"), IDs numéricos positivos o negativos,
-    y usernames con o sin "@". El resultado se devuelve en un formato
-    estándar compatible con la API de Telegram.
-
-    Logica:
-    - "me" / "self" -> "me"
-    - IDs numéricos -> int
-    - Usernames válidos -> "@username"
-
-    Args:
-        value (str): Identificador de destino a normalizar.
-
-    Returns:
-        Union[int, str]: Identificador normalizado.
-
-    Raises:
-        ValueError: Si el valor no corresponde a un destino válido.
-    """
-
-    raw = str(value).strip()
-    if raw.upper() == VALUE_NOT_SET or not raw:
-        return VALUE_NOT_SET
-
-    if raw.lower() in ["me", "self"]:
-        return "me"
-
-    clean_numeric = raw.replace("-", "")
-    if clean_numeric.isdigit():
-        return int(raw)
-
-    clean_username = raw.lstrip("@")
-
-    if re.match(r"^[a-zA-Z0-9_]+$", clean_username):
-        return f"@{clean_username}"
-
-    raise ValueError(
-        f"El destino '{raw}' no es válido. Debe ser 'me', un ID numérico "
-        "o un @username (ej: caracoltv)."
-    )
 
 
 def get_user_config_dir(app_name: str) -> Path:

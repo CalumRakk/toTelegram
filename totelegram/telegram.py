@@ -4,49 +4,41 @@ import json
 import locale
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Optional, cast
 
-from totelegram.core.setting import Settings
+from totelegram.console import console
 
 if TYPE_CHECKING:
     from pyrogram import Client  # type: ignore
+    from pyrogram import enums
     from pyrogram.enums import MessageMediaType
+    from pyrogram.errors import (
+        ApiIdInvalid,
+        ApiIdPublishedFlood,
+        ChannelPrivate,
+        ChatWriteForbidden,
+        PeerIdInvalid,
+        UsernameInvalid,
+    )
     from pyrogram.types import Chat, Message
+
 
 logger = logging.getLogger(__name__)
 
 
 class TelegramSession:
-    """
-    Context Manager centralizado para manejar el ciclo de vida del cliente de Telegram.
-    Soporta inicialización vía objeto Settings (uso normal) o parámetros directos (validación).
-    """
-
     def __init__(
         self,
+        session_name: str,
+        api_id: int,
+        api_hash: str,
         worktable: Path | str,
-        settings: Optional[Settings] = None,
-        session_name: Optional[str] = None,
-        api_id: Optional[int] = None,
-        api_hash: Optional[str] = None,
     ):
         self.client: Optional[Client] = None
-
-        if settings:
-            self.name = settings.profile_name
-            self.api_id = settings.api_id
-            self.api_hash = settings.api_hash
-            self.workdir = worktable
-        else:
-            if not all([session_name, api_id, api_hash, worktable]):
-                raise ValueError(
-                    "Debes proveer 'settings' O 'session_name, api_id, api_hash, workdir'"
-                )
-
-            self.name = session_name
-            self.api_id = api_id
-            self.api_hash = api_hash
-            self.workdir = worktable
+        self.name = session_name
+        self.api_id = api_id
+        self.api_hash = api_hash
+        self.workdir = worktable
 
     def start(self) -> Client:
         """Inicia la conexión manualmente."""
@@ -54,28 +46,42 @@ class TelegramSession:
             return self.client
 
         logger.info(f"Iniciando sesión de Telegram: {self.name}")
-        from pyrogram import Client  # type: ignore
 
         lang, encoding = locale.getdefaultlocale()
         iso639 = lang.split("_")[0] if lang else "en"
 
-        self.client = Client(
-            name=self.name,  # type: ignore
-            api_id=self.api_id,  # type: ignore
-            api_hash=self.api_hash,  # type: ignore
-            workdir=str(self.workdir),  # type: ignore
-            lang_code=iso639,
-            in_memory=False,
-            no_updates=True,
-        )
+        with console.status("Iniciando cliente de telegram...") as init_status:
+            from pyrogram import Client  # type: ignore
+            from pyrogram.types import Chat  # type: ignore
 
-        try:
-            self.client.start()  # type: ignore
-            logger.debug("Cliente Pyrogram iniciado correctamente")
-            return self.client
-        except Exception as e:
-            logger.error(f"Error iniciando cliente Telegram: {e}")
-            raise e
+            self.client = Client(
+                name=self.name,  # type: ignore
+                api_id=self.api_id,  # type: ignore
+                api_hash=self.api_hash,  # type: ignore
+                workdir=str(self.workdir),  # type: ignore
+                lang_code=iso639,
+                in_memory=False,
+                no_updates=True,
+            )
+
+            try:
+                self.client.start()  # type: ignore
+                me = cast(Chat, self.client.get_me())
+                logger.info(
+                    f"Cliente Pyrogram iniciado correctamente: {me.first_name} (@{me.username})"
+                )
+                init_status.stop()
+                return self.client
+
+            except ApiIdInvalid as e:
+                logger.debug("Error: API ID o Hash inválidos.")
+                raise e
+            except ApiIdPublishedFlood as e:
+                logger.debug("Error: API ID baneado públicamente.")
+                raise e
+            except Exception as e:
+                logger.debug(f"Error: inesperado: {e}")
+                raise e
 
     def stop(self):
         """Detiene la conexión manualmente."""

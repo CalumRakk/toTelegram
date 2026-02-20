@@ -2,12 +2,16 @@ from typing import Optional
 
 import typer
 
-from totelegram.commands.profile_logic import ProfileCreateLogic, render_profiles_table
+from totelegram.commands.config_logic import classify_intent
+from totelegram.commands.profile_logic import render_profiles_table
 from totelegram.commands.profile_ui import ProfileUI
 from totelegram.commands.profile_utils import validate_profile_name
 from totelegram.console import UI, console
-from totelegram.core.schemas import CLIState
-from totelegram.services.validator import ValidationService
+from totelegram.core.schemas import AccessStatus, CLIState
+from totelegram.core.setting import normalize_chat_id
+from totelegram.services.auth import AuthLogic
+from totelegram.services.chat_access import ChatAccessService
+from totelegram.telegram import TelegramSession
 from totelegram.utils import VALUE_NOT_SET
 
 app = typer.Typer(help="Gestión de perfiles de configuración.")
@@ -56,14 +60,47 @@ def create_profile(
     state: CLIState = ctx.obj
     manager = state.manager
 
-    validator = ValidationService()
-    validate_profile = ProfileCreateLogic(manager, profile_name)
+    auth = AuthLogic(state, api_id, api_hash, chat_id)
 
-    validate_profile.validate_profile_exists(profile_name)
+    auth.proccess()
 
-    validate_profile.proccess_login(profile_name, api_id, api_hash)
-    final_chat_id = validate_profile.procces_dest(validator, manager, profile_name, api_id, api_hash, chat_id)
-    validate_profile.store_chat_id_and_active_profile(final_chat_id)
+    settings = manager.get_settings(profile_name)
+
+    quey = normalize_chat_id(chat_id)
+    intent_type = classify_intent(quey)
+
+    if not intent_type.is_direct:
+        UI.warn(f"El chat_id {chat_id} no es correcto.")
+        UI.info("Utiliza [bold]config set chat_id <ID>[/] para configurarlo.")
+        UI.info("Si no sabes el ID, use [bold]totelegram config resolve[/].")
+        raise typer.Exit(1)
+
+    with TelegramSession(
+        session_name=profile_name,
+        api_id=settings.api_id,
+        api_hash=settings.api_hash,
+        worktable=manager.profiles_dir,
+    ) as client:
+
+        access_service = ChatAccessService(client)
+        report = access_service.verify_access(quey)
+        if report.status == AccessStatus.NOT_FOUND:
+            # TODO: aplicar aqui el winzard interactivo.
+            UI.warn(f"El chat_id {chat_id} no es correcto.")
+            UI.info("Utiliza [bold]config set chat_id <ID>[/] para configurarlo.")
+            UI.info("Si no sabes el ID, use [bold]totelegram config resolve[/].")
+            raise typer.Exit(1)
+
+        assert report.chat is not None
+
+        if report.is_ready:
+            UI.success("Tienes permisos de escritura.")
+            manager.set_setting(profile_name, "chat_id", str(report.chat.id))
+            UI.success(f"Configuración 'chat_id' actualizada.")
+        else:
+            UI.warn("No tienes permisos de escritura en el chat.")
+            UI.warn("Corrige los permisos antes de intentar cualquier subida.")
+            UI.warn("Configuración 'chat_id' no actualizada.")
 
 
 @app.command("switch")
