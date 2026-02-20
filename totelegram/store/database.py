@@ -24,6 +24,8 @@ class DatabaseSession:
 
         logger.debug(f"Iniciando base de datos en {self.db_path}")
 
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+
         self.db = peewee.SqliteDatabase(
             str(self.db_path),
             pragmas={"journal_mode": "wal", "cache_size": -1024 * 64},

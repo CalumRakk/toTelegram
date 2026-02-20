@@ -11,7 +11,7 @@ from totelegram.core.setting import (
     InfoField,
     Settings,
 )
-from totelegram.utils import VALUE_NOT_SET, get_user_config_dir
+from totelegram.utils import VALUE_NOT_SET
 
 logger = logging.getLogger(__name__)
 
@@ -46,9 +46,9 @@ class Result(NamedTuple):
 
 
 class SettingsManager:
-    def __init__(self, worktable: Optional[Path] = None):
+    def __init__(self, worktable: Path):
         self.app_name = APP_SESSION_NAME
-        self.worktable = worktable or Path(get_user_config_dir(self.app_name))
+        self.worktable = worktable
         self.settings_active_path = self.worktable / "settings_active"
         self.profiles_dir = self.worktable / "profiles"
         self.database_path = self.profiles_dir / f"{self.app_name}.sqlite"

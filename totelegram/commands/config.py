@@ -4,16 +4,16 @@ import typer
 
 from totelegram.commands.config_logic import (
     ConfigResolutionLogic,
-    ConfigUpdateLogic,
     classify_intent,
     display_config_table,
 )
 from totelegram.commands.profile_ui import ProfileUI
 from totelegram.console import UI, console
 from totelegram.core.schemas import CLIState
-from totelegram.core.setting import Settings, normalize_chat_id
+from totelegram.core.setting import normalize_chat_id
 from totelegram.services.chat_access import ChatAccessService
 from totelegram.services.chat_search import ChatSearchService
+from totelegram.services.config_service import ConfigService
 from totelegram.telegram import TelegramSession
 
 if TYPE_CHECKING:
@@ -77,9 +77,24 @@ def set_configs(
 
     ui.announce_profile_used(settings_name)
 
-    logic = ConfigUpdateLogic(settings_name, manager, state.is_debug)
-    updates = logic.parse_and_transform(args)
-    logic.apply(settings_name, updates, action="set")
+    try:
+        service = ConfigService(state.manager, state.is_debug)
+        updates = service.prepare_updates(args)
+        for key, val in updates.items():
+            changed, final_val = service.apply_update(
+                settings_name, key, val, action="set"
+            )
+            if changed:
+                UI.success(f"Configuracion [bold]{key}[/] actualizada.")
+            else:
+                UI.info(f"Configuracion [bold]{key}[/] ya tiene ese valor.")
+
+        settings = state.manager.get_settings(settings_name)
+        display_config_table(state.manager, state.is_debug, settings)
+
+    except ValueError as e:
+        UI.error(f"DEBUG ERROR: {str(e)}")
+        raise typer.Exit(1)
 
 
 @app.command("unset")
@@ -91,24 +106,17 @@ def unset_config(
     # TODO: agregar soporte a multiples configuraciones. ¿deberia?
     state: CLIState = ctx.obj
     manager = state.manager
-    is_debug = state.is_debug
     settings_name = cast(str, manager.resolve_settings_name(state.settings_name))
 
     ui.announce_profile_used(settings_name)
 
-    settings = manager.get_settings(settings_name)
-
-    info = Settings.validate_key_access(is_debug, key)
-
-    current_value = getattr(settings, key.lower(), None)
-    if current_value != info.default_value:
-        manager.unset_setting(settings_name, key)
-        manager.set_setting(settings_name, key, info.default_value)
-        UI.success(
-            f"La configuración [bold]{key}[/] ha sido restaurada a su valor por defecto."
-        )
-    else:
-        UI.info(f"La configuración [bold]{key}[/] esta usando su valor por defecto.")
+    try:
+        service = ConfigService(state.manager, state.is_debug)
+        default_val = service.restore_default(settings_name, key)
+        UI.success(f"Restaurado [bold]{key}[/] al valor por defecto: {default_val}")
+    except ValueError as e:
+        UI.error(str(e))
+        raise typer.Exit(1)
 
 
 def validate_item(value: str) -> str:
@@ -131,15 +139,28 @@ def add_to_list(
 
     state: CLIState = ctx.obj
     manager = state.manager
-    is_debug = state.is_debug
     settings_name = cast(str, manager.resolve_settings_name(state.settings_name))
 
     ui.announce_profile_used(settings_name)
 
-    logic = ConfigUpdateLogic(settings_name, manager, state.is_debug)
+    try:
+        service = ConfigService(state.manager, state.is_debug)
+        updates = service.prepare_updates([key, values])  # type: ignore
+        for key, val in updates.items():
+            changed, final_val = service.apply_update(
+                settings_name, key, val, action="set"
+            )
+            if changed:
+                UI.success(f"Configuracion [bold]{key}[/] actualizada.")
+            else:
+                UI.info(f"Configuracion [bold]{key}[/] ya tiene ese valor.")
 
-    updates_to_apply = logic.parse_and_transform([key, values])  # type: ignore
-    logic.apply(settings_name, updates_to_apply, action="add")
+        settings = state.manager.get_settings(settings_name)
+        display_config_table(state.manager, state.is_debug, settings)
+
+    except ValueError as e:
+        UI.error(str(e))
+        raise typer.Exit(1)
 
 
 # @app.command("wizard")
@@ -245,7 +266,7 @@ def resolve_config(
 
         chat_access = ChatAccessService(client)
         chat_searcher = ChatSearchService(client)
-        logic = ConfigResolutionLogic(state, chat_access)
+        logic = ConfigResolutionLogic(state)
 
         if intent_type.is_direct:
             report = chat_access.verify_access(chat_id)
