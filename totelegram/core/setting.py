@@ -1,4 +1,5 @@
 import json
+import re
 from enum import IntEnum
 from pathlib import Path
 from typing import Annotated, Any, ClassVar, List, Optional, Union, cast, get_origin
@@ -26,6 +27,43 @@ class InfoField(BaseModel):
     default_value: Any
     is_sensitive: bool
     type_annotation: str
+
+def normalize_chat_id(value: Union[str, int, None]) -> Union[int, str]:
+    if value is None:
+        return VALUE_NOT_SET
+
+    raw = str(value).strip()
+    if not raw or raw.upper() == VALUE_NOT_SET:
+        return VALUE_NOT_SET
+
+    # Identidad propia
+    if raw.lower() in ("me", "self", "mensajes guardados"):
+        return "me"
+
+    # ID Numérico. Limpiamos posible prefijo "ID:" o "id:"
+    potential_number = re.sub(r"^(id:)", "", raw, flags=re.IGNORECASE)
+    if re.fullmatch(r"-?\d+", potential_number):
+        return int(potential_number)
+
+    # Enlaces de Telegram (Invite links o Username links)
+    from pyrogram.client import Client
+    if Client.INVITE_LINK_RE.fullmatch(raw):
+        return raw
+
+    # Probamos si es un enlace de tipo t.me/username
+    tme_match = re.search(r"t\.me/([a-zA-Z0-9_]{5,32})/?$", raw)
+    if tme_match:
+        return f"@{tme_match.group(1)}"
+
+    # Usernames (@username o username)
+    clean_username = raw.lstrip("@")
+    if re.fullmatch(r"[a-zA-Z][a-zA-Z0-9_]*", clean_username):
+        return f"@{clean_username}"
+
+    raise ValueError(
+        f"El destino '{raw}' no es un formato reconocido. "
+        "Usa un ID numérico, @username o un enlace t.me/."
+    )
 
 
 def get_type_annotation(field: FieldInfo) -> str:
@@ -59,14 +97,17 @@ CommaSeparatedList = Annotated[
     BeforeValidator(parse_comma_list),
 ]
 
+ChatID= Annotated[
+    Union[int, str],
+    BeforeValidator(normalize_chat_id),
+]
+
 
 class Settings(BaseSettings):
     # TODO: agrega un default que impida subir archivo muy pequeños.
-    # APP_NAME: ClassVar[str] = APP_SESSION_NAME
-    MAX_FILENAME_LENGTH: ClassVar[int] = 55
-    # database_name: str = f"{APP_NAME}.sqlite"
 
-    chat_id: str = Field(
+    MAX_FILENAME_LENGTH: ClassVar[int] = 55
+    chat_id: ChatID = Field(
         default=VALUE_NOT_SET,
         description="ID del chat destino. NOT_SET indica configuración pendiente.",
         json_schema_extra={"is_sensitive": False, "access": AccessLevel.EDITABLE},
@@ -113,11 +154,13 @@ class Settings(BaseSettings):
         description="Filtro de seguridad: No procesar archivos que superen este tamaño.",
         json_schema_extra={"is_sensitive": False, "access": AccessLevel.EDITABLE},
     )
+
     duplicate_policy: DuplicatePolicy = Field(
         default=DuplicatePolicy.SMART,
         description="Gobernanza de duplicados: 'smart', 'strict' o 'force'.",
         json_schema_extra={"is_sensitive": False, "access": AccessLevel.EDITABLE},
     )
+
     exclude_files_default: CommaSeparatedList = ["*.log", "*.json", "*.json.xz"]
 
     model_config = SettingsConfigDict(
@@ -128,14 +171,6 @@ class Settings(BaseSettings):
         default=None,
         description="Ruta del archivo de log. Si está vacío, se usa la ruta por defecto en la carpeta de trabajo.",
     )
-    # worktable: Path = Field(
-    #     default=Path(get_user_config_dir(APP_NAME)).resolve(),
-    #     description="Carpeta de trabajo para la aplicación, donde se almacena la db y perfiles",
-    # )
-
-    # def model_post_init(self, __context):
-    #     if self.log_path is None:
-    #         self.log_path = self.worktable / "app_name.log"
 
     @classmethod
     def get_info(cls, field_name: str) -> Optional[InfoField]:
@@ -232,16 +267,6 @@ class Settings(BaseSettings):
                 f"La configuracion '{info.field_name.upper()}' solo es modificable en modo --debug."
             )
         return info
-
-    # --- Propiedades ----
-
-    # @property
-    # def database_path(self) -> Path:
-    #     return self.worktable / self.database_name
-
-    # @property
-    # def profile_path(self):
-    #     return self.worktable / "profiles"
 
 
 def get_settings(env_path: Union[Path, str] = ".env") -> Settings:
