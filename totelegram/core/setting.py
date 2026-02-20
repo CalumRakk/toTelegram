@@ -12,6 +12,7 @@ from totelegram.core.enums import DuplicatePolicy
 from totelegram.utils import VALUE_NOT_SET
 
 APP_SESSION_NAME = "toTelegram"
+SELF_CHAT_ALIASES = ["me", "mensajes guardados"]
 
 
 class AccessLevel(IntEnum):
@@ -28,6 +29,7 @@ class InfoField(BaseModel):
     is_sensitive: bool
     type_annotation: str
 
+
 def normalize_chat_id(value: Union[str, int, None]) -> Union[int, str]:
     if value is None:
         return VALUE_NOT_SET
@@ -37,7 +39,7 @@ def normalize_chat_id(value: Union[str, int, None]) -> Union[int, str]:
         return VALUE_NOT_SET
 
     # Identidad propia
-    if raw.lower() in ("me", "self", "mensajes guardados"):
+    if raw.lower() in SELF_CHAT_ALIASES:
         return "me"
 
     # ID Numérico. Limpiamos posible prefijo "ID:" o "id:"
@@ -47,6 +49,7 @@ def normalize_chat_id(value: Union[str, int, None]) -> Union[int, str]:
 
     # Enlaces de Telegram (Invite links o Username links)
     from pyrogram.client import Client
+
     if Client.INVITE_LINK_RE.fullmatch(raw):
         return raw
 
@@ -55,15 +58,14 @@ def normalize_chat_id(value: Union[str, int, None]) -> Union[int, str]:
     if tme_match:
         return f"@{tme_match.group(1)}"
 
-    # Usernames (@username o username)
-    clean_username = raw.lstrip("@")
-    if re.fullmatch(r"[a-zA-Z][a-zA-Z0-9_]*", clean_username):
-        return f"@{clean_username}"
+    # Usernames (@username)
+    # clean_username = raw.lstrip("@")
+    # if re.fullmatch(r"[a-zA-Z][a-zA-Z0-9_]*", clean_username):
+    #     return f"@{clean_username}"
+    if raw.startswith("@"):
+        return raw
 
-    raise ValueError(
-        f"El destino '{raw}' no es un formato reconocido. "
-        "Usa un ID numérico, @username o un enlace t.me/."
-    )
+    return raw
 
 
 def get_type_annotation(field: FieldInfo) -> str:
@@ -97,7 +99,7 @@ CommaSeparatedList = Annotated[
     BeforeValidator(parse_comma_list),
 ]
 
-ChatID= Annotated[
+ChatID = Annotated[
     Union[int, str],
     BeforeValidator(normalize_chat_id),
 ]
