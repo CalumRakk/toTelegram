@@ -4,8 +4,8 @@ from typing import Optional
 
 import typer
 
-from totelegram.commands.profile_logic import render_profiles_table
 from totelegram.commands.profile_ui import ProfileUI
+from totelegram.commands.views import DisplayProfile
 from totelegram.console import UI, console
 from totelegram.core.schemas import AccessStatus, CLIState
 from totelegram.core.setting import normalize_chat_id
@@ -46,7 +46,7 @@ def list_profiles(
         return
 
     active_profile = manager.get_active_profile_name()
-    render_profiles_table(manager, active_profile, profiles, quiet)
+    DisplayProfile.render_profiles_table(manager, active_profile, profiles, quiet)
 
 
 @app.command("create")

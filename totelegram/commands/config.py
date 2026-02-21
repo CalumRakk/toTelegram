@@ -2,11 +2,8 @@ from typing import TYPE_CHECKING, List, cast
 
 import typer
 
-from totelegram.commands.config_logic import (
-    ConfigResolutionLogic,
-    display_config_table,
-)
 from totelegram.commands.profile_ui import ProfileUI
+from totelegram.commands.views import DisplayConfig
 from totelegram.console import UI, console
 from totelegram.core.schemas import CLIState
 from totelegram.core.setting import Settings, normalize_chat_id
@@ -43,7 +40,7 @@ def main(ctx: typer.Context):
         settings = Settings.get_default_settings()
 
     ui.announce_profile_used(profile_name) if profile_name else None
-    display_config_table(manager, state.is_debug, settings)
+    DisplayConfig.show_config_table(manager, state.is_debug, settings)
     ui.print_options_help_footer()
 
 
@@ -90,7 +87,7 @@ def set_configs(
                 UI.info(f"Configuracion [bold]{key}[/] ya tiene ese valor.")
 
         settings = state.manager.get_settings(settings_name)
-        display_config_table(state.manager, state.is_debug, settings)
+        DisplayConfig.show_config_table(state.manager, state.is_debug, settings)
 
     except ValueError as e:
         UI.error(f"DEBUG ERROR: {str(e)}")
@@ -156,7 +153,7 @@ def add_to_list(
                 UI.info(f"Configuracion [bold]{key}[/] ya tiene ese valor.")
 
         settings = state.manager.get_settings(settings_name)
-        display_config_table(state.manager, state.is_debug, settings)
+        DisplayConfig.show_config_table(state.manager, state.is_debug, settings)
 
     except ValueError as e:
         UI.error(str(e))
@@ -219,7 +216,7 @@ def check_config(ctx: typer.Context):
             from pyrogram.types import Chat
 
             if settings.chat_id == "NOT_SET":
-                display_config_table(manager, state.is_debug, settings)
+                DisplayConfig.show_config_table(manager, state.is_debug, settings)
                 UI.warn("CHAT_ID no configurado.")
                 raise typer.Exit(code=1)
 
@@ -239,72 +236,78 @@ def check_config(ctx: typer.Context):
 
 
 @app.command("search")
-def resolve_config(
+def search_config(
     ctx: typer.Context,
     query: str = typer.Argument(..., help="Nombre, @username o ID."),
     contains: bool = typer.Option(False, "--contains", "-c"),
     depth: int = typer.Option(100, "--depth", "-d"),
     apply: bool = typer.Option(False, "--apply", "-a"),
 ):
-    """Busca y configura el chat de destino."""
+    """Busca y establece el chat de destino."""
     state: CLIState = ctx.obj
     manager = state.manager
-    settings_name = cast(str, manager.resolve_profile_name(state.profile_name))
+    profile_name = cast(str, manager.resolve_profile_name(state.profile_name))
 
-    ui.announce_profile_used(settings_name)
+    ui.announce_profile_used(profile_name)
 
-    settings = manager.get_settings(settings_name)
-
-    with TelegramSession(
-        session_name=settings_name,
-        api_id=settings.api_id,
-        api_hash=settings.api_hash,
-        worktable=manager.profiles_dir,
-    ) as client:
-
+    # Obtener el ID del chat destino
+    with TelegramSession.from_profile(profile_name, manager) as client:
         chat_access = ChatAccessService(client)
         chat_searcher = ChatSearchService(client)
-        logic = ConfigResolutionLogic(state)
+
+        target_chat_id = None
 
         if is_direct_identifier(query):
-            chat_id = normalize_chat_id(query)
-            with UI.loading("Verificando permisos..."):
-                report = chat_access.verify_access(chat_id)
+            target_chat_id = normalize_chat_id(query)
+        else:
+            is_exact = not contains
+            result = chat_searcher.search_by_name(query, depth, is_exact)
 
-            if not report.is_ready or report.chat is None:
-                UI.warn("No tienes permisos de escritura en el chat.")
-                UI.warn("Corrige los permisos antes de intentar cualquier subida.")
-                UI.warn("Configuración 'chat_id' no actualizada.")
+            if result.is_resolved and result.winner:
+                target_chat_id = result.winner.id
+            elif result.is_ambiguous:
+                conflicts = len(result.conflicts)
+                UI.warn(f"Ambigüedad: Hay {conflicts} chats con ese nombre.")
+                DisplayConfig.show_chat_table(
+                    result.conflicts, "Conflictos Encontrados"
+                )
+                UI.info("Usa el ID exacto: [bold]config set chat_id <ID>[/]")
+                raise typer.Exit(1)
+            elif result.needs_help:
+                DisplayConfig.show_chat_table(
+                    result.suggestions, "Quizás quisiste decir:"
+                )
+                UI.info(
+                    "Tip: Si no encuentras lo que buscas, intenta aumentar la profundidad con --depth."
+                )
+                raise typer.Exit(1)
+            else:
+                UI.error(
+                    f"No se encontró ningún chat relacionado con '{result.query}'."
+                )
                 raise typer.Exit(1)
 
-            logic.process_winner(report.chat, apply)
-            raise typer.Exit(0)
+        # Verificación de permisos
+        with UI.loading("Verificando permisos..."):
+            report = chat_access.verify_access(target_chat_id)
 
-        is_exact = not contains
-        result = chat_searcher.search_by_name(query, depth, is_exact)
-
-        if result.is_resolved and result.winner:
-            with UI.loading("Verificando permisos..."):
-                report = chat_access.verify_access(result.winner.id)
-
-            if report.is_ready and report.chat:
-                logic.process_winner(report.chat, apply)
-                raise typer.Exit(0)
-
+        if not (report.is_ready and report.chat):
             UI.warn("No tienes permisos de escritura en el chat.")
             UI.warn("Corrige los permisos antes de intentar cualquier subida.")
             UI.warn("Configuración 'chat_id' no actualizada.")
             raise typer.Exit(1)
 
-        elif result.is_ambiguous:
-            logic.process_ambiguity(result.conflicts)
+        # Si llegamos aquí, todo salió bien
+        UI.success(
+            f"¡Encontrado! [bold]{report.chat.title}[/] [dim](ID: {report.chat.id})[/]"
+        )
+        UI.success("Tienes permisos de escritura.")
 
-        elif result.needs_help:
-            logic.process_suggestions(result.suggestions, result.query)
+        if apply:
+            manager.set_setting(profile_name, "chat_id", report.chat.id)
+            UI.success("Configuración 'chat_id' actualizada.")
 
-        else:
-            UI.error(f"No se encontró ningún chat relacionado con '{result.query}'.")
-            raise typer.Exit(1)
+        raise typer.Exit(0)
 
 
 # @app.command("remove")
