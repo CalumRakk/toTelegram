@@ -7,11 +7,9 @@ from dotenv import dotenv_values
 from pydantic import BaseModel, ValidationError
 
 from totelegram.core.setting import (
-    APP_SESSION_NAME,
     InfoField,
     Settings,
 )
-from totelegram.utils import VALUE_NOT_SET
 
 logger = logging.getLogger(__name__)
 
@@ -47,17 +45,12 @@ class Result(NamedTuple):
 
 class SettingsManager:
     def __init__(self, worktable: Path):
-        self.app_name = APP_SESSION_NAME
         self.worktable = worktable
-        self.settings_active_path = self.worktable / "settings_active"
+        self.settings_active_path = self.worktable / "active_profile_name"
         self.profiles_dir = self.worktable / "profiles"
-        self.database_path = self.profiles_dir / f"{self.app_name}.sqlite"
+        self.database_path = self.worktable / f"{self.worktable.name}.sqlite"
 
-    def get_settings_path(self, name: str) -> Path:
-        """nombre -> profiles/nombre.json"""
-        return self.profiles_dir / f"{name.lower()}.env"
-
-    def _get_all_profile_stems(self) -> List[str]:
+    def _get_all_profile_names(self) -> List[str]:
         """Busca todos los nombres únicos que tienen un .env o un .session"""
         if not self.profiles_dir.exists():
             return []
@@ -70,15 +63,18 @@ class SettingsManager:
 
     def get_all_profiles(self) -> List[Profile]:
         profiles = []
-        for name in self._get_all_profile_stems():
-            path_env = self.profiles_dir / f"{name}.env"
-            path_session = self.profiles_dir / f"{name}.session"
+        for name in self._get_all_profile_names():
+            path_env = self.get_settings_path(name)
+            path_session = self.get_session_path(name)
             profile = Profile(name=name, path_env=path_env, path_session=path_session)
             profiles.append(profile)
         return profiles
 
-    def get_profile(self, name: str) -> Optional[Profile]:
-        return next((p for p in self.get_all_profiles() if p.name == name), None)
+    def get_profile(self, profile_name: str) -> Optional[Profile]:
+        """Busca un perfil por su nombre (case-sensitive)"""
+        return next(
+            (p for p in self.get_all_profiles() if p.name == profile_name), None
+        )
 
     def delete_profile(self, profile: Profile) -> List[Path]:
         """
@@ -98,33 +94,58 @@ class SettingsManager:
             session_path.unlink()
             deleted_files.append(session_path)
 
-        if self.active_settings_exists():
-            if self.get_active_settings_name() == profile.name:
+        if self.has_active_profile_configured():
+            if self.get_active_profile_name() == profile.name:
                 self.settings_active_path.unlink()
 
         return deleted_files
 
-    def settings_exists(self, name: str) -> bool:
-        return self.get_settings_path(name).exists()
+    def settings_exists(self, profile_name: str) -> bool:
+        return self.get_settings_path(profile_name).exists()
 
-    def set_settings_name_as_active(self, name: str):
-        path = self.get_settings_path(name)
-        if not path.exists():
-            raise IOError(f"Se intentó activar el perfil '{name}', pero no existe.")
+    def set_profile_name_as_active(self, profile_name: str) -> None:
+        """
+        Establece un perfil como activo.
+
+        Valida que el perfil exista y que sea "trinity" (completo y apto para uso global).
+        Un perfil incompleto no puede activarse porque rompería la coherencia del entorno.
+
+        Args:
+            profile_name (str): Nombre del perfil a activar
+        Raises:
+            IOError: Si el perfil no existe o no es "trinity"
+        """
+        profile = self.get_profile(profile_name)
+
+        if profile is None:
+            raise IOError(
+                f"Se intentó activar el perfil '{profile_name}', pero no existe."
+            )
+        if not profile.is_trinity:
+            raise IOError(
+                f"Se intentó activar el perfil '{profile_name}', pero no es trinity."
+            )
 
         self.settings_active_path.parent.mkdir(parents=True, exist_ok=True)
-        self.settings_active_path.write_text(name)
+        self.settings_active_path.write_text(profile_name)
 
-    def get_active_settings_name(self) -> Optional[str]:
+    def get_active_profile_name(self) -> Optional[str]:
         if not self.settings_active_path.exists():
             return None
-        return self.settings_active_path.read_text()
+        return self.settings_active_path.read_text().strip()
 
-    def active_settings_exists(self) -> bool:
-        return self.settings_active_path.exists()
+    def has_active_profile_configured(self) -> bool:
+        """
+        Indica si hay un perfil activo configurado.
+        """
+        if self.settings_active_path.exists():
+            content = self.settings_active_path.read_text().strip()
+            return len(content) > 0
+        return False
 
-    def get_settings(self, settings_name: str) -> Settings:
-        settings_path = self.get_settings_path(settings_name)
+    def get_settings(self, profile_name: str) -> Settings:
+
+        settings_path = self.get_settings_path(profile_name)
         if not settings_path.exists():
             raise IOError(
                 f"El archivo de configuracion '{settings_path.name}' no existe."
@@ -139,58 +160,63 @@ class SettingsManager:
             )
             raise ValueError(f"Error de validacion: {e}")
 
-    @staticmethod
-    def get_default_settings() -> Settings:
-        return Settings(profile_name=VALUE_NOT_SET)
-
-    def resolve_settings_name(
-        self, settings_name: Optional[str] = None, strict: bool = True
+    def resolve_profile_name(
+        self, profile_name: Optional[str] = None, strict: bool = True
     ) -> Optional[str]:
         """
         Valida y resuelve el perfil de configuración a utilizar.
         La operacion simplifica estos tres escenarios:
 
-        - Si se proporciona `settings_name`, verifica que exista.
-        - Si no se proporciona, utiliza el perfil activo.
+        - Si se proporciona `profile_name`, verifica que exista el archivo `.env`.
+        - Si no se proporciona, utiliza el perfil activo guardado en `worktable/active_profile_name`.
         - Si la validación falla y `strict` es True, lanza ValueError;
         de lo contrario, devuelve None.
 
         Args:
-            settings_name (Optional[str]): Nombre del perfil a validar.
+            profile_name (Optional[str]): Nombre del perfil a validar.
             error (bool): Indica si se debe lanzar una excepción en caso de error.
 
         Raises:
             ValueError: Si no se logra resolver el perfil y `error` es True.
         """
 
-        if settings_name:
-            if not self.settings_exists(settings_name):
-                logger.error(f"El perfil {settings_name} no existe.")
+        if profile_name:
+            if not self.settings_exists(profile_name):
+                logger.error(f"El perfil {profile_name} no existe.")
                 if strict:
-                    raise ValueError(f"El perfil {settings_name} no existe.")
-            return settings_name
+                    raise ValueError(f"El perfil {profile_name} no existe.")
+            return profile_name
 
-        if not self.active_settings_exists():
+        if not self.has_active_profile_configured():
             logger.error("No hay un perfil activo.")
             if strict:
                 raise ValueError("No hay un perfil activo.")
 
-        active = self.get_active_settings_name()
+        active = self.get_active_profile_name()
         if active:
             return active
 
         if strict:
             raise ValueError("No hay un perfil activo.")
 
+    def get_session_path(self, profile_name: str) -> Path:
+        return self.profiles_dir / f"{profile_name}.session"
+
     # --------------------------------
-    #  Métodos de escritura y sanidad
+    #  Métodos de escritura y sanidad en el contexto de `.env`
+    #  En este contexto solo existe settings_name
     # --------------------------------
+
+    # TODO: analizar si deberia cambiar los métodos settings_* por env_*
+    def get_settings_path(self, profile_name: str) -> Path:
+        """profile_name -> profiles/profile_name.env"""
+        return self.profiles_dir / f"{profile_name}.env"
 
     def _load_and_sanitize(self, settings_name: str) -> Dict[str, Any]:
         """
-         Carga el contenido crudo del perfil y normaliza sus claves.
+        Carga el contenido crudo del .env y normaliza sus claves.
 
-        ¿Por qué este método y no usar Settings()? por:
+        ¿Por qué este método y no usar Settings() para cargarlo? por:
 
          1. Evita la contaminacion del archivo: Settings cargaría todos los valores por defecto
             del sistema. Al guardar, el archivo (.model_dump()) pasaría de tener 3 líneas

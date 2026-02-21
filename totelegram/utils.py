@@ -6,7 +6,7 @@ import sys
 from contextlib import nullcontext
 from pathlib import Path
 from time import sleep
-from typing import TYPE_CHECKING, Any, List, cast
+from typing import TYPE_CHECKING, Any, List, Union, cast
 
 from totelegram.console import console
 
@@ -18,7 +18,8 @@ import filetype
 logger = logging.getLogger(__name__)
 
 VALUE_NOT_SET = "NOT_SET"
-VALUE_NOT_SET = "NOT_SET"
+ID_PREFIX_RE = re.compile(r"^id:", re.IGNORECASE)
+SELF_CHAT_ALIASES = ["me", "mensajes guardados"]
 
 if sys.version_info >= (3, 12):
     from itertools import batched
@@ -129,3 +130,78 @@ def get_user_config_dir(app_name: str) -> Path:
     else:
         # En Linux / Unix
         return Path(os.getenv("XDG_CONFIG_HOME", Path.home() / ".config")) / app_name
+
+
+def is_direct_identifier(chat_id: Union[str, int, None]) -> bool:
+    """Devuelve True si el chat_id es un identificador de pyrogram/telegram.
+
+    Para el caso de VALUE_NOT_SET, devuelve False
+    """
+    if isinstance(chat_id, int):
+        return True
+
+    if chat_id is None:
+        return False
+
+    clean = str(chat_id).strip().lower()
+
+    # Aunque terminaria como False, se especifica para hacerlo explicito.
+    if clean == VALUE_NOT_SET:
+        return False
+
+    # IDs numéricos (incluyendo negativos)
+    if clean.replace("-", "").isdigit():
+        return True
+
+    # Usernames oficiales
+    if clean.startswith("@"):
+        return True
+
+    # Enlaces directos
+    if "t.me/" in clean or "telegram.me/" in clean:
+        return True
+
+    # Aliases internos del sistema
+    if clean in SELF_CHAT_ALIASES:
+        return True
+
+    return False
+
+
+def normalize_chat_id(value: Union[str, int]) -> Union[int, str]:
+    """Normaliza un chat_id para que sea compatible con pyrogram/telegram."""
+    if isinstance(value, int):
+        return value
+
+    raw = str(value).strip()
+    if not raw or raw.upper() == VALUE_NOT_SET:
+        return VALUE_NOT_SET
+
+    # Identidad propia
+    if raw.lower() in SELF_CHAT_ALIASES:
+        return "me"
+
+    # ID Numérico. Limpiamos posible prefijo "ID:" o "id:"
+    potential_number = re.sub(r"^(id:)", "", raw, flags=re.IGNORECASE)
+    if re.fullmatch(r"-?\d+", potential_number):
+        return int(potential_number)
+
+    # Enlaces de Telegram (Invite links o Username links)
+    from pyrogram.client import Client
+
+    if Client.INVITE_LINK_RE.fullmatch(raw):
+        return raw
+
+    # Probamos si es un enlace de tipo t.me/username
+    tme_match = re.search(r"t\.me/([a-zA-Z0-9_]{5,32})/?$", raw)
+    if tme_match:
+        return f"@{tme_match.group(1)}"
+
+    # Usernames (@username)
+    # clean_username = raw.lstrip("@")
+    # if re.fullmatch(r"[a-zA-Z][a-zA-Z0-9_]*", clean_username):
+    #     return f"@{clean_username}"
+    if raw.startswith("@"):
+        return raw.strip()
+
+    raise ValueError(f"Invalid chat ID: {value}")

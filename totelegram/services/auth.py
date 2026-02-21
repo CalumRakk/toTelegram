@@ -1,99 +1,108 @@
-import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
-import typer
-
-from totelegram.core.schemas import CLIState
+from totelegram.core.registry import Profile, SettingsManager
 from totelegram.telegram import TelegramSession
 
 if TYPE_CHECKING:
     from pyrogram import Client  # type: ignore
 
-from totelegram.console import UI
 from totelegram.utils import VALUE_NOT_SET
 
 
 class AuthLogic:
     def __init__(
-        self, state: CLIState, api_id: int, api_hash: str, chat_id: Optional[str]
+        self,
+        profile_name: str,
+        temp_dir: Path | str,
+        api_id: int,
+        api_hash: str,
+        manager: SettingsManager,
+        chat_id: Optional[str] = None,
     ) -> None:
-        self.state = state
+        self.profile_name = profile_name
+        self.temp_dir = Path(temp_dir)
         self.api_id = api_id
         self.api_hash = api_hash
+        self.manager = manager
         self.chat_id = chat_id
 
-    def _validate_profile_exists(
-        self,
-    ):
-        """Si el profile no existe, lanza error."""
-        profile_name = self.state.settings_name
-        assert profile_name is not None
-        existing_profile = self.state.manager.get_profile(profile_name)
-        if existing_profile is not None:
-            UI.error(f"No se puede crear el perfil '{profile_name}'.")
+    def _create_session(self) -> Path:
+        """
+        Genera una sesión autenticada en el directorio temporal (self.temp_dir).
 
-            if existing_profile.is_trinity:
-                UI.warn("El perfil existe.")
-            elif existing_profile.has_session:
-                UI.warn("Existe una sesión de Telegram huérfana con este nombre.")
-            elif existing_profile.has_env:
-                UI.warn(
-                    "Existe un archivo de configuración (.env) sin sesión asociada."
-                )
+        Verifica que no exista previamente una sesión definitiva para el perfil
+        y crea el archivo `.session` usando las credenciales proporcionadas.
 
-            UI.info("\nPara empezar de cero, elimina los rastros primero usando:")
-            UI.info(f"  [cyan]totelegram profile delete {profile_name}[/cyan]")
-            raise typer.Exit(code=1)
+        Returns:
+            Path: La ruta del archivo de sesión generado.
 
-    def proccess(self) -> None:
-        try:
+        Raises:
+            FileExistsError: Si el archivo de sesión ya existe.
+        """
+        final_session_path = self.manager.get_session_path(self.profile_name)
+        if final_session_path.exists():
+            raise FileExistsError(
+                f"El archivo de sesión {final_session_path} ya existe."
+            )
 
-            self._validate_profile_exists()
+        temp_session_path = self.temp_dir / f"{self.profile_name}.session"
+        with TelegramSession(
+            session_name=self.profile_name,
+            api_id=self.api_id,
+            api_hash=self.api_hash,
+            worktable=self.temp_dir,
+        ):
+            # Una vez dentro ya no necesitamos la session temp, salimos para liberar el archivo
+            pass
+        return temp_session_path
 
-            manager = self.state.manager
-            settings_name = self.state.settings_name
-            assert settings_name is not None, "settings_name no puede ser None"
+    def _persist_session(self, temp_session_path: Path):
+        """
+        Mueve la sesión desde el directorio temporal al directorio definitivo
+        de perfiles.
 
-            final_session_path = manager.profiles_dir / f"{settings_name}.session"
-            with tempfile.TemporaryDirectory() as temp_dir:
-                temp_session_path = Path(temp_dir) / f"{settings_name}.session"
-                UI.info("\n[bold cyan]1. Autenticación con Telegram[/bold cyan]")
-                UI.info(
-                    "[dim]Se solicitará tu número telefónico y código (OTP) para vincular la cuenta.[/dim]\n"
-                )
+        Valida que el archivo temporal exista antes de persistirlo.
 
-                with TelegramSession(
-                    session_name=settings_name,
-                    api_id=self.api_id,
-                    api_hash=self.api_hash,
-                    worktable=temp_session_path,
-                ):
-                    # Una vez dentro ya no necesitamos la session temp, salimos para liberar el archivo
-                    pass
+        Args:
+            temp_session_path (Path): La ruta del archivo de sesión temporal.
 
-                if not temp_session_path.exists():
-                    raise FileNotFoundError(
-                        "Error crítico: No se generó el archivo de sesión."
-                    )
+        Returns:
+            Path: La ruta del archivo de sesión definitivo.
 
-                manager.profiles_dir.mkdir(parents=True, exist_ok=True)
-                temp_session_path.rename(final_session_path)
-                UI.success(
-                    f"[green]Identidad salvada correctamente en {settings_name}.session[/green]"
-                )
+        Raises:
+            FileNotFoundError: Si el archivo de sesión temporal no existe.
+        """
+        final_session_path = self.manager.get_session_path(self.profile_name)
+        if not temp_session_path.exists():
+            raise FileNotFoundError("No se encontró el archivo de sesión.")
 
-                settings_dict = {
-                    "api_id": self.api_id,
-                    "api_hash": self.api_hash,
-                    "profile_name": settings_name,
-                    "chat_id": VALUE_NOT_SET,
-                }
-                manager._write_all_settings(settings_name, settings_dict)
+        self.manager.profiles_dir.mkdir(parents=True, exist_ok=True)
+        temp_session_path.rename(final_session_path)
+        return final_session_path
 
-                UI.success(
-                    f"[green]Identidad salvada correctamente en {settings_name}.session[/green]"
-                )
-        except Exception as e:
-            UI.error(f"Operación abortada durante el login: {e}")
-            raise typer.Exit(code=1)
+    def _write_profile_settings(self):
+        """Crea y guarda el archivo de configuración asociado al perfil."""
+        settings_dict = {
+            "api_id": self.api_id,
+            "api_hash": self.api_hash,
+            "profile_name": self.profile_name,
+            "chat_id": self.chat_id or VALUE_NOT_SET,
+        }
+        self.manager._write_all_settings(self.profile_name, settings_dict)
+
+    def initialize_profile(self) -> Profile:
+        """
+        Inicializa completamente un perfil.
+
+        Orquesta la creación de un Profile asegurando su trinidad.
+
+        Returns:
+            Profile: El perfil inicializado.
+        """
+        temp_path = self._create_session()
+        self._persist_session(temp_path)
+        self._write_profile_settings()
+        profile = self.manager.get_profile(self.profile_name)
+        assert profile is not None, "Perfil inconsistente tras inicialización"
+        return profile

@@ -78,7 +78,8 @@ class Inventory(BaseModel):
 
 class CLIState(BaseModel):
     manager: "SettingsManager"
-    settings_name: Optional[str]
+    # Entre profile_name y settings_name el primero es más general y se adapta mejor en diferentes contextos
+    profile_name: Optional[str]
     is_debug: bool = False
 
     model_config = {"arbitrary_types_allowed": True}

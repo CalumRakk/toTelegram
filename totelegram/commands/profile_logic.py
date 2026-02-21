@@ -90,7 +90,7 @@ class ProfileCreateLogic:
     # def proccess_login(self) -> None:
     #     try:
     #         manager = self.state.manager
-    #         settings_name = self.state.settings_name
+    #         settings_name = self.state.profile_name
     #         assert settings_name is not None, "settings_name no puede ser None"
 
     #         final_session_path = manager.profiles_dir / f"{settings_name}.session"
@@ -162,7 +162,7 @@ class ProfileCreateLogic:
 
         final_chat_id = VALUE_NOT_SET
         try:
-            settings_name = self.state.settings_name
+            settings_name = self.state.profile_name
             manager = self.state.manager
             assert settings_name is not None, "settings_name no puede ser None"
 
@@ -208,7 +208,7 @@ class ProfileCreateLogic:
                 "Usa [cyan]totelegram config set chat_id <ID>[/cyan] cuando estés listo."
             )
 
-        self.manager.set_settings_name_as_active(self.profile_name)
+        self.manager.set_profile_name_as_active(self.profile_name)
         UI.success(
             f"[bold green]¡Perfil '{self.profile_name}' activado y listo para usar![/bold green]\n"
         )

@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Optional, cast
 
 from totelegram.console import console
+from totelegram.core.registry import SettingsManager
 
 if TYPE_CHECKING:
     from pyrogram import Client  # type: ignore
@@ -100,6 +101,43 @@ class TelegramSession:
     def __exit__(self, exc_type, exc_val, exc_tb):
         """Soporte para Context Manager (with)."""
         self.stop()
+
+    @classmethod
+    def from_profile(
+        cls, profile_name: str, manager: SettingsManager
+    ) -> "TelegramSession":
+        """
+        Construye una `TelegramSession` a partir de un perfil válido.
+
+        Verifica que el perfil exista y sea trinity, obtiene sus credenciales
+        y devuelve una sesión lista para iniciarse.
+
+        Args:
+            profile_name (str): Nombre del perfil a usar.
+            manager (SettingsManager): Manejador de configuraciones.
+
+        Raises:
+            ValueError: Si el perfil no existe o no es trinity
+
+        Examples:
+            >>> with TelegramSession.from_profile("default", manager) as client:
+            ...     client.get_me()
+        """
+        profile = manager.get_profile(profile_name)
+
+        if profile is None:
+            raise ValueError("Perfil no existe")
+
+        if not profile.is_trinity:
+            raise ValueError("Perfil no es trinity")
+
+        settings = manager.get_settings(profile_name)
+        return cls(
+            session_name=profile_name,
+            api_id=settings.api_id,
+            api_hash=settings.api_hash,
+            worktable=manager.worktable,
+        )
 
 
 def parse_message_json_data(json_data: dict) -> Message:

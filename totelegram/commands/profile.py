@@ -1,21 +1,25 @@
+import keyword
+import tempfile
 from typing import Optional
 
 import typer
 
-from totelegram.commands.config_logic import classify_intent
 from totelegram.commands.profile_logic import render_profiles_table
 from totelegram.commands.profile_ui import ProfileUI
-from totelegram.commands.profile_utils import validate_profile_name
 from totelegram.console import UI, console
 from totelegram.core.schemas import AccessStatus, CLIState
 from totelegram.core.setting import normalize_chat_id
 from totelegram.services.auth import AuthLogic
 from totelegram.services.chat_access import ChatAccessService
 from totelegram.telegram import TelegramSession
-from totelegram.utils import VALUE_NOT_SET
+from totelegram.utils import VALUE_NOT_SET, is_direct_identifier
 
 app = typer.Typer(help="Gestión de perfiles de configuración.")
 ui = ProfileUI(console)
+
+
+def is_valid_profile_name(profile_name: str):
+    return profile_name.isidentifier() and not keyword.iskeyword(profile_name)
 
 
 @app.callback(invoke_without_command=True)
@@ -41,14 +45,14 @@ def list_profiles(
         UI.info("Usa 'totelegram profile create' para empezar.")
         return
 
-    active_profile = manager.get_active_settings_name()
+    active_profile = manager.get_active_profile_name()
     render_profiles_table(manager, active_profile, profiles, quiet)
 
 
 @app.command("create")
 def create_profile(
     ctx: typer.Context,
-    profile_name: str = typer.Option(..., prompt=True, callback=validate_profile_name),
+    profile_name: str = typer.Option(..., prompt=True),
     api_id: int = typer.Option(..., prompt=True),
     api_hash: str = typer.Option(..., prompt=True),
     chat_id: Optional[str] = typer.Option(
@@ -60,47 +64,74 @@ def create_profile(
     state: CLIState = ctx.obj
     manager = state.manager
 
-    auth = AuthLogic(state, api_id, api_hash, chat_id)
+    if profile_name is None or not is_valid_profile_name(profile_name):
+        UI.error("No se ha especificado un nombre de perfil valido.")
+        raise typer.Exit(1)
 
-    auth.proccess()
+    existing_profile = state.manager.get_profile(profile_name)
+    if existing_profile:
+        UI.error(f"No se puede crear el perfil '{profile_name}'.")
 
-    settings = manager.get_settings(profile_name)
+        if existing_profile.is_trinity:
+            UI.warn("El perfil existe.")
+        elif existing_profile.has_session:
+            UI.warn("Existe una sesión de Telegram huérfana con este nombre.")
+        elif existing_profile.has_env:
+            UI.warn(f"Existe un archivo de configuración (.env) sin sesión asociada.")
+            tip = f"[bold]totelegram --use {existing_profile.name} config check[/]"
+            UI.info(f"Ejecuta un diagnóstico usando: {tip} ")
 
-    quey = normalize_chat_id(chat_id)
-    intent_type = classify_intent(quey)
+        tip = f"[bold]totelegram profile delete {profile_name}[/]"
+        UI.info(f"Para empezar de cero, elimina los rastros usando: {tip}")
+        raise typer.Exit(code=1)
 
-    if not intent_type.is_direct:
+    UI.info("[bold cyan]1. Autenticación con Telegram[/bold cyan]")
+    UI.info(
+        "[dim]Se solicitará tu número telefónico y código (OTP) para vincular la cuenta.[/dim]\n"
+    )
+    with tempfile.TemporaryDirectory() as temp_dir:
+        auth = AuthLogic(
+            profile_name=profile_name,
+            temp_dir=temp_dir,
+            api_id=api_id,
+            api_hash=api_hash,
+            manager=manager,
+            chat_id=chat_id,
+        )
+        auth.initialize_profile()
+
+    UI.success("Perfil creado exitosamente.")
+
+    if not is_direct_identifier(chat_id):
+        if chat_id == VALUE_NOT_SET:
+            # TODO: aplicar aqui el winzard interactivo.
+            pass
+        else:
+            # Aplicar la busqueda de chat e informar al usuario.
+            return
+
+    # Busqueda por Identificador chat_id
+    assert chat_id is not None, "El chat_id no puede ser None"
+
+    chat_id_normalized = normalize_chat_id(chat_id)
+    with TelegramSession.from_profile(profile_name, manager) as client:
+        access_service = ChatAccessService(client)
+        report = access_service.verify_access(chat_id_normalized)
+
+    if report.is_ready and report.chat:
+        UI.success("Tienes permisos de escritura.")
+        manager.set_setting(profile_name, "chat_id", report.chat.id)
+        UI.success(f"Configuración 'chat_id' actualizada.")
+    elif report.status == AccessStatus.NOT_FOUND:
+        # TODO: aplicar aqui el winzard interactivo.
         UI.warn(f"El chat_id {chat_id} no es correcto.")
         UI.info("Utiliza [bold]config set chat_id <ID>[/] para configurarlo.")
         UI.info("Si no sabes el ID, use [bold]totelegram config resolve[/].")
         raise typer.Exit(1)
-
-    with TelegramSession(
-        session_name=profile_name,
-        api_id=settings.api_id,
-        api_hash=settings.api_hash,
-        worktable=manager.profiles_dir,
-    ) as client:
-
-        access_service = ChatAccessService(client)
-        report = access_service.verify_access(quey)
-        if report.status == AccessStatus.NOT_FOUND:
-            # TODO: aplicar aqui el winzard interactivo.
-            UI.warn(f"El chat_id {chat_id} no es correcto.")
-            UI.info("Utiliza [bold]config set chat_id <ID>[/] para configurarlo.")
-            UI.info("Si no sabes el ID, use [bold]totelegram config resolve[/].")
-            raise typer.Exit(1)
-
-        assert report.chat is not None
-
-        if report.is_ready:
-            UI.success("Tienes permisos de escritura.")
-            manager.set_setting(profile_name, "chat_id", str(report.chat.id))
-            UI.success(f"Configuración 'chat_id' actualizada.")
-        else:
-            UI.warn("No tienes permisos de escritura en el chat.")
-            UI.warn("Corrige los permisos antes de intentar cualquier subida.")
-            UI.warn("Configuración 'chat_id' no actualizada.")
+    else:
+        UI.warn("No tienes permisos de escritura en el chat.")
+        UI.warn("Corrige los permisos antes de intentar cualquier subida.")
+        UI.warn("Configuración 'chat_id' no actualizada.")
 
 
 @app.command("switch")
@@ -141,13 +172,13 @@ def switch_profile(
         )
         raise typer.Exit(code=1)
 
-    current_active = manager.get_active_settings_name()
+    current_active = manager.get_active_profile_name()
     if str(current_active).lower() == name.lower():
         UI.info(f"El perfil '[bold]{name}[/]' ya es el perfil activo.")
         return
 
     try:
-        manager.set_settings_name_as_active(name)
+        manager.set_profile_name_as_active(name)
         UI.success(
             f"Perfil cambiado exitosamente. Ahora usando: [bold green]{name}[/bold green]"
         )

@@ -5,7 +5,6 @@ import typer
 from totelegram.commands.profile_ui import ProfileUI
 from totelegram.console import UI, console
 from totelegram.core.registry import ProfileManager
-from totelegram.core.schemas import CLIState
 from totelegram.core.setting import Settings
 from totelegram.store.database import DatabaseSession
 from totelegram.store.models import TelegramChat
@@ -96,40 +95,6 @@ def _normalize_input_values(values: List[str]) -> List[str]:
             clean = item.strip().strip("'").strip('"')
             if clean:
                 cleaned.append(clean)
-    return cleaned
-
-
-def validate_profile_name(ctx: typer.Context, profile_name: str):
-    def normalize_string(value: str):
-        if not isinstance(value, str):
-            return value
-        return value.strip()
-
-    cleaned = normalize_string(profile_name)
-    # TODO: un nombre como `mi-perfil` no es válido en isidentifier ¿es un error?
-    state: CLIState = ctx.obj
-    manager = state.manager
-
-    if not cleaned.isidentifier():
-        raise typer.BadParameter(
-            "El nombre del perfil solo puede contener letras, números y guiones bajos, y no puede comenzar con un número."
-        )
-
-    existing_profile = manager.get_profile(profile_name)
-    if existing_profile is not None:
-        UI.error(f"No se puede crear el perfil '{profile_name}'.")
-
-        if existing_profile.is_trinity:
-            UI.warn("El perfil existe.")
-        elif existing_profile.has_session:
-            UI.warn("Existe una sesión de Telegram huérfana con este nombre.")
-        elif existing_profile.has_env:
-            UI.warn("Existe un archivo de configuración (.env) sin sesión asociada.")
-
-        UI.info("Para empezar de cero, elimina los rastros primero usando:")
-        UI.info(f"[cyan]totelegram profile delete {profile_name}[/cyan]")
-        raise typer.Exit(code=1)
-
     return cleaned
 
 

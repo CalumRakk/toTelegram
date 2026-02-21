@@ -4,17 +4,17 @@ import typer
 
 from totelegram.commands.config_logic import (
     ConfigResolutionLogic,
-    classify_intent,
     display_config_table,
 )
 from totelegram.commands.profile_ui import ProfileUI
 from totelegram.console import UI, console
 from totelegram.core.schemas import CLIState
-from totelegram.core.setting import normalize_chat_id
+from totelegram.core.setting import Settings, normalize_chat_id
 from totelegram.services.chat_access import ChatAccessService
 from totelegram.services.chat_search import ChatSearchService
 from totelegram.services.config_service import ConfigService
 from totelegram.telegram import TelegramSession
+from totelegram.utils import is_direct_identifier
 
 if TYPE_CHECKING:
     from pyrogram import Client  # type: ignore
@@ -32,17 +32,17 @@ def main(ctx: typer.Context):
 
     state: CLIState = ctx.obj
     manager = state.manager
-    settings_name = manager.resolve_settings_name(state.settings_name, strict=False)
+    profile_name = manager.resolve_profile_name(state.profile_name, strict=False)
 
     title = "Configuración"
-    if settings_name:
-        title += f" (Perfil: [green]{settings_name}[/green])"
-        settings = manager.get_settings(settings_name)
+    if profile_name:
+        title += f" (Perfil: [green]{profile_name}[/green])"
+        settings = manager.get_settings(profile_name)
     else:
         title += " (Sin Perfil Activo)"
-        settings = manager.get_default_settings()
+        settings = Settings.get_default_settings()
 
-    ui.announce_profile_used(settings_name) if settings_name else None
+    ui.announce_profile_used(profile_name) if profile_name else None
     display_config_table(manager, state.is_debug, settings)
     ui.print_options_help_footer()
 
@@ -73,7 +73,7 @@ def set_configs(
     """
     state: CLIState = ctx.obj
     manager = state.manager
-    settings_name = cast(str, manager.resolve_settings_name(state.settings_name))
+    settings_name = cast(str, manager.resolve_profile_name(state.profile_name))
 
     ui.announce_profile_used(settings_name)
 
@@ -106,7 +106,7 @@ def unset_config(
     # TODO: agregar soporte a multiples configuraciones. ¿deberia?
     state: CLIState = ctx.obj
     manager = state.manager
-    settings_name = cast(str, manager.resolve_settings_name(state.settings_name))
+    settings_name = cast(str, manager.resolve_profile_name(state.profile_name))
 
     ui.announce_profile_used(settings_name)
 
@@ -139,7 +139,7 @@ def add_to_list(
 
     state: CLIState = ctx.obj
     manager = state.manager
-    settings_name = cast(str, manager.resolve_settings_name(state.settings_name))
+    settings_name = cast(str, manager.resolve_profile_name(state.profile_name))
 
     ui.announce_profile_used(settings_name)
 
@@ -169,7 +169,7 @@ def add_to_list(
 #     state: CLIState = ctx.obj
 #     manager = state.manager
 #     is_debug = state.is_debug
-#     settings_name = cast(str, manager.resolve_settings_name(state.settings_name))
+#     settings_name = cast(str, manager.resolve_profile_name(state.profile_name))
 #     ui.announce_profile_used(settings_name)
 
 #     settings = manager.get_settings(settings_name)
@@ -201,12 +201,13 @@ def add_to_list(
 @app.command("check")
 def check_config(ctx: typer.Context):
     """Verifica que el perfil actual esté listo para subir archivos."""
+    # FIX: si `.session` no existe, el comando creara uno en la carpeta de perfiles. ocacionando confusion con la trinidad.
     state: CLIState = ctx.obj
     manager = state.manager
-    settings_name = cast(str, manager.resolve_settings_name(state.settings_name))
+    settings_name = cast(str, manager.resolve_profile_name(state.profile_name))
 
     settings = state.manager.get_settings(settings_name)
-    UI.info(f"Comprobando integridad del perfil: [bold]{state.settings_name}[/]")
+    UI.info(f"Comprobando integridad del perfil: [bold]{state.profile_name}[/]")
 
     try:
         with TelegramSession(
@@ -248,14 +249,11 @@ def resolve_config(
     """Busca y configura el chat de destino."""
     state: CLIState = ctx.obj
     manager = state.manager
-    settings_name = cast(str, manager.resolve_settings_name(state.settings_name))
+    settings_name = cast(str, manager.resolve_profile_name(state.profile_name))
 
     ui.announce_profile_used(settings_name)
 
     settings = manager.get_settings(settings_name)
-
-    chat_id = normalize_chat_id(query)
-    intent_type = classify_intent(chat_id)
 
     with TelegramSession(
         session_name=settings_name,
@@ -268,34 +266,35 @@ def resolve_config(
         chat_searcher = ChatSearchService(client)
         logic = ConfigResolutionLogic(state)
 
-        if intent_type.is_direct:
-            report = chat_access.verify_access(chat_id)
-            if not report.is_ready:
+        if is_direct_identifier(query):
+            chat_id = normalize_chat_id(query)
+            with UI.loading("Verificando permisos..."):
+                report = chat_access.verify_access(chat_id)
+
+            if not report.is_ready or report.chat is None:
                 UI.warn("No tienes permisos de escritura en el chat.")
                 UI.warn("Corrige los permisos antes de intentar cualquier subida.")
                 UI.warn("Configuración 'chat_id' no actualizada.")
                 raise typer.Exit(1)
 
-            assert report.chat is not None
             logic.process_winner(report.chat, apply)
             raise typer.Exit(0)
-
-        print(chat_id, type(chat_id))
-        assert isinstance(chat_id, str), "chat_id is not a string"
 
         is_exact = not contains
-        result = chat_searcher.search_by_name(chat_id, depth, is_exact)
+        result = chat_searcher.search_by_name(query, depth, is_exact)
 
-        if result.is_resolved:
-            report = chat_access.verify_access(chat_id)
-            if not report.is_ready:
-                UI.warn("No tienes permisos de escritura en el chat.")
-                UI.warn("Corrige los permisos antes de intentar cualquier subida.")
-                UI.warn("Configuración 'chat_id' no actualizada.")
-                raise typer.Exit(1)
-            assert report.chat is not None
-            logic.process_winner(report.chat, apply)
-            raise typer.Exit(0)
+        if result.is_resolved and result.winner:
+            with UI.loading("Verificando permisos..."):
+                report = chat_access.verify_access(result.winner.id)
+
+            if report.is_ready and report.chat:
+                logic.process_winner(report.chat, apply)
+                raise typer.Exit(0)
+
+            UI.warn("No tienes permisos de escritura en el chat.")
+            UI.warn("Corrige los permisos antes de intentar cualquier subida.")
+            UI.warn("Configuración 'chat_id' no actualizada.")
+            raise typer.Exit(1)
 
         elif result.is_ambiguous:
             logic.process_ambiguity(result.conflicts)

@@ -1,5 +1,4 @@
 import json
-import re
 from enum import IntEnum
 from pathlib import Path
 from typing import Annotated, Any, ClassVar, List, Optional, Union, cast, get_origin
@@ -9,10 +8,9 @@ from pydantic.fields import FieldInfo
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from totelegram.core.enums import DuplicatePolicy
-from totelegram.utils import VALUE_NOT_SET
+from totelegram.utils import VALUE_NOT_SET, normalize_chat_id
 
 APP_SESSION_NAME = "toTelegram"
-SELF_CHAT_ALIASES = ["me", "mensajes guardados"]
 
 
 class AccessLevel(IntEnum):
@@ -28,44 +26,6 @@ class InfoField(BaseModel):
     default_value: Any
     is_sensitive: bool
     type_annotation: str
-
-
-def normalize_chat_id(value: Union[str, int, None]) -> Union[int, str]:
-    if value is None:
-        return VALUE_NOT_SET
-
-    raw = str(value).strip()
-    if not raw or raw.upper() == VALUE_NOT_SET:
-        return VALUE_NOT_SET
-
-    # Identidad propia
-    if raw.lower() in SELF_CHAT_ALIASES:
-        return "me"
-
-    # ID Numérico. Limpiamos posible prefijo "ID:" o "id:"
-    potential_number = re.sub(r"^(id:)", "", raw, flags=re.IGNORECASE)
-    if re.fullmatch(r"-?\d+", potential_number):
-        return int(potential_number)
-
-    # Enlaces de Telegram (Invite links o Username links)
-    from pyrogram.client import Client
-
-    if Client.INVITE_LINK_RE.fullmatch(raw):
-        return raw
-
-    # Probamos si es un enlace de tipo t.me/username
-    tme_match = re.search(r"t\.me/([a-zA-Z0-9_]{5,32})/?$", raw)
-    if tme_match:
-        return f"@{tme_match.group(1)}"
-
-    # Usernames (@username)
-    # clean_username = raw.lstrip("@")
-    # if re.fullmatch(r"[a-zA-Z][a-zA-Z0-9_]*", clean_username):
-    #     return f"@{clean_username}"
-    if raw.startswith("@"):
-        return raw
-
-    return raw
 
 
 def get_type_annotation(field: FieldInfo) -> str:
@@ -269,3 +229,7 @@ class Settings(BaseSettings):
                 f"La configuracion '{info.field_name.upper()}' solo es modificable en modo --debug."
             )
         return info
+
+    @staticmethod
+    def get_default_settings() -> "Settings":
+        return Settings(profile_name=VALUE_NOT_SET)

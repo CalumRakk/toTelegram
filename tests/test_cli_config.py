@@ -16,12 +16,12 @@ class TestCliConfig(unittest.TestCase):
         self.tmp_dir = TemporaryDirectory()
         self.config_path = Path(self.tmp_dir.name)
 
-        self.settings_name = "test_user"
+        self.profile_name = "test_user"
         manager = SettingsManager(self.config_path)
         manager._write_all_settings(
             "test_user",
             {
-                "profile_name": self.settings_name,
+                "profile_name": self.profile_name,
                 "chat_id": "123456789",
                 "upload_limit_rate_kbps": "1000",
                 "api_id": "123456789",
@@ -29,7 +29,7 @@ class TestCliConfig(unittest.TestCase):
             },
         )
 
-        self.state = CLIState(manager=manager, settings_name=self.settings_name)
+        self.state = CLIState(manager=manager, profile_name=self.profile_name)
         self.manager = manager
 
     def tearDown(self):
@@ -53,7 +53,7 @@ class TestCliConfig(unittest.TestCase):
         )
 
         self.assertEqual(result.exit_code, 0)
-        settings = self.manager.get_settings(self.settings_name)
+        settings = self.manager.get_settings(self.profile_name)
         current_value = getattr(settings, "upload_limit_rate_kbps", None)
         self.assertEqual(current_value, 500)
 
@@ -71,7 +71,7 @@ class TestCliConfig(unittest.TestCase):
         self.assertIn("debe ser de tipo", result.stdout)
 
         # El valor original no debería haber cambiado
-        settings = self.manager.get_settings(self.settings_name)
+        settings = self.manager.get_settings(self.profile_name)
         current_value = getattr(settings, "MAX_FILESIZE_BYTES", None)
         self.assertNotEqual(current_value, "no_soy_un_numero")
 
@@ -88,7 +88,7 @@ class TestCliConfig(unittest.TestCase):
         # Añadir (confirmando con 'y')
         runner.invoke(app, ["add", "exclude_files", "*.tmp", "*.bak"], obj=self.state)
 
-        settings = self.manager.get_settings(self.settings_name)
+        settings = self.manager.get_settings(self.profile_name)
         self.assertIn("*.tmp", settings.exclude_files)
         self.assertIn("*.bak", settings.exclude_files)
 

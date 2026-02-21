@@ -7,11 +7,13 @@ from typing import Optional
 import typer
 
 from totelegram.core.schemas import CLIState
+from totelegram.core.setting import APP_SESSION_NAME
+from totelegram.utils import get_user_config_dir
 
 logging.getLogger("dotenv").setLevel(logging.CRITICAL)
 
 from totelegram.commands import config, profile, upload
-from totelegram.console import console
+from totelegram.console import UI, console
 from totelegram.core.registry import SettingsManager
 from totelegram.logging_config import setup_logging
 
@@ -60,22 +62,21 @@ def main(
     ),
 ):
     """
-    Callback principal. Se ejecuta antes que cualquier comando.
-    Útil para configurar logging global.
+    Se ejecuta antes que cualquier comando.
     """
+    worktable = get_user_config_dir(APP_SESSION_NAME)
+    config_manager = SettingsManager(worktable)
 
-    config_manager = SettingsManager()
-    active_profile = use or config_manager.get_active_settings_name()
-
-    if not active_profile:
-        logger.info("No se ha especificado ni hay un perfil activo en el sistema.")
-
+    # main resuelve la intencion del nombre del perfil a usar; las validaciones dependen del contexto del comando.
+    profile_name = use or config_manager.get_active_profile_name()
     if debug is True:
         setup_logging("debug_execution.log", logging.DEBUG)
-        console.print(f"\n[bold yellow]MODO DEBUG ACTIVADO[/]")
+        UI.info(f"\n[bold yellow]MODO DEBUG ACTIVADO[/]")
+    else:
+        setup_logging("execution.log", logging.INFO)
 
     ctx.obj = CLIState(
-        manager=config_manager, settings_name=active_profile, is_debug=debug
+        manager=config_manager, profile_name=profile_name, is_debug=debug
     )
 
 

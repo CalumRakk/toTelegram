@@ -1,4 +1,4 @@
-from typing import List, Union
+from typing import List
 
 import typer
 from rich.markup import escape
@@ -9,8 +9,8 @@ from totelegram.commands.profile_utils import (
 )
 from totelegram.console import UI, console
 from totelegram.core.registry import SettingsManager
-from totelegram.core.schemas import ChatMatch, CLIState, IntentType
-from totelegram.core.setting import SELF_CHAT_ALIASES, AccessLevel, Settings
+from totelegram.core.schemas import ChatMatch, CLIState
+from totelegram.core.setting import AccessLevel, Settings
 
 
 def mark_sensitive(value: int | str) -> str:
@@ -52,7 +52,7 @@ def display_config_table(maneger: SettingsManager, is_debug: bool, settings: Set
     table.add_column("Valor Actual")
     table.add_column("Descripción")
 
-    default_settings = maneger.get_default_settings()
+    default_settings = Settings.get_default_settings()
     for field_name, default_value in default_settings.model_dump().items():
         info = Settings.get_info(field_name)
         if info is None:
@@ -98,23 +98,6 @@ def display_config_table(maneger: SettingsManager, is_debug: bool, settings: Set
     console.print(table)
 
 
-def classify_intent(query: Union[str, int]) -> IntentType:
-    if isinstance(query, int):
-        return IntentType.DIRECT_ID
-
-    clean = str(query).strip()
-    if clean.startswith("@"):
-        return IntentType.DIRECT_USERNAME
-
-    if "t.me/" in clean or "telegram.me/" in clean:
-        return IntentType.DIRECT_LINK
-
-    if clean.lower() in SELF_CHAT_ALIASES:
-        return IntentType.DIRECT_ALIAS
-
-    return IntentType.SEARCH_QUERY
-
-
 class ConfigResolutionLogic:
     def __init__(self, state: CLIState):
         self.state = state
@@ -123,9 +106,9 @@ class ConfigResolutionLogic:
         UI.success(f"¡Encontrado! [bold]{match.title}[/] [dim](ID: {match.id})[/]")
         UI.success("Tienes permisos de escritura.")
         if apply:
-            assert self.state.settings_name is not None
+            assert self.state.profile_name is not None
             self.state.manager.set_setting(
-                self.state.settings_name, "chat_id", str(match.id)
+                self.state.profile_name, "chat_id", str(match.id)
             )
             UI.success(f"Configuración 'chat_id' actualizada.")
 
