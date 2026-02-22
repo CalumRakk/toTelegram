@@ -3,6 +3,7 @@ from typing import TYPE_CHECKING, Optional, Union
 
 import typer
 
+from totelegram.core.consts import Commands
 from totelegram.services.chat_search import ChatSearchService
 
 if TYPE_CHECKING:
@@ -140,12 +141,8 @@ def profile_profile(ctx: typer.Context):
     """Muestra la lista de perfiles si no se pasa un subcomando."""
     if ctx.invoked_subcommand is not None:
         return
-    state: CLIState = ctx.obj
-    manager = state.manager
+
     list_profiles(ctx, False)
-    if not manager.has_active_profile_configured():
-        UI.warn("No hay un perfil activo completamente configurado.")
-        UI.info("Usa 'totelegram profile create' para empezar.")
 
 
 @app.command("list")
@@ -160,11 +157,18 @@ def list_profiles(
     profiles = manager.get_all_profiles()
     if not profiles:
         UI.warn("No se encontraron perfiles en el sistema.")
-        UI.info("Usa 'totelegram profile create' para empezar.")
+        command= f"{Commands.PROFILE_CREATE}"
+        UI.tip(f"Crea un perfil usando el siguiente comando:", commands=command, spacing="top")
         return
 
     active_profile = manager.get_active_profile_name()
     DisplayProfile.render_profiles_table(manager, active_profile, profiles, quiet)
+
+    if not active_profile:
+        UI.warn("No hay un perfil activo en el sistema.")
+        UI.tip("Activa un perfil usando el comando:", commands=f"{Commands.PROFILE_SWITCH} [NOMBRE]", spacing="top")
+
+
 
 
 @app.command("create")

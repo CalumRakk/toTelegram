@@ -5,6 +5,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from totelegram.console import UI, console
+from totelegram.core.consts import COLORS
 from totelegram.core.registry import Profile, SettingsManager
 from totelegram.core.schemas import ChatMatch
 from totelegram.core.setting import AccessLevel, Settings
@@ -61,7 +62,7 @@ class DisplayConfig:
         cls, maneger: SettingsManager, is_debug: bool, settings: Settings
     ):
         table = Table(
-            title="Configuración del Perfil", show_header=True, header_style="bold blue"
+            title="Configuración del Perfil", show_header=True, header_style=COLORS.TABLE_TITLE
         )
         table.add_column("Opción (Key)")
         table.add_column("Tipo")
@@ -145,20 +146,20 @@ class DisplayProfile:
     ):
         console.print()
         if quiet:
-            console.print("Perfiles disponibles de toTelegram:")
+            console.print("Perfiles disponibles:")
             for profile in profiles:
                 console.print(" - " + profile.name)
             return
 
         table = Table(
-            title="Perfiles disponibles de toTelegram",
-            title_style="bold magenta",
+            title="Perfiles disponibles",
+            title_style=COLORS.TABLE_TITLE,
         )
-        table.add_column("Estado", style="cyan", no_wrap=True)
-        table.add_column("Perfil", style="magenta")
-        table.add_column("Session (.session)", style="green")
-        table.add_column("Config (.env)", style="green")
-        table.add_column("Destino (Chat ID)", style="green")
+        table.add_column("Estado", no_wrap=True)
+        table.add_column("Perfil",)
+        table.add_column("Session (.session)", justify="center")
+        table.add_column("Config (.env)", justify="center")
+        table.add_column("Destino (Chat ID)")
 
         was_orphan = False
         for profile in profiles:
@@ -166,21 +167,21 @@ class DisplayProfile:
 
             active_marker = "[bold green]*[/]" if is_active else ""
             auth_status = (
-                "[green][ OK ][/]" if profile.has_session else "[red][ MISSING ][/]"
+                "[green] OK [/]" if profile.has_session else "[red] MISSING [/]"
             )
 
             if profile.has_env:
                 settings = manager.get_settings(profile.name)
                 chat_id = settings.chat_id
 
-                config_status = "[green][ OK ][/]"
+                config_status = "[green] OK [/]"
                 target_desc = (
                     f"[white]{chat_id}[/]"
                     if chat_id != VALUE_NOT_SET
                     else "[yellow]Pendiente[/]"
                 )
             else:
-                config_status = "[red][ MISSING ][/]"
+                config_status = "[red] MISSING [/]"
                 target_desc = "[dim]--[/]"
 
             if not profile.is_trinity:
@@ -281,7 +282,7 @@ class DisplayGeneric:
     @classmethod
     def show_chat_table(cls, matches: List[ChatMatch], title: str):
         """Helper para mostrar resultados de chats en formato tabla."""
-        table = Table(title=title, show_header=True, header_style="bold magenta")
+        table = Table(title=title, show_header=True, header_style=COLORS.TABLE_TITLE)
         table.add_column("ID", style="dim")
         table.add_column("Titulo")
         table.add_column("Username")

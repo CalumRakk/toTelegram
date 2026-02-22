@@ -10,6 +10,7 @@ from time import sleep
 from typing import TYPE_CHECKING, Any, List, Union, cast
 
 from totelegram.console import console
+from totelegram.core.consts import APP_NAME, SELF_CHAT_ALIASES, VALUE_NOT_SET
 
 if TYPE_CHECKING:
     from totelegram.core.setting import Settings
@@ -18,10 +19,7 @@ import filetype
 
 logger = logging.getLogger(__name__)
 
-APP_NAME = "toTelegram"
-VALUE_NOT_SET = "NOT_SET"
-ID_PREFIX_RE = re.compile(r"^id:", re.IGNORECASE)
-SELF_CHAT_ALIASES = ["me", "mensajes guardados"]
+
 
 if sys.version_info >= (3, 12):
     from itertools import batched

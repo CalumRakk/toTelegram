@@ -1,9 +1,11 @@
+import time
 from typing import TYPE_CHECKING, List, cast
 
 import typer
 
 from totelegram.commands.views import DisplayConfig, DisplayGeneric, DisplayProfile
 from totelegram.console import UI, console
+from totelegram.core.consts import Commands
 from totelegram.core.schemas import CLIState
 from totelegram.core.setting import Settings, normalize_chat_id
 from totelegram.services.chat_access import ChatAccessService
@@ -36,14 +38,14 @@ def main(ctx: typer.Context):
         title += " (Sin Perfil Activo)"
         settings = Settings.get_default_settings()
 
-    DisplayProfile.announce_profile_used(profile_name) if profile_name else None
-    DisplayConfig.show_config_table(manager, state.is_debug, settings)
-    console.print(
-            "\nUsa [yellow]totelegram profile set <KEY> <VALUE>[/yellow] para modificar."
-        )
-    console.print(
-            "Usa [yellow]totelegram profile add/remove[/yellow] para listas (ej: EXCLUDE_FILES)."
-        )
+    if profile_name:
+        DisplayProfile.announce_profile_used(profile_name)
+        DisplayConfig.show_config_table(manager, state.is_debug, settings)
+        commands=[f"{Commands.CONFIG_SET} <KEY> <VALUE>", f"{Commands.CONFIG_EDIT_LIST} <KEY> <VALUE1>"]
+        UI.tip("Puedes modificar cualquier configuración usando los siguientes comandos:", commands=commands, spacing="block")
+    else:
+        UI.warn("No hay un perfil activo para mostrar valores de configuracion.")
+
 
 
 @app.command(name="set")
@@ -168,38 +170,50 @@ def check_config(ctx: typer.Context):
     # FIX: si `.session` no existe, el comando creara uno en la carpeta de perfiles. ocacionando confusion con la trinidad.
     state: CLIState = ctx.obj
     manager = state.manager
-    settings_name = cast(str, manager.resolve_profile_name(state.profile_name))
+    settings_name = cast(str, manager.resolve_profile_name(state.profile_name, strict=False))
 
-    settings = state.manager.get_settings(settings_name)
-    UI.info(f"Comprobando integridad del perfil: [bold]{state.profile_name}[/]")
+    with UI.loading(f"Comprobando integridad del perfil: [bold]{state.profile_name}[/]"):
+        time.sleep(0.2)  # Simular carga
+        profile = state.manager.get_profile(settings_name)
+        if not profile:
+            UI.error(f"Perfil global no encontrado.")
+            raise typer.Exit(1)
 
-    try:
-        with TelegramSession(
-            session_name=settings_name,
-            api_hash=settings.api_hash,
-            api_id=settings.api_id,
-            profiles_dir=manager.profiles_dir,
-        ) as client:
-            from pyrogram.types import Chat
 
-            if settings.chat_id == "NOT_SET":
-                DisplayConfig.show_config_table(manager, state.is_debug, settings)
-                UI.warn("CHAT_ID no configurado.")
-                raise typer.Exit(code=1)
+        if not profile.is_trinity and not profile.has_env:
+            UI.error("Perfil incompleto: No tiene [bold].env[/]\n")
+            console.print(f"Créalo de nuevo: [cyan]totelegram profile create --force --profile-name {settings_name}[/]")
+            raise typer.Exit(1)
 
-            with UI.loading("Verificando permisos..."):
-                validator = ChatAccessService(client)
-                access_report = validator.verify_access(settings.chat_id)
 
-            if not access_report.is_ready:
-                UI.warn("No tienes permisos de escritura en el chat.")
-                raise typer.Exit(code=1)
 
-            UI.success("Perfil listo para subir archivos.")
+    # try:
+    #     with TelegramSession(
+    #         session_name=settings_name,
+    #         api_hash=settings.api_hash,
+    #         api_id=settings.api_id,
+    #         profiles_dir=manager.profiles_dir,
+    #     ) as client:
+    #         from pyrogram.types import Chat
 
-    except Exception as e:
-        UI.error(f"Error de configuracion {str(e)}")
-        raise typer.Exit(code=1)
+    #         if settings.chat_id == "NOT_SET":
+    #             DisplayConfig.show_config_table(manager, state.is_debug, settings)
+    #             UI.warn("CHAT_ID no configurado.")
+    #             raise typer.Exit(code=1)
+
+    #         with UI.loading("Verificando permisos..."):
+    #             validator = ChatAccessService(client)
+    #             access_report = validator.verify_access(settings.chat_id)
+
+    #         if not access_report.is_ready:
+    #             UI.warn("No tienes permisos de escritura en el chat.")
+    #             raise typer.Exit(code=1)
+
+    #         UI.success("Perfil listo para subir archivos.")
+
+    # except Exception as e:
+    #     UI.error(f"Error de configuracion {str(e)}")
+    #     raise typer.Exit(code=1)
 
 
 @app.command("search")

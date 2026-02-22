@@ -72,7 +72,8 @@ def main(
         setup_logging("debug_execution.log", logging.DEBUG)
         UI.info(f"\n[bold yellow]MODO DEBUG ACTIVADO[/]")
     else:
-        setup_logging("execution.log", logging.INFO)
+        # setup_logging("execution.log", logging.INFO)
+        pass
 
     ctx.obj = CLIState(
         manager=config_manager, profile_name=profile_name, is_debug=debug
