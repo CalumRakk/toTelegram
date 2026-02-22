@@ -116,12 +116,25 @@ class DisplayConfig:
 
 class DisplayProfile:
     @staticmethod
-    def announce_profile_creation(profile_name: str):
-        UI.info(f"Creando perfil '[bold]{profile_name}[/]'.")
-        UI.info("[bold cyan]1. Autenticación con Telegram[/bold cyan]")
-        UI.info(
-            "[dim]Se solicitará tu número telefónico y código (OTP) para vincular la cuenta.[/dim]\n"
+    def announce_start_profile_creation(profile_name: str):
+        UI.info(f"Creando perfil '[bold]{profile_name}[/]'.\n")
+        console.print("[bold cyan]1. Autenticación con Telegram[/bold cyan]")
+        console.print(
+            "[dim]Se solicitará tu [bold]número telefónico[/] y [bold]código (OTP)[/] para vincular la cuenta.[/dim]\n"
         )
+    @staticmethod
+    def announce_profile_creation(profile_name: str):
+        console.print()
+        UI.info(f"Perfil '[bold]{profile_name}[/]' creado exitosamente.")
+
+    @staticmethod
+    def announce_start_destination_setup():
+        console.print()
+        UI.info("Configurando destino de subida (Chat ID).")
+        console.print(
+            "[dim]Puedes omitir este paso y configurarlo más tarde usando 'totelegram config set chat_id <ID>'.[/dim]\n"
+        )
+
     @classmethod
     def render_profiles_table(
         cls,

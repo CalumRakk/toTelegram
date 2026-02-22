@@ -6,10 +6,7 @@ from typing import Any, Dict, List, NamedTuple, Optional, cast
 from dotenv import dotenv_values
 from pydantic import BaseModel, ValidationError
 
-from totelegram.core.setting import (
-    InfoField,
-    Settings,
-)
+from totelegram.core.setting import InfoField, Settings
 
 logger = logging.getLogger(__name__)
 
@@ -91,8 +88,15 @@ class SettingsManager:
             deleted_files.append(env_path)
 
         if session_path.exists():
+            db_files= [".session-journal", ".session-shm", ".session-wal"]
             session_path.unlink()
             deleted_files.append(session_path)
+
+            for suffix in db_files:
+                related_db = session_path.with_suffix(suffix)
+                if related_db.exists():
+                    related_db.unlink()
+                    deleted_files.append(related_db)
 
         if self.has_active_profile_configured():
             if self.get_active_profile_name() == profile.name:
@@ -182,18 +186,25 @@ class SettingsManager:
 
         if profile_name:
             if not self.settings_exists(profile_name):
-                logger.error(f"El perfil {profile_name} no existe.")
+                logger.debug(f"El perfil {profile_name} no existe.")
                 if strict:
                     raise ValueError(f"El perfil {profile_name} no existe.")
             return profile_name
 
         if not self.has_active_profile_configured():
-            logger.error("No hay un perfil activo.")
+            logger.debug("No hay un perfil activo.")
             if strict:
                 raise ValueError("No hay un perfil activo.")
 
         active = self.get_active_profile_name()
         if active:
+            # FIX: validar que el perfil activo tenga un .env válido antes de devolverlo.
+            if not self.settings_exists(active):
+                msg= f"El perfil activo '{active}' no es válido porque su archivo de configuración no existe."
+                logger.debug(msg)
+                if strict:
+                    raise ValueError(msg)
+                return None
             return active
 
         if strict:

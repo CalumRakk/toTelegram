@@ -140,7 +140,12 @@ def profile_profile(ctx: typer.Context):
     """Muestra la lista de perfiles si no se pasa un subcomando."""
     if ctx.invoked_subcommand is not None:
         return
+    state: CLIState = ctx.obj
+    manager = state.manager
     list_profiles(ctx, False)
+    if not manager.has_active_profile_configured():
+        UI.warn("No hay un perfil activo completamente configurado.")
+        UI.info("Usa 'totelegram profile create' para empezar.")
 
 
 @app.command("list")
@@ -171,6 +176,7 @@ def create_profile(
     chat_id: Optional[str] = typer.Option(
         VALUE_NOT_SET, help="Chat ID (opcional para saltar asistente)"
     ),
+    force: bool = typer.Option(False, "--force", "-f", help="Forzar creación incluso si el perfil ya existe")
 ):
     """Crea una nueva identidad y la vincula con tu cuenta de Telegram."""
 
@@ -183,14 +189,18 @@ def create_profile(
 
     existing_profile = state.manager.get_profile(profile_name)
     if existing_profile:
-        UI.error(f"No se puede crear el perfil '{profile_name}'.")
+        if force is False:
+            UI.error(f"No se puede crear el perfil '{profile_name}'.")
 
-        DisplayProfile.show_profile_conflict(existing_profile)
+            DisplayProfile.show_profile_conflict(existing_profile)
 
-        DisplayProfile.show_delete_hint(existing_profile.name)
-        raise typer.Exit(1)
+            DisplayProfile.show_delete_hint(existing_profile.name)
+            raise typer.Exit(1)
+        else:
+            manager.delete_profile(existing_profile)
+            UI.warn(f"Perfil '{profile_name}' existente eliminado por opción '--force'.")
 
-    DisplayProfile.announce_profile_creation(profile_name)
+    DisplayProfile.announce_start_profile_creation(profile_name)
 
     with tempfile.TemporaryDirectory() as temp_dir:
         auth = AuthLogic(
@@ -203,7 +213,9 @@ def create_profile(
         )
         auth.initialize_profile()
 
-    UI.success("Perfil creado exitosamente.")
+    DisplayProfile.announce_profile_creation(profile_name)
+
+    DisplayProfile.announce_start_destination_setup()
 
     assert chat_id is not None
     is_chat_id_specified = chat_id != VALUE_NOT_SET

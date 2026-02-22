@@ -51,6 +51,7 @@ class TelegramSession:
         iso639 = lang.split("_")[0] if lang else "en"
 
         from pyrogram import Client  # type: ignore
+        from pyrogram.errors import ApiIdInvalid, ApiIdPublishedFlood
         from pyrogram.types import Chat  # type: ignore
 
         self.client = Client(
