@@ -1,25 +1,138 @@
-import keyword
 import tempfile
-from typing import Optional
+from typing import TYPE_CHECKING, Optional, Union
 
 import typer
 
-from totelegram.commands.profile_ui import ProfileUI
-from totelegram.commands.views import DisplayProfile
+from totelegram.services.chat_search import ChatSearchService
+
+if TYPE_CHECKING:
+    from pyrogram import Client # type: ignore
+
+from totelegram.commands.views import DisplayGeneric, DisplayProfile
 from totelegram.console import UI, console
 from totelegram.core.schemas import AccessStatus, CLIState
 from totelegram.core.setting import normalize_chat_id
 from totelegram.services.auth import AuthLogic
 from totelegram.services.chat_access import ChatAccessService
 from totelegram.telegram import TelegramSession
-from totelegram.utils import VALUE_NOT_SET, is_direct_identifier
+from totelegram.utils import VALUE_NOT_SET, is_direct_identifier, is_valid_profile_name
 
 app = typer.Typer(help="Gestión de perfiles de configuración.")
-ui = ProfileUI(console)
 
 
-def is_valid_profile_name(profile_name: str):
-    return profile_name.isidentifier() and not keyword.iskeyword(profile_name)
+def _run_destination_wizard(client: "Client", current_depth:int=100) -> Optional[Union[str, int]]:
+    """
+    Inicia el asistente interactivo para determinar y validar el chat destino.
+    Devuelve el identificador del chat (int o str) si se resuelve con éxito,
+    o None si el usuario decide omitir la configuración.
+    """
+
+    def has_write_permission(target: Union[str, int])-> bool:
+        with UI.loading("Verificando permisos..."):
+            report= access_service.verify_access(target)
+
+        if report.is_ready and report.chat:
+            UI.success("Tienes permisos de escritura.")
+            return True
+
+        UI.error(f"Error: {report.reason}")
+        if report.hint:
+            UI.info(report.hint)
+
+        return False
+
+    search_service = ChatSearchService(client)
+    access_service = ChatAccessService(client)
+
+    while True:
+        console.print("\n[bold cyan]Selección de Destino[/bold cyan]")
+        console.print(" [1] Usar [bold]Mensajes guardados[/] (Nube personal)")
+        console.print(" [2] Buscar entre tus Canales, Grupos o Chats.")
+        console.print(
+            " [3] Introduce un [bold]ID[/], [bold]@username[/] o [bold]link[/]."
+        )
+        console.print(" [4] Configurar más tarde (salir).")
+
+        option = typer.prompt("\nSelecciona una opción", default="1")
+        if option == "1":
+            if has_write_permission("me"):
+                return "me"
+
+        elif option == "2":
+            query = typer.prompt("\nEscribe el nombre del chat que buscas")
+            console.print()
+
+            while True:
+                with UI.loading(f"Buscando chat que contenga [bold]{query}[/] (profundidad: {current_depth})..."):
+                    resolution = search_service.search_by_name(query, is_exact=False, depth=current_depth)
+
+                matches = resolution.all_unique_matches()
+
+                DisplayGeneric.show_matches_summary(query, matches)
+                DisplayGeneric.render_search_results(matches)
+
+                # Si NO HAY resultados, damos opciones para intentar de nuevo o cambiar la búsqueda
+                if not matches:
+                    DisplayGeneric.show_search_tip()
+                    console.print("\n[bold]¿Qué deseas hacer?[/bold]")
+                    console.print(f" [1] Reintentar con '{query}' (Si ya enviaste el mensaje)")
+                    console.print(f" [2] Búsqueda profunda (Escanear más chats antiguos)")
+                    console.print(f" [3] Probar otro nombre.")
+                    console.print(f" [4] Volver al menú principal.")
+
+                    sub_opt = typer.prompt("\nSelecciona una acción", default="1")
+                    if sub_opt == "1":
+                        continue
+                    elif sub_opt == "2":
+                        current_depth += 100
+                        continue
+                    elif sub_opt == "3":
+                        query = typer.prompt("Escribe el nuevo nombre")
+                        current_depth = 50
+                        continue
+                    else:
+                        break  # Rompe el sub-bucle y vuelve al menú principal
+
+                # Si HAY resultados, procesamos la selección
+                try:
+                    choice = typer.prompt("\nSelecciona el numeral (#) o '0' para cancelar", default="0")
+
+                    # Manejo explicíto del 0, se evitan bug de lista [-1]
+                    if choice == "0":
+                        UI.info("Selección cancelada. Volviendo al menú principal.")
+                        break
+
+                    choice_idx = int(choice) - 1
+
+                    if choice_idx < 0 or choice_idx >= len(matches):
+                        raise ValueError()
+
+                    seleccion = matches[choice_idx]
+
+                    if has_write_permission(seleccion.id):
+                        return seleccion.id
+                    else:
+                        # Si elige uno que no tiene permisos, lo dejamos volver a intentar
+                        break
+
+                except (ValueError, IndexError):
+                    console.print("[red]Selección inválida. Inténtalo de nuevo.[/red]")
+
+        elif option == "3":
+            user_input = typer.prompt("Escribe el identificador")
+            if not is_direct_identifier(user_input):
+                UI.error("Formato inválido.")
+                continue
+
+            target = normalize_chat_id(user_input)
+            if has_write_permission(target):
+                return target
+
+        elif option == "4":
+            return None
+
+        else:
+            UI.error("Opción inválida.")
 
 
 @app.callback(invoke_without_command=True)
@@ -72,66 +185,57 @@ def create_profile(
     if existing_profile:
         UI.error(f"No se puede crear el perfil '{profile_name}'.")
 
-        if existing_profile.is_trinity:
-            UI.warn("El perfil existe.")
-        elif existing_profile.has_session:
-            UI.warn("Existe una sesión de Telegram huérfana con este nombre.")
-        elif existing_profile.has_env:
-            UI.warn(f"Existe un archivo de configuración (.env) sin sesión asociada.")
-            tip = f"[bold]totelegram --use {existing_profile.name} config check[/]"
-            UI.info(f"Ejecuta un diagnóstico usando: {tip} ")
+        DisplayProfile.show_profile_conflict(existing_profile)
 
-        tip = f"[bold]totelegram profile delete {profile_name}[/]"
-        UI.info(f"Para empezar de cero, elimina los rastros usando: {tip}")
-        raise typer.Exit(code=1)
+        DisplayProfile.show_delete_hint(existing_profile.name)
+        raise typer.Exit(1)
 
-    UI.info("[bold cyan]1. Autenticación con Telegram[/bold cyan]")
-    UI.info(
-        "[dim]Se solicitará tu número telefónico y código (OTP) para vincular la cuenta.[/dim]\n"
-    )
+    DisplayProfile.announce_profile_creation(profile_name)
+
     with tempfile.TemporaryDirectory() as temp_dir:
         auth = AuthLogic(
             profile_name=profile_name,
-            temp_dir=temp_dir,
             api_id=api_id,
             api_hash=api_hash,
-            manager=manager,
             chat_id=chat_id,
+            manager=manager,
+            temp_dir=temp_dir,
         )
         auth.initialize_profile()
 
     UI.success("Perfil creado exitosamente.")
 
-    if not is_direct_identifier(chat_id):
-        if chat_id == VALUE_NOT_SET:
-            # TODO: aplicar aqui el winzard interactivo.
-            pass
-        else:
-            # Aplicar la busqueda de chat e informar al usuario.
-            return
+    assert chat_id is not None
+    is_chat_id_specified = chat_id != VALUE_NOT_SET
 
-    # Busqueda por Identificador chat_id
-    assert chat_id is not None, "El chat_id no puede ser None"
-
-    chat_id_normalized = normalize_chat_id(chat_id)
     with TelegramSession.from_profile(profile_name, manager) as client:
         access_service = ChatAccessService(client)
-        report = access_service.verify_access(chat_id_normalized)
+        if is_chat_id_specified:
+            if not is_direct_identifier(chat_id):
+                UI.error(f"El {chat_id=} no es un identificador (ID, username, link).")
+                raise typer.Exit(1)
 
-    if report.is_ready and report.chat:
-        UI.success("Tienes permisos de escritura.")
-        manager.set_setting(profile_name, "chat_id", report.chat.id)
-        UI.success(f"Configuración 'chat_id' actualizada.")
-    elif report.status == AccessStatus.NOT_FOUND:
-        # TODO: aplicar aqui el winzard interactivo.
-        UI.warn(f"El chat_id {chat_id} no es correcto.")
-        UI.info("Utiliza [bold]config set chat_id <ID>[/] para configurarlo.")
-        UI.info("Si no sabes el ID, use [bold]totelegram config resolve[/].")
-        raise typer.Exit(1)
-    else:
-        UI.warn("No tienes permisos de escritura en el chat.")
-        UI.warn("Corrige los permisos antes de intentar cualquier subida.")
-        UI.warn("Configuración 'chat_id' no actualizada.")
+            chat_id_normalized = normalize_chat_id(chat_id)
+            report = access_service.verify_access(chat_id_normalized)
+
+            if report.is_ready and report.chat:
+                UI.success("Tienes permisos de escritura.")
+                manager.set_setting(profile_name, "chat_id", report.chat.id)
+                UI.success(f"Configuración 'chat_id' actualizada.")
+            elif report.status == AccessStatus.NOT_FOUND:
+                DisplayGeneric.warn_report_access_not_found(chat_id_normalized)
+                raise typer.Exit(1)
+            else:
+                DisplayGeneric.warn_report_access_permissions()
+                raise typer.Exit(1)
+        else:
+            resolved_chat_id = _run_destination_wizard(client)
+            if resolved_chat_id:
+                manager.set_setting(profile_name, "chat_id", resolved_chat_id)
+                UI.success("Configuración 'chat_id' actualizada.")
+            else:
+                UI.info("Configuración de destino omitida. Puedes hacerlo luego.")
+
 
 
 @app.command("switch")

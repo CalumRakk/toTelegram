@@ -1,4 +1,5 @@
 import hashlib
+import keyword
 import logging
 import os
 import re
@@ -17,6 +18,7 @@ import filetype
 
 logger = logging.getLogger(__name__)
 
+APP_NAME = "toTelegram"
 VALUE_NOT_SET = "NOT_SET"
 ID_PREFIX_RE = re.compile(r"^id:", re.IGNORECASE)
 SELF_CHAT_ALIASES = ["me", "mensajes guardados"]
@@ -120,7 +122,7 @@ def sleep_progress(seconds: float):
             logger.info(f"{i} segundos restantes...")
 
 
-def get_user_config_dir(app_name: str) -> Path:
+def get_user_config_dir(app_name: str = APP_NAME) -> Path:
     if sys.platform.startswith("win"):
         # En Windows se usa APPDATA → Roaming
         return Path(cast(str, os.getenv("APPDATA"))) / app_name
@@ -205,3 +207,7 @@ def normalize_chat_id(value: Union[str, int]) -> Union[int, str]:
         return raw.strip()
 
     raise ValueError(f"Invalid chat ID: {value}")
+
+
+def is_valid_profile_name(profile_name: str):
+    return profile_name.isidentifier() and not keyword.iskeyword(profile_name)

@@ -1,7 +1,6 @@
 import logging
 from typing import TYPE_CHECKING, Generator, List
 
-from totelegram.console import UI
 from totelegram.core.schemas import ChatMatch, ChatResolution
 
 if TYPE_CHECKING:
@@ -41,60 +40,51 @@ class ChatSearchService:
         Returns:
             ChatResolution: Estado final de la búsqueda y candidatos encontrados.
         """
+        from pyrogram.types import Dialog
 
-        search_desc = (
-            f"llamado exactamente '[bold]{query}[/]'"
-            if is_exact
-            else f"que contenga '[bold]{query}[/]' (sin distinción de mayúsculas y minúsculas)"
+        query = query.strip()
+
+        logger.debug(f"Resolviendo chat {query=} {is_exact=} {depth=}")
+
+        result = ChatResolution(
+            query=query, search_depth=depth, is_exact_requested=is_exact
         )
-        UI.info(f"Buscando chat {search_desc}")
 
-        with UI.loading("Resolviendo..."):
-            from pyrogram.types import Dialog
+        candidates: List[ChatMatch] = []
+        suggestions: List[ChatMatch] = []
 
-            query = query.strip()
+        dialogs: Generator[Dialog] = self.client.get_dialogs(limit=depth)  # type: ignore
 
-            logger.debug(f"Resolviendo chat {query=} {is_exact=} {depth=}")
+        for dialog in dialogs:
+            title = dialog.chat.title or dialog.chat.first_name or ""
+            match_data = ChatMatch.from_chat(dialog.chat)
 
-            result = ChatResolution(
-                query=query, search_depth=depth, is_exact_requested=is_exact
+            if is_exact:
+                if title == query:
+                    candidates.append(match_data)
+                elif query.lower() in title.lower():
+                    # No es exacto, pero se parece.
+                    suggestions.append(match_data)
+            else:
+                if query.lower() in title.lower():
+                    candidates.append(match_data)
+
+        # Clasificacion de resultado.
+        if len(candidates) == 1:
+            result.winner = candidates[0]
+            logger.info(f"Chat resuelto exitosamente {query=} {result.winner.id=}")
+
+        elif len(candidates) > 1:
+            result.conflicts = candidates
+            logger.info(
+                f"Resolución ambigua  {query=} conflictos={len(result.conflicts)}"
             )
 
-            candidates: List[ChatMatch] = []
-            suggestions: List[ChatMatch] = []
+        # Las sugerencias solo se llenan si no hubo un ganador claro
+        if not result.winner:
+            result.suggestions = suggestions
+            logger.debug(
+                f"Sin coincidencia exacta {query=} sugerencias={len(result.suggestions)}"
+            )
 
-            dialogs: Generator[Dialog] = self.client.get_dialogs(limit=depth)  # type: ignore
-
-            for dialog in dialogs:
-                title = dialog.chat.title or dialog.chat.first_name or ""
-                match_data = ChatMatch.from_chat(dialog.chat)
-
-                if is_exact:
-                    if title == query:
-                        candidates.append(match_data)
-                    elif query.lower() in title.lower():
-                        # No es exacto, pero se parece.
-                        suggestions.append(match_data)
-                else:
-                    if query.lower() in title.lower():
-                        candidates.append(match_data)
-
-            # Clasificacion de resultado.
-            if len(candidates) == 1:
-                result.winner = candidates[0]
-                logger.info(f"Chat resuelto exitosamente {query=} {result.winner.id=}")
-
-            elif len(candidates) > 1:
-                result.conflicts = candidates
-                logger.info(
-                    f"Resolución ambigua  {query=} conflictos={len(result.conflicts)}"
-                )
-
-            # Las sugerencias solo se llenan si no hubo un ganador claro
-            if not result.winner:
-                result.suggestions = suggestions
-                logger.debug(
-                    f"Sin coincidencia exacta {query=} sugerencias={len(result.suggestions)}"
-                )
-
-            return result
+        return result

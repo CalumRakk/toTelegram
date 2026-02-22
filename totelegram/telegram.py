@@ -6,7 +6,6 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional, cast
 
-from totelegram.console import console
 from totelegram.core.registry import SettingsManager
 
 if TYPE_CHECKING:
@@ -33,13 +32,13 @@ class TelegramSession:
         session_name: str,
         api_id: int,
         api_hash: str,
-        worktable: Path | str,
+        profiles_dir: Path | str,
     ):
         self.client: Optional[Client] = None
         self.name = session_name
         self.api_id = api_id
         self.api_hash = api_hash
-        self.workdir = worktable
+        self.profiles_dir = profiles_dir
 
     def start(self) -> Client:
         """Inicia la conexión manualmente."""
@@ -51,38 +50,36 @@ class TelegramSession:
         lang, encoding = locale.getdefaultlocale()
         iso639 = lang.split("_")[0] if lang else "en"
 
-        with console.status("Iniciando cliente de telegram...") as init_status:
-            from pyrogram import Client  # type: ignore
-            from pyrogram.types import Chat  # type: ignore
+        from pyrogram import Client  # type: ignore
+        from pyrogram.types import Chat  # type: ignore
 
-            self.client = Client(
-                name=self.name,  # type: ignore
-                api_id=self.api_id,  # type: ignore
-                api_hash=self.api_hash,  # type: ignore
-                workdir=str(self.workdir),  # type: ignore
-                lang_code=iso639,
-                in_memory=False,
-                no_updates=True,
+        self.client = Client(
+            name=self.name,  # type: ignore
+            api_id=self.api_id,  # type: ignore
+            api_hash=self.api_hash,  # type: ignore
+            workdir=str(self.profiles_dir),  # type: ignore
+            lang_code=iso639,
+            in_memory=False,
+            no_updates=True,
+        )
+
+        try:
+            self.client.start()  # type: ignore
+            me = cast(Chat, self.client.get_me())
+            logger.info(
+                f"Cliente Pyrogram iniciado correctamente: {me.first_name} (@{me.username})"
             )
+            return self.client
 
-            try:
-                self.client.start()  # type: ignore
-                me = cast(Chat, self.client.get_me())
-                logger.info(
-                    f"Cliente Pyrogram iniciado correctamente: {me.first_name} (@{me.username})"
-                )
-                init_status.stop()
-                return self.client
-
-            except ApiIdInvalid as e:
-                logger.debug("Error: API ID o Hash inválidos.")
-                raise e
-            except ApiIdPublishedFlood as e:
-                logger.debug("Error: API ID baneado públicamente.")
-                raise e
-            except Exception as e:
-                logger.debug(f"Error: inesperado: {e}")
-                raise e
+        except ApiIdInvalid as e:
+            logger.debug("Error: API ID o Hash inválidos.")
+            raise e
+        except ApiIdPublishedFlood as e:
+            logger.debug("Error: API ID baneado públicamente.")
+            raise e
+        except Exception as e:
+            logger.debug(f"Error: inesperado: {e}")
+            raise e
 
     def stop(self):
         """Detiene la conexión manualmente."""
@@ -136,7 +133,7 @@ class TelegramSession:
             session_name=profile_name,
             api_id=settings.api_id,
             api_hash=settings.api_hash,
-            worktable=manager.worktable,
+            profiles_dir=manager.profiles_dir,
         )
 
 

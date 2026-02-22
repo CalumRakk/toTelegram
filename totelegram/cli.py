@@ -7,8 +7,7 @@ from typing import Optional
 import typer
 
 from totelegram.core.schemas import CLIState
-from totelegram.core.setting import APP_SESSION_NAME
-from totelegram.utils import get_user_config_dir
+from totelegram.utils import APP_NAME, get_user_config_dir
 
 logging.getLogger("dotenv").setLevel(logging.CRITICAL)
 
@@ -64,7 +63,7 @@ def main(
     """
     Se ejecuta antes que cualquier comando.
     """
-    worktable = get_user_config_dir(APP_SESSION_NAME)
+    worktable = get_user_config_dir(APP_NAME)
     config_manager = SettingsManager(worktable)
 
     # main resuelve la intencion del nombre del perfil a usar; las validaciones dependen del contexto del comando.

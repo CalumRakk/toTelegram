@@ -10,8 +10,6 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from totelegram.core.enums import DuplicatePolicy
 from totelegram.utils import VALUE_NOT_SET, normalize_chat_id
 
-APP_SESSION_NAME = "toTelegram"
-
 
 class AccessLevel(IntEnum):
     EDITABLE = 1  # Visible y editable

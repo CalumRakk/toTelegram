@@ -156,6 +156,21 @@ class ChatResolution(BaseModel):
         """Indica si no hubo un ganador, pero existen sugerencias disponibles."""
         return self.winner is None and len(self.suggestions) > 0
 
+    def all_unique_matches(self) -> List[ChatMatch]:
+        """Devuelve una lista combinada de ganador, conflictos y sugerencias sin duplicados."""
+        all_matches: List[ChatMatch] = []
+        if self.winner:
+            all_matches.append(self.winner)
+        all_matches.extend(self.conflicts)
+        all_matches.extend(self.suggestions)
+
+        seen = set()
+        unique_matches = []
+        for m in all_matches:
+            if m.id not in seen:
+                seen.add(m.id)
+                unique_matches.append(m)
+        return unique_matches
 
 class IntentType(str, Enum):
     DIRECT_ID = "direct_id"

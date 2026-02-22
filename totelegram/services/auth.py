@@ -51,7 +51,7 @@ class AuthLogic:
             session_name=self.profile_name,
             api_id=self.api_id,
             api_hash=self.api_hash,
-            worktable=self.temp_dir,
+            profiles_dir=self.temp_dir,
         ):
             # Una vez dentro ya no necesitamos la session temp, salimos para liberar el archivo
             pass

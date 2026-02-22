@@ -2,8 +2,7 @@ from typing import TYPE_CHECKING, List, cast
 
 import typer
 
-from totelegram.commands.profile_ui import ProfileUI
-from totelegram.commands.views import DisplayConfig
+from totelegram.commands.views import DisplayConfig, DisplayGeneric, DisplayProfile
 from totelegram.console import UI, console
 from totelegram.core.schemas import CLIState
 from totelegram.core.setting import Settings, normalize_chat_id
@@ -18,8 +17,6 @@ if TYPE_CHECKING:
     from pyrogram.types import User
 
 app = typer.Typer(help="Configuración del perfil actual.")
-ui = ProfileUI(console)
-
 
 @app.callback(invoke_without_command=True)
 def main(ctx: typer.Context):
@@ -39,9 +36,14 @@ def main(ctx: typer.Context):
         title += " (Sin Perfil Activo)"
         settings = Settings.get_default_settings()
 
-    ui.announce_profile_used(profile_name) if profile_name else None
+    DisplayProfile.announce_profile_used(profile_name) if profile_name else None
     DisplayConfig.show_config_table(manager, state.is_debug, settings)
-    ui.print_options_help_footer()
+    console.print(
+            "\nUsa [yellow]totelegram profile set <KEY> <VALUE>[/yellow] para modificar."
+        )
+    console.print(
+            "Usa [yellow]totelegram profile add/remove[/yellow] para listas (ej: EXCLUDE_FILES)."
+        )
 
 
 @app.command(name="set")
@@ -72,7 +74,7 @@ def set_configs(
     manager = state.manager
     settings_name = cast(str, manager.resolve_profile_name(state.profile_name))
 
-    ui.announce_profile_used(settings_name)
+    DisplayProfile.announce_profile_used(settings_name)
 
     try:
         service = ConfigService(state.manager, state.is_debug)
@@ -105,7 +107,7 @@ def unset_config(
     manager = state.manager
     settings_name = cast(str, manager.resolve_profile_name(state.profile_name))
 
-    ui.announce_profile_used(settings_name)
+    DisplayProfile.announce_profile_used(settings_name)
 
     try:
         service = ConfigService(state.manager, state.is_debug)
@@ -124,7 +126,7 @@ def validate_item(value: str) -> str:
 
 
 @app.command("add")
-def add_to_list(
+def add_config(
     ctx: typer.Context,
     key: str,
     values: List[str] = typer.Argument(
@@ -138,7 +140,7 @@ def add_to_list(
     manager = state.manager
     settings_name = cast(str, manager.resolve_profile_name(state.profile_name))
 
-    ui.announce_profile_used(settings_name)
+    DisplayProfile.announce_profile_used(settings_name)
 
     try:
         service = ConfigService(state.manager, state.is_debug)
@@ -160,41 +162,6 @@ def add_to_list(
         raise typer.Exit(1)
 
 
-# @app.command("wizard")
-# def config_wizard(ctx: typer.Context):
-#     """Asistente interactivo para encontrar y configurar el chat de destino."""
-#     state: CLIState = ctx.obj
-#     manager = state.manager
-#     is_debug = state.is_debug
-#     settings_name = cast(str, manager.resolve_profile_name(state.profile_name))
-#     ui.announce_profile_used(settings_name)
-
-#     settings = manager.get_settings(settings_name)
-#     validator = ValidationService()
-
-#     try:
-#         UI.info(f"Iniciando cliente de telegram con sesión de {settings_name}...")
-
-#         with TelegramSession(manager.worktable, settings) as client:
-#             UI.success("Cliente de telegram iniciado.")
-
-#             resolved_chat = _capture_chat_id_wizard(validator, client)
-
-#             if resolved_chat == "me":
-#                 pm.update_config("CHAT_ID", "me", profile_name=profile_name)
-#                 UI.success("Destino configurado: Mensajes Guardados")
-#             elif resolved_chat != CHAT_ID_NOT_SET:
-#                 resolve_and_store_chat_logic(
-#                     pm, resolved_chat, profile_name, client=client
-#                 )
-#             else:
-#                 UI.info("Operación cancelada. No se han realizado cambios.")
-
-#     except Exception as e:
-#         UI.error(f"Error en el asistente: {e}")
-#         raise typer.Exit(1)
-
-
 @app.command("check")
 def check_config(ctx: typer.Context):
     """Verifica que el perfil actual esté listo para subir archivos."""
@@ -211,7 +178,7 @@ def check_config(ctx: typer.Context):
             session_name=settings_name,
             api_hash=settings.api_hash,
             api_id=settings.api_id,
-            worktable=manager.profiles_dir,
+            profiles_dir=manager.profiles_dir,
         ) as client:
             from pyrogram.types import Chat
 
@@ -248,7 +215,7 @@ def search_config(
     manager = state.manager
     profile_name = cast(str, manager.resolve_profile_name(state.profile_name))
 
-    ui.announce_profile_used(profile_name)
+    DisplayProfile.announce_profile_used(profile_name)
 
     # Obtener el ID del chat destino
     with TelegramSession.from_profile(profile_name, manager) as client:
@@ -268,13 +235,13 @@ def search_config(
             elif result.is_ambiguous:
                 conflicts = len(result.conflicts)
                 UI.warn(f"Ambigüedad: Hay {conflicts} chats con ese nombre.")
-                DisplayConfig.show_chat_table(
+                DisplayGeneric.show_chat_table(
                     result.conflicts, "Conflictos Encontrados"
                 )
                 UI.info("Usa el ID exacto: [bold]config set chat_id <ID>[/]")
                 raise typer.Exit(1)
             elif result.needs_help:
-                DisplayConfig.show_chat_table(
+                DisplayGeneric.show_chat_table(
                     result.suggestions, "Quizás quisiste decir:"
                 )
                 UI.info(
