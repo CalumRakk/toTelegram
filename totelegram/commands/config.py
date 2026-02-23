@@ -1,3 +1,4 @@
+import json
 import time
 from typing import TYPE_CHECKING, List, cast
 
@@ -7,18 +8,19 @@ from totelegram.commands.views import DisplayConfig, DisplayGeneric, DisplayProf
 from totelegram.console import UI, console
 from totelegram.core.consts import Commands
 from totelegram.core.schemas import CLIState
-from totelegram.core.setting import Settings, normalize_chat_id
+from totelegram.core.setting import normalize_chat_id
 from totelegram.services.chat_access import ChatAccessService
 from totelegram.services.chat_search import ChatSearchService
 from totelegram.services.config_service import ConfigService
 from totelegram.telegram import TelegramSession
-from totelegram.utils import is_direct_identifier
+from totelegram.utils import is_direct_identifier, is_suspected_glob_expansion
 
 if TYPE_CHECKING:
     from pyrogram import Client  # type: ignore
     from pyrogram.types import User
 
 app = typer.Typer(help="Configuración del perfil actual.")
+
 
 @app.callback(invoke_without_command=True)
 def main(ctx: typer.Context):
@@ -29,23 +31,21 @@ def main(ctx: typer.Context):
     state: CLIState = ctx.obj
     manager = state.manager
     profile_name = manager.resolve_profile_name(state.profile_name, strict=False)
-
-    title = "Configuración"
     if profile_name:
-        title += f" (Perfil: [green]{profile_name}[/green])"
         settings = manager.get_settings(profile_name)
-    else:
-        title += " (Sin Perfil Activo)"
-        settings = Settings.get_default_settings()
+        DisplayConfig.show_config_table(profile_name, manager, state.is_debug, settings)
 
-    if profile_name:
-        DisplayProfile.announce_profile_used(profile_name)
-        DisplayConfig.show_config_table(manager, state.is_debug, settings)
-        commands=[f"{Commands.CONFIG_SET} <KEY> <VALUE>", f"{Commands.CONFIG_EDIT_LIST} <KEY> <VALUE1>"]
-        UI.tip("Puedes modificar cualquier configuración usando los siguientes comandos:", commands=commands, spacing="block")
+        commands = [
+            f"{Commands.CONFIG_SET} <KEY> <VALUE>",
+            f"{Commands.CONFIG_EDIT_LIST} <KEY> <VALUE1>",
+        ]
+        UI.tip(
+            "Puedes modificar cualquier configuración usando los siguientes comandos:",
+            commands=commands,
+            spacing="top",
+        )
     else:
         UI.warn("No hay un perfil activo para mostrar valores de configuracion.")
-
 
 
 @app.command(name="set")
@@ -86,12 +86,14 @@ def set_configs(
                 settings_name, key, val, action="set"
             )
             if changed:
-                UI.success(f"Configuracion [bold]{key}[/] actualizada.")
+                UI.success(
+                    f"Configuracion [bold]{key}[/] actualizada con [bold]{final_val}[/]."
+                )
             else:
                 UI.info(f"Configuracion [bold]{key}[/] ya tiene ese valor.")
 
-        settings = state.manager.get_settings(settings_name)
-        DisplayConfig.show_config_table(state.manager, state.is_debug, settings)
+        # settings = state.manager.get_settings(settings_name)
+        # DisplayConfig.show_config_table(settings_name, state.manager, state.is_debug, settings)
 
     except ValueError as e:
         UI.error(f"DEBUG ERROR: {str(e)}")
@@ -124,7 +126,7 @@ def validate_item(value: str) -> str:
     if "," in value or value.strip().startswith("["):
         UI.error("Formato no soportado. Usa: config <key> add 1 2 3")
         raise typer.Exit()
-    return value
+    return value.strip("'").strip('"')
 
 
 @app.command("add")
@@ -135,9 +137,7 @@ def add_config(
         ..., min=1, callback=lambda x: [validate_item(i) for i in x]
     ),
 ):
-    """Agrega valores a una lista (ej. EXCLUDE_FILES)."""
-    # TODO: agregar soporte a multiples configuraciones ¿deberia?
-
+    """Agrega valores a una lista (ej. exclude_files)."""
     state: CLIState = ctx.obj
     manager = state.manager
     settings_name = cast(str, manager.resolve_profile_name(state.profile_name))
@@ -147,17 +147,69 @@ def add_config(
     try:
         service = ConfigService(state.manager, state.is_debug)
         updates = service.prepare_updates([key, values])  # type: ignore
+
+        if is_suspected_glob_expansion(values):
+            proceed = DisplayConfig.confirm_expanded_pattern("agregar", key, values)
+            if not proceed:
+                UI.info(
+                    "Operación cancelada. El archivo de configuración no fue modificado."
+                )
+                raise typer.Exit()
+
         for key, val in updates.items():
             changed, final_val = service.apply_update(
-                settings_name, key, val, action="set"
+                settings_name, key, val, action="add"
             )
             if changed:
-                UI.success(f"Configuracion [bold]{key}[/] actualizada.")
+                UI.success(
+                    f"Configuracion [bold]{key}[/] actualizada con [bold]{json.dumps(final_val)}[/]."
+                )
             else:
                 UI.info(f"Configuracion [bold]{key}[/] ya tiene ese valor.")
 
-        settings = state.manager.get_settings(settings_name)
-        DisplayConfig.show_config_table(state.manager, state.is_debug, settings)
+    except ValueError as e:
+        UI.error(str(e))
+        raise typer.Exit(1)
+
+
+@app.command("remove")
+def remove_config(
+    ctx: typer.Context,
+    key: str,
+    values: List[str] = typer.Argument(
+        ..., min=1, callback=lambda x: [validate_item(i) for i in x]
+    ),
+):
+    """Quita valores a una lista (ej. exclude_files)."""
+    print(values, type(values))
+    state: CLIState = ctx.obj
+    manager = state.manager
+    settings_name = cast(str, manager.resolve_profile_name(state.profile_name))
+
+    DisplayProfile.announce_profile_used(settings_name)
+
+    try:
+        service = ConfigService(state.manager, state.is_debug)
+        updates = service.prepare_updates([key, values])  # type: ignore
+
+        if is_suspected_glob_expansion(values):
+            proceed = DisplayConfig.confirm_expanded_pattern("eliminar", key, values)
+            if not proceed:
+                UI.info(
+                    "Operación cancelada. El archivo de configuración no fue modificado."
+                )
+                raise typer.Exit()
+
+        for key, val in updates.items():
+            changed, final_val = service.apply_update(
+                settings_name, key, val, action="remove"
+            )
+            if changed:
+                UI.success(
+                    f"Configuracion [bold]{key}[/] actualizada con [bold]{json.dumps(final_val)}[/]."
+                )
+            else:
+                UI.info(f"Configuracion [bold]{key}[/] ya tiene ese valor.")
 
     except ValueError as e:
         UI.error(str(e))
@@ -170,22 +222,25 @@ def check_config(ctx: typer.Context):
     # FIX: si `.session` no existe, el comando creara uno en la carpeta de perfiles. ocacionando confusion con la trinidad.
     state: CLIState = ctx.obj
     manager = state.manager
-    settings_name = cast(str, manager.resolve_profile_name(state.profile_name, strict=False))
+    settings_name = cast(
+        str, manager.resolve_profile_name(state.profile_name, strict=False)
+    )
 
-    with UI.loading(f"Comprobando integridad del perfil: [bold]{state.profile_name}[/]"):
+    with UI.loading(
+        f"Comprobando integridad del perfil: [bold]{state.profile_name}[/]"
+    ):
         time.sleep(0.2)  # Simular carga
         profile = state.manager.get_profile(settings_name)
         if not profile:
             UI.error(f"Perfil global no encontrado.")
             raise typer.Exit(1)
 
-
         if not profile.is_trinity and not profile.has_env:
             UI.error("Perfil incompleto: No tiene [bold].env[/]\n")
-            console.print(f"Créalo de nuevo: [cyan]totelegram profile create --force --profile-name {settings_name}[/]")
+            console.print(
+                f"Créalo de nuevo: [cyan]totelegram profile create --force --profile-name {settings_name}[/]"
+            )
             raise typer.Exit(1)
-
-
 
     # try:
     #     with TelegramSession(
@@ -289,13 +344,3 @@ def search_config(
             UI.success("Configuración 'chat_id' actualizada.")
 
         raise typer.Exit(0)
-
-
-# @app.command("remove")
-# def remove_from_list(
-#     ctx: typer.Context, key: str, values: List[str], force: bool = False
-# ):
-#     """Elimina valores de una lista."""
-#     env: Env = ctx.obj
-#     profile_name = pm.resolve_name()
-#     pm.update_config_list("remove", key, values, profile_name)

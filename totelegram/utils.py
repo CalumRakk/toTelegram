@@ -20,7 +20,6 @@ import filetype
 logger = logging.getLogger(__name__)
 
 
-
 if sys.version_info >= (3, 12):
     from itertools import batched
 else:
@@ -209,3 +208,32 @@ def normalize_chat_id(value: Union[str, int]) -> Union[int, str]:
 
 def is_valid_profile_name(profile_name: str):
     return profile_name.isidentifier() and not keyword.iskeyword(profile_name)
+
+
+def is_suspected_glob_expansion(values: List[str]) -> bool:
+    """
+    Heurística para detectar si la terminal expandió un comodín (* o ?).
+    Devuelve True si los valores parecen ser una inyección de la shell.
+    """
+    if not values:
+        return False
+
+    # Si hay comodines explícitos, significa que el usuario usó comillas correctamente.
+    has_wildcard = any("*" in v or "?" in v for v in values)
+    if has_wildcard:
+        return False
+
+    # Contamos cuántos de estos valores coinciden con archivos reales locales.
+    existing_files = sum(1 for v in values if Path(v).exists())
+
+    # Si todos existen en disco, es casi seguro que la terminal expandió un asterisco.
+    if len(values) > 1 and existing_files == len(values):
+        return True
+
+    # El caso borde podria ser que el asterisco hizo match con un solo archivo local.
+    # Podria ser un falso positivo, porque podria ser verdad quería excluir ese archivo específico.
+    # Igualforma, lo reportamos como si paremos dar una advertencia.
+    if len(values) == 1 and existing_files == 1:
+        return True
+
+    return False

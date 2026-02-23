@@ -24,7 +24,17 @@ class ConfigService:
                 "Debes proporcionar pares de CLAVE y VALOR. Ej: 'set chat_id 12345'"
             )
 
-        raw_data = {args[i].lower(): args[i + 1] for i in range(0, len(args), 2)}
+        def remove_quotation(value: Any):
+            if isinstance(value, str):
+                return value.strip("'").strip('"')
+            if isinstance(value, list):
+                return [remove_quotation(v) for v in value]
+            return value
+
+        raw_data = {
+            args[i].lower(): remove_quotation(args[i + 1])
+            for i in range(0, len(args), 2)
+        }
         updates = {}
 
         for key, raw_value in raw_data.items():
@@ -41,7 +51,7 @@ class ConfigService:
         settings_name: str,
         key: str,
         value: Any,
-        action: Literal["set", "add"] = "set",
+        action: Literal["set", "add", "remove"] = "set",
     ) -> Tuple[bool, Any]:
         """
         Aplica un cambio individual.
@@ -49,10 +59,16 @@ class ConfigService:
         """
         if action == "set":
             return self.manager.set_setting(settings_name, key, value)
-        else:
-            if not isinstance(value, list):
-                value = [value]
+
+        if not isinstance(value, list):
+            value = [value]
+
+        if action == "remove":
+            return self.manager.remove_setting(settings_name, key, value)
+        elif action == "add":
             return self.manager.add_setting(settings_name, key, value)
+
+        raise ValueError(f"Invalid action: {action}")
 
     def restore_default(self, settings_name: str, key: str) -> Any:
         """Restaura una configuración a su valor por defecto."""

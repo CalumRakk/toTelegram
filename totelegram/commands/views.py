@@ -1,11 +1,12 @@
-from typing import List, Optional, Union
+from typing import List, Literal, Optional, Union
 
+import typer
 from rich.markup import escape
 from rich.panel import Panel
 from rich.table import Table
 
 from totelegram.console import UI, console
-from totelegram.core.consts import COLORS
+from totelegram.core.consts import COLORS, Commands
 from totelegram.core.registry import Profile, SettingsManager
 from totelegram.core.schemas import ChatMatch
 from totelegram.core.setting import AccessLevel, Settings
@@ -42,6 +43,34 @@ def get_friendly_chat_name(chat_id: str, database_path: str) -> str:
 
 
 class DisplayConfig:
+    @staticmethod
+    def confirm_expanded_pattern(
+        action: Literal["agregar", "eliminar"], key: str, values: List[str]
+    ) -> bool:
+        # UI.warn(f"Se detectaron archivos locales en lugar de un patrón global.")
+
+        cmd_example = f"{Commands.CONFIG_ADD_LIST if action == 'agregar' else Commands.CONFIG_REMOVE_LIST} {key} '*.log'"
+        UI.educational_tip(
+            title="Detectado expansión de patrones",
+            message=(
+                "Tu terminal ha expandido el asterisco convirtiéndolo en una lista de archivos "
+                "locales antes de que el programa pudiera leerlo.\n\n"
+                f"Para {action} correctamente un patrón global, envuélvelo en comillas simples:"
+            ),
+            commands=[cmd_example],
+            border_style="yellow",
+            spacing="bottom",
+        )
+
+        is_unique = len(values) == 1
+        indicative = (
+            f"el archivo '{values[0]}'" if is_unique else f"{len(values)} archivos"
+        )
+        return typer.confirm(
+            f"¿Seguro deseas {action} {indicative} en lugar del patrón?",
+            default=False,
+        )
+
     @classmethod
     def _mark_sensitive(cls, value: int | str) -> str:
         if not isinstance(value, (str, int)):
@@ -59,11 +88,14 @@ class DisplayConfig:
 
     @classmethod
     def show_config_table(
-        cls, maneger: SettingsManager, is_debug: bool, settings: Settings
+        cls,
+        profile_name: str,
+        maneger: SettingsManager,
+        is_debug: bool,
+        settings: Settings,
     ):
-        table = Table(
-            title="Configuración del Perfil", show_header=True, header_style=COLORS.TABLE_TITLE
-        )
+        UI.info(f"Configuración del perfil: [green]{profile_name}[/green]")
+        table = Table(show_header=True, title_style=COLORS.TABLE_TITLE)
         table.add_column("Opción (Key)")
         table.add_column("Tipo")
         table.add_column("Valor Actual")
@@ -113,6 +145,7 @@ class DisplayConfig:
                 )
 
         console.print(table)
+        # console.print("[green]Valor modificado[/] | [dim]Valor por defecto[/]")
 
 
 class DisplayProfile:
@@ -123,6 +156,7 @@ class DisplayProfile:
         console.print(
             "[dim]Se solicitará tu [bold]número telefónico[/] y [bold]código (OTP)[/] para vincular la cuenta.[/dim]\n"
         )
+
     @staticmethod
     def announce_profile_creation(profile_name: str):
         console.print()
@@ -156,7 +190,9 @@ class DisplayProfile:
             title_style=COLORS.TABLE_TITLE,
         )
         table.add_column("Estado", no_wrap=True)
-        table.add_column("Perfil",)
+        table.add_column(
+            "Perfil",
+        )
         table.add_column("Session (.session)", justify="center")
         table.add_column("Config (.env)", justify="center")
         table.add_column("Destino (Chat ID)")
@@ -218,7 +254,8 @@ class DisplayProfile:
 
     @staticmethod
     def announce_profile_used(profile_name: str):
-        UI.info(f"Perfil activo: [bold]{profile_name}[/]")
+        UI.info(f"Perfil Actual: [bold]{profile_name}[/]")
+
 
 class DisplayGeneric:
 
@@ -278,11 +315,10 @@ class DisplayGeneric:
             )
         console.print(table)
 
-
     @classmethod
     def show_chat_table(cls, matches: List[ChatMatch], title: str):
         """Helper para mostrar resultados de chats en formato tabla."""
-        table = Table(title=title, show_header=True, header_style=COLORS.TABLE_TITLE)
+        table = Table(title=title, show_header=True, title_style=COLORS.TABLE_TITLE)
         table.add_column("ID", style="dim")
         table.add_column("Titulo")
         table.add_column("Username")
@@ -299,7 +335,6 @@ class DisplayGeneric:
         UI.warn(f"El {chat_id=} no fue encontrado.")
         UI.info("Utiliza [bold]config set chat_id <ID>[/] para configurarlo.")
         UI.info("Si no sabes el ID, use [bold]totelegram config search[/].")
-
 
     @staticmethod
     def warn_report_access_permissions():

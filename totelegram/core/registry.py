@@ -88,7 +88,7 @@ class SettingsManager:
             deleted_files.append(env_path)
 
         if session_path.exists():
-            db_files= [".session-journal", ".session-shm", ".session-wal"]
+            db_files = [".session-journal", ".session-shm", ".session-wal"]
             session_path.unlink()
             deleted_files.append(session_path)
 
@@ -200,7 +200,7 @@ class SettingsManager:
         if active:
             # FIX: validar que el perfil activo tenga un .env válido antes de devolverlo.
             if not self.settings_exists(active):
-                msg= f"El perfil activo '{active}' no es válido porque su archivo de configuración no existe."
+                msg = f"El perfil activo '{active}' no es válido porque su archivo de configuración no existe."
                 logger.debug(msg)
                 if strict:
                     raise ValueError(msg)
@@ -355,6 +355,51 @@ class SettingsManager:
                 current_list.append(item)
 
         changed = len(current_list) > initial_count
+        if changed:
+            current_data[key_normalized] = current_list
+            self._write_all_settings(settings_name, current_data)
+
+        return Result(changed, current_list)
+
+    def remove_setting(
+        self, settings_name: str, field_name: str, field_values: List[str]
+    ) -> Result:
+        """
+        Elimina elementos a una configuración de tipo lista.
+
+        Returns:
+            Tuple[bool, List[str]]: (True si se eliminaron elementos nuevos, Lista final resultante)
+        """
+        key_normalized = field_name.lower().strip()
+        new_elements = Settings.validate_single_setting(key_normalized, field_values)
+        if not isinstance(field_values, list):
+            raise ValueError(
+                f"El campo '{key_normalized}' no es una lista, no se puede usar 'add/remove'."
+            )
+
+        # Obtenemos el valor el valor del archivo (si lo hay) para comparar con el nuevo.
+        current_data = self._load_and_sanitize(settings_name)
+
+        current_list = []
+        if key_normalized in current_data:
+            try:
+                current_list = list(
+                    Settings.validate_single_setting(
+                        key_normalized, current_data[key_normalized]
+                    )
+                )
+            except (ValueError, TypeError):
+                # El valor en el archivo estaba corrupto, forzamos el valor por defecto
+                info = cast(InfoField, Settings.get_info(key_normalized))
+                current_list = info.default_value
+
+        # Solo se eliminan los elementos que estan ya en la lista
+        initial_count = len(current_list)
+        for item in new_elements:
+            if item in current_list:
+                current_list.remove(item)
+
+        changed = len(current_list) < initial_count
         if changed:
             current_data[key_normalized] = current_list
             self._write_all_settings(settings_name, current_data)
