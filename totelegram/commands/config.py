@@ -1,5 +1,6 @@
 import json
 import time
+from functools import wraps
 from typing import TYPE_CHECKING, List, Literal, Tuple, cast
 
 import typer
@@ -26,6 +27,18 @@ if TYPE_CHECKING:
 app = typer.Typer(help="Configuración del perfil actual.")
 
 
+def handle_config_errors(func):
+    @wraps(func)
+    def wrapper(ctx: typer.Context, *args, **kwargs):
+        try:
+            return func(ctx, *args, **kwargs)
+        except ValueError as e:
+            UI.error(str(e))
+            raise typer.Exit(1)
+
+    return wrapper
+
+
 def _get_config_tools(ctx: typer.Context) -> Tuple[str, ConfigService]:
     """Extrae las herramientas necesarias para cualquier comando de configuracion que requieran un perfil."""
     state: CLIState = ctx.obj
@@ -35,6 +48,7 @@ def _get_config_tools(ctx: typer.Context) -> Tuple[str, ConfigService]:
     return settings_name, service
 
 
+@handle_config_errors
 def _command_modify_list(
     settings_name: str,
     service: ConfigService,
@@ -42,28 +56,22 @@ def _command_modify_list(
     values: List[str],
     action: Literal["add", "remove"],
 ):
-    try:
-        updates = service.prepare_updates([key, values])  # type: ignore
-        verb = "agregar" if action == "add" else "eliminar"
+    updates = service.prepare_updates([key, values])  # type: ignore
+    verb = "agregar" if action == "add" else "eliminar"
 
-        if is_suspected_glob_expansion(values):
-            if not DisplayConfig.confirm_expanded_pattern(verb, key, values):
-                UI.info("Operacion cancelada.")
-                raise typer.Exit()
+    if is_suspected_glob_expansion(values):
+        if not DisplayConfig.confirm_expanded_pattern(verb, key, values):
+            UI.info("Operacion cancelada.")
+            raise typer.Exit()
 
-        for k, val in updates.items():
-            changed, final_val = service.apply_update(
-                settings_name, k, val, action=action
+    for k, val in updates.items():
+        changed, final_val = service.apply_update(settings_name, k, val, action=action)
+        if changed:
+            UI.success(
+                f"Configuracion [bold]{k}[/] actualizada: {json.dumps(final_val)}"
             )
-            if changed:
-                UI.success(
-                    f"Configuracion [bold]{k}[/] actualizada: {json.dumps(final_val)}"
-                )
-            else:
-                UI.info(f"Configuracion [bold]{k}[/] no sufrio cambios.")
-    except ValueError as e:
-        UI.error(str(e))
-        raise typer.Exit(1)
+        else:
+            UI.info(f"Configuracion [bold]{k}[/] no sufrio cambios.")
 
 
 @app.callback(invoke_without_command=True)
@@ -93,6 +101,7 @@ def main(ctx: typer.Context):
 
 
 @app.command(name="set")
+@handle_config_errors
 def set_configs(
     ctx: typer.Context,
     args: List[str] = typer.Argument(
@@ -116,37 +125,30 @@ def set_configs(
        Cualquier validación de red debe delegarse al comando 'config check' o
        'config resolve'.
     """
-    try:
-        settings_name, service = _get_config_tools(ctx)
-        updates = service.prepare_updates(args)
-        for key, val in updates.items():
-            changed, final_val = service.apply_update(
-                settings_name, key, val, action="set"
+
+    settings_name, service = _get_config_tools(ctx)
+    updates = service.prepare_updates(args)
+    for key, val in updates.items():
+        changed, final_val = service.apply_update(settings_name, key, val, action="set")
+        if changed:
+            UI.success(
+                f"Configuracion [bold]{key}[/] actualizada con [bold]{final_val}[/]."
             )
-            if changed:
-                UI.success(
-                    f"Configuracion [bold]{key}[/] actualizada con [bold]{final_val}[/]."
-                )
-            else:
-                UI.info(f"Configuracion [bold]{key}[/] ya tiene ese valor.")
-    except ValueError as e:
-        UI.error(f"DEBUG ERROR: {str(e)}")
-        raise typer.Exit(1)
+        else:
+            UI.info(f"Configuracion [bold]{key}[/] ya tiene ese valor.")
 
 
 @app.command("unset")
+@handle_config_errors
 def unset_config(
     ctx: typer.Context,
     key: str = typer.Argument(..., help="Clave a restaurar a su valor por defecto"),
 ):
     """Quita una configuración personalizada para usar el valor por defecto."""
-    try:
-        settings_name, service = _get_config_tools(ctx)
-        default_val = service.restore_default(settings_name, key)
-        UI.success(f"Restaurado [bold]{key}[/] al valor por defecto: {default_val}")
-    except ValueError as e:
-        UI.error(str(e))
-        raise typer.Exit(1)
+
+    settings_name, service = _get_config_tools(ctx)
+    default_val = service.restore_default(settings_name, key)
+    UI.success(f"Restaurado [bold]{key}[/] al valor por defecto: {default_val}")
 
 
 @app.command("add")
