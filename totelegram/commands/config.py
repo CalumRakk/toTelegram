@@ -1,6 +1,6 @@
 import json
 import time
-from typing import TYPE_CHECKING, List, cast
+from typing import TYPE_CHECKING, List, Literal, Tuple, cast
 
 import typer
 
@@ -13,13 +13,57 @@ from totelegram.services.chat_access import ChatAccessService
 from totelegram.services.chat_search import ChatSearchService
 from totelegram.services.config_service import ConfigService
 from totelegram.telegram import TelegramSession
-from totelegram.utils import is_direct_identifier, is_suspected_glob_expansion
+from totelegram.utils import (
+    is_direct_identifier,
+    is_suspected_glob_expansion,
+    validate_item,
+)
 
 if TYPE_CHECKING:
     from pyrogram import Client  # type: ignore
     from pyrogram.types import User
 
 app = typer.Typer(help="Configuración del perfil actual.")
+
+
+def _get_config_tools(ctx: typer.Context) -> Tuple[str, ConfigService]:
+    """Extrae las herramientas necesarias para cualquier comando de configuracion que requieran un perfil."""
+    state: CLIState = ctx.obj
+    settings_name = cast(str, state.manager.resolve_profile_name(state.profile_name))
+    DisplayProfile.announce_profile_used(settings_name)
+    service = ConfigService(state.manager, state.is_debug)
+    return settings_name, service
+
+
+def _command_modify_list(
+    settings_name: str,
+    service: ConfigService,
+    key: str,
+    values: List[str],
+    action: Literal["add", "remove"],
+):
+    try:
+        updates = service.prepare_updates([key, values])  # type: ignore
+        verb = "agregar" if action == "add" else "eliminar"
+
+        if is_suspected_glob_expansion(values):
+            if not DisplayConfig.confirm_expanded_pattern(verb, key, values):
+                UI.info("Operacion cancelada.")
+                raise typer.Exit()
+
+        for k, val in updates.items():
+            changed, final_val = service.apply_update(
+                settings_name, k, val, action=action
+            )
+            if changed:
+                UI.success(
+                    f"Configuracion [bold]{k}[/] actualizada: {json.dumps(final_val)}"
+                )
+            else:
+                UI.info(f"Configuracion [bold]{k}[/] no sufrio cambios.")
+    except ValueError as e:
+        UI.error(str(e))
+        raise typer.Exit(1)
 
 
 @app.callback(invoke_without_command=True)
@@ -72,14 +116,8 @@ def set_configs(
        Cualquier validación de red debe delegarse al comando 'config check' o
        'config resolve'.
     """
-    state: CLIState = ctx.obj
-    manager = state.manager
-    settings_name = cast(str, manager.resolve_profile_name(state.profile_name))
-
-    DisplayProfile.announce_profile_used(settings_name)
-
     try:
-        service = ConfigService(state.manager, state.is_debug)
+        settings_name, service = _get_config_tools(ctx)
         updates = service.prepare_updates(args)
         for key, val in updates.items():
             changed, final_val = service.apply_update(
@@ -91,10 +129,6 @@ def set_configs(
                 )
             else:
                 UI.info(f"Configuracion [bold]{key}[/] ya tiene ese valor.")
-
-        # settings = state.manager.get_settings(settings_name)
-        # DisplayConfig.show_config_table(settings_name, state.manager, state.is_debug, settings)
-
     except ValueError as e:
         UI.error(f"DEBUG ERROR: {str(e)}")
         raise typer.Exit(1)
@@ -106,27 +140,13 @@ def unset_config(
     key: str = typer.Argument(..., help="Clave a restaurar a su valor por defecto"),
 ):
     """Quita una configuración personalizada para usar el valor por defecto."""
-    # TODO: agregar soporte a multiples configuraciones. ¿deberia?
-    state: CLIState = ctx.obj
-    manager = state.manager
-    settings_name = cast(str, manager.resolve_profile_name(state.profile_name))
-
-    DisplayProfile.announce_profile_used(settings_name)
-
     try:
-        service = ConfigService(state.manager, state.is_debug)
+        settings_name, service = _get_config_tools(ctx)
         default_val = service.restore_default(settings_name, key)
         UI.success(f"Restaurado [bold]{key}[/] al valor por defecto: {default_val}")
     except ValueError as e:
         UI.error(str(e))
         raise typer.Exit(1)
-
-
-def validate_item(value: str) -> str:
-    if "," in value or value.strip().startswith("["):
-        UI.error("Formato no soportado. Usa: config <key> add 1 2 3")
-        raise typer.Exit()
-    return value.strip("'").strip('"')
 
 
 @app.command("add")
@@ -138,37 +158,8 @@ def add_config(
     ),
 ):
     """Agrega valores a una lista (ej. exclude_files)."""
-    state: CLIState = ctx.obj
-    manager = state.manager
-    settings_name = cast(str, manager.resolve_profile_name(state.profile_name))
-
-    DisplayProfile.announce_profile_used(settings_name)
-
-    try:
-        service = ConfigService(state.manager, state.is_debug)
-        updates = service.prepare_updates([key, values])  # type: ignore
-
-        if is_suspected_glob_expansion(values):
-            # Se pregunta la accion, porque incluso un usuario avanzado en general va querer guardar el patrón *.ext para que aplique a archivos futuros.
-            proceed = DisplayConfig.confirm_expanded_pattern("agregar", key, values)
-            if not proceed:
-                UI.info("Operación cancelada.")
-                raise typer.Exit()
-
-        for key, val in updates.items():
-            changed, final_val = service.apply_update(
-                settings_name, key, val, action="add"
-            )
-            if changed:
-                UI.success(
-                    f"Configuracion [bold]{key}[/] actualizada con [bold]{json.dumps(final_val)}[/]."
-                )
-            else:
-                UI.info(f"Configuracion [bold]{key}[/] ya tiene ese valor.")
-
-    except ValueError as e:
-        UI.error(str(e))
-        raise typer.Exit(1)
+    settings_name, service = _get_config_tools(ctx)
+    _command_modify_list(settings_name, service, key, values, "add")
 
 
 @app.command("remove")
@@ -180,37 +171,8 @@ def remove_config(
     ),
 ):
     """Quita valores a una lista (ej. exclude_files)."""
-    print(values, type(values))
-    state: CLIState = ctx.obj
-    manager = state.manager
-    settings_name = cast(str, manager.resolve_profile_name(state.profile_name))
-
-    DisplayProfile.announce_profile_used(settings_name)
-
-    try:
-        service = ConfigService(state.manager, state.is_debug)
-        updates = service.prepare_updates([key, values])  # type: ignore
-
-        if is_suspected_glob_expansion(values):
-            proceed = DisplayConfig.confirm_expanded_pattern("eliminar", key, values)
-            if not proceed:
-                UI.info("Operación cancelada.")
-                raise typer.Exit()
-
-        for key, val in updates.items():
-            changed, final_val = service.apply_update(
-                settings_name, key, val, action="remove"
-            )
-            if changed:
-                UI.success(
-                    f"Configuracion [bold]{key}[/] actualizada con [bold]{json.dumps(final_val)}[/]."
-                )
-            else:
-                UI.info(f"Configuracion [bold]{key}[/] ya tiene ese valor.")
-
-    except ValueError as e:
-        UI.error(str(e))
-        raise typer.Exit(1)
+    settings_name, service = _get_config_tools(ctx)
+    _command_modify_list(settings_name, service, key, values, "remove")
 
 
 @app.command("check")

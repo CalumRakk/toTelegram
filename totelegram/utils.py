@@ -237,3 +237,9 @@ def is_suspected_glob_expansion(values: List[str]) -> bool:
         return True
 
     return False
+
+
+def validate_item(value: str) -> str:
+    if "," in value or value.strip().startswith("["):
+        raise ValueError("Formato no soportado. Usa: config <key> add 1 2 3")
+    return value.strip("'").strip('"')
