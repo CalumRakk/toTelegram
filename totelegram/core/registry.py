@@ -1,7 +1,7 @@
 import json
 import logging
 from pathlib import Path
-from typing import Any, Dict, List, NamedTuple, Optional, cast
+from typing import Any, Dict, List, Literal, NamedTuple, Optional, cast
 
 from dotenv import dotenv_values
 from pydantic import BaseModel, ValidationError
@@ -325,41 +325,7 @@ class SettingsManager:
         Returns:
             Tuple[bool, List[str]]: (True si se añadieron elementos nuevos, Lista final resultante)
         """
-        key_normalized = field_name.lower().strip()
-        new_elements = Settings.validate_single_setting(key_normalized, field_values)
-        if not isinstance(field_values, list):
-            raise ValueError(
-                f"El campo '{key_normalized}' no es una lista, no se puede usar 'add'."
-            )
-
-        # Obtenemos el valor el valor del archivo (si lo hay) para comparar con el nuevo.
-        current_data = self._load_and_sanitize(settings_name)
-
-        current_list = []
-        if key_normalized in current_data:
-            try:
-                current_list = list(
-                    Settings.validate_single_setting(
-                        key_normalized, current_data[key_normalized]
-                    )
-                )
-            except (ValueError, TypeError):
-                # El valor en el archivo estaba corrupto, forzamos el valor por defecto
-                info = cast(InfoField, Settings.get_info(key_normalized))
-                current_list = info.default_value
-
-        # Solo se agregan los elementos que no estan ya en la lista
-        initial_count = len(current_list)
-        for item in new_elements:
-            if item not in current_list:
-                current_list.append(item)
-
-        changed = len(current_list) > initial_count
-        if changed:
-            current_data[key_normalized] = current_list
-            self._write_all_settings(settings_name, current_data)
-
-        return Result(changed, current_list)
+        return self._modify_list_setting(settings_name, field_name, field_values, "add")
 
     def remove_setting(
         self, settings_name: str, field_name: str, field_values: List[str]
@@ -370,17 +336,44 @@ class SettingsManager:
         Returns:
             Tuple[bool, List[str]]: (True si se eliminaron elementos nuevos, Lista final resultante)
         """
+        return self._modify_list_setting(
+            settings_name, field_name, field_values, "remove"
+        )
+
+    def _modify_list_setting(
+        self,
+        settings_name: str,
+        field_name: str,
+        field_values: List[str],
+        operation: Literal["add", "remove"],
+    ) -> Result:
+        """
+        Helper para modificar configuraciones tipo lista de forma segura.
+
+        Args:
+            settings_name (str): Nombre de la configuración
+            field_name (str): Nombre del campo a modificar
+            field_values (List[str]): Valores a agregar o remover
+            operation (Literal["add", "remove"]): Operación a realizar
+
+        Returns:
+            Tuple[bool, List[str]]: (True si se modificaron elementos, Lista final resultante)
+
+        Raises:
+            ValueError: Si el campo no es una lista
+
+        """
         key_normalized = field_name.lower().strip()
+
         new_elements = Settings.validate_single_setting(key_normalized, field_values)
-        if not isinstance(field_values, list):
+        if not isinstance(new_elements, list):
             raise ValueError(
-                f"El campo '{key_normalized}' no es una lista, no se puede usar 'add/remove'."
+                f"El campo '{key_normalized}' no es una lista, no se puede usar '{operation}'."
             )
 
-        # Obtenemos el valor el valor del archivo (si lo hay) para comparar con el nuevo.
         current_data = self._load_and_sanitize(settings_name)
-
         current_list = []
+
         if key_normalized in current_data:
             try:
                 current_list = list(
@@ -389,17 +382,26 @@ class SettingsManager:
                     )
                 )
             except (ValueError, TypeError):
-                # El valor en el archivo estaba corrupto, forzamos el valor por defecto
+                # Si el valor en disco estaba corrupto, usamos el default
                 info = cast(InfoField, Settings.get_info(key_normalized))
-                current_list = info.default_value
+                current_list = (
+                    info.default_value.copy()
+                    if isinstance(info.default_value, list)
+                    else []
+                )
 
-        # Solo se eliminan los elementos que estan ya en la lista
-        initial_count = len(current_list)
-        for item in new_elements:
-            if item in current_list:
-                current_list.remove(item)
+        original_count = len(current_list)
 
-        changed = len(current_list) < initial_count
+        if operation == "add":
+            for item in new_elements:
+                if item not in current_list:
+                    current_list.append(item)
+
+        elif operation == "remove":
+            # Usamos list comprehension para remover todas las instancias de forma segura
+            current_list = [item for item in current_list if item not in new_elements]
+
+        changed = len(current_list) != original_count
         if changed:
             current_data[key_normalized] = current_list
             self._write_all_settings(settings_name, current_data)
