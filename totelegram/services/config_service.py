@@ -51,24 +51,54 @@ class ConfigService:
         settings_name: str,
         key: str,
         value: Any,
-        action: Literal["set", "add", "remove"] = "set",
+        action: Literal["set", "add", "remove"],
     ) -> Tuple[bool, Any]:
         """
-        Aplica un cambio individual.
+        Aplica un cambio individual, resolviendo la lógica de listas si es necesario.
         Devuelve (si_cambio, valor_final).
         """
-        if action == "set":
-            return self.manager.set_setting(settings_name, key, value)
+        key = key.lower().strip()
 
+        if action == "set":
+            changed = self.manager.set_setting(settings_name, key, value)
+            return changed, value
+
+        # Modificar listas (add/remove)
         if not isinstance(value, list):
             value = [value]
 
-        if action == "remove":
-            return self.manager.remove_setting(settings_name, key, value)
-        elif action == "add":
-            return self.manager.add_setting(settings_name, key, value)
+        try:
+            current_settings = self.manager.get_settings(settings_name)
+            current_list = getattr(current_settings, key)
+        except Exception:
+            # Si el archivo está roto, tomamos el default
+            info = Settings.get_info(key)
+            current_list = (
+                info.default_value.copy()
+                if info and isinstance(info.default_value, list)
+                else []
+            )
 
-        raise ValueError(f"Invalid action: {action}")
+        if not isinstance(current_list, list):
+            raise ValueError(
+                f"El campo '{key}' no es una lista, no se puede usar '{action}'."
+            )
+
+        original_count = len(current_list)
+
+        if action == "add":
+            for item in value:
+                if item not in current_list:
+                    current_list.append(item)
+        elif action == "remove":
+            current_list = [item for item in current_list if item not in value]
+
+        # Guardar solo si hubo cambios reales
+        changed = len(current_list) != original_count
+        if changed:
+            self.manager.set_setting(settings_name, key, current_list)
+
+        return changed, current_list
 
     def restore_default(self, settings_name: str, key: str) -> Any:
         """Restaura una configuración a su valor por defecto."""

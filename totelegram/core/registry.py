@@ -1,12 +1,12 @@
 import json
 import logging
 from pathlib import Path
-from typing import Any, Dict, List, Literal, NamedTuple, Optional, cast
+from typing import Any, Dict, List, Optional
 
 from dotenv import dotenv_values
 from pydantic import BaseModel, ValidationError
 
-from totelegram.core.setting import InfoField, Settings
+from totelegram.core.setting import Settings
 
 logger = logging.getLogger(__name__)
 
@@ -28,16 +28,6 @@ class Profile(BaseModel):
     def is_trinity(self):
         """Un perfil es trinity si tiene ambos archivos y su nombre."""
         return self.has_env and self.has_session
-
-
-class settings:
-    name: str
-    is_debug: bool
-
-
-class Result(NamedTuple):
-    changed: bool
-    value: Any
 
 
 class SettingsManager:
@@ -267,146 +257,40 @@ class SettingsManager:
 
     def set_setting(
         self, settings_name: str, field_name: str, field_value: Any
-    ) -> Result:
+    ) -> bool:
         """
-        Establece un valor de configuración especifico.
-
-        Returns:
-            Tuple[bool, Any]: (True si el valor cambió físicamente, Valor actual/final)
+        Guarda un valor directamente en el archivo .env.
+        Asume que el valor ya fue validado y sanitizado por la capa superior.
+        Devuelve True si hubo un cambio real en el archivo.
         """
         key_normalized = field_name.lower().strip()
-
-        new_value = Settings.validate_single_setting(key_normalized, field_value)
-
         current_data = self._load_and_sanitize(settings_name)
-        if key_normalized in current_data:
-            old_value = current_data[key_normalized]
-            try:
-                old_value = Settings.validate_single_setting(key_normalized, old_value)
-            except Exception:
-                # Si el valor en el archivo estaba corrupto, forzamos el valor por defecto
-                return self.unset_setting(settings_name, key_normalized)
 
-            if old_value == new_value:
-                return Result(False, old_value)
+        # Evitar escritura innecesaria si el valor es el mismo
+        if (
+            key_normalized in current_data
+            and current_data[key_normalized] == field_value
+        ):
+            return False
 
-        current_data[key_normalized] = new_value
+        current_data[key_normalized] = field_value
         self._write_all_settings(settings_name, current_data)
-        return Result(True, new_value)
+        return True
 
-    def unset_setting(self, settings_name: str, field_name: str):
+    def unset_setting(self, settings_name: str, field_name: str) -> bool:
         """
-        Restablece un valor de configuración especifico a su valor por defecto.
-
-        Returns:
-            Tuple[bool, Any]: (True si el valor cambió físicamente, Valor por defecto)
-
+        Elimina una clave del archivo .env para que el sistema use su valor por defecto.
+        Devuelve True si la clave existía y fue eliminada.
         """
         key_normalized = field_name.lower().strip()
-
-        info = cast(InfoField, Settings.validate_key_access(False, key_normalized))
-
         current_data = self._load_and_sanitize(settings_name)
+
         if key_normalized in current_data:
             del current_data[key_normalized]
             self._write_all_settings(settings_name, current_data)
-            # Si la clave existia, fue elimina y ahora se usará el valor por defecto.
-            return Result(True, info.default_value)
+            return True
 
-        # Si la clave no estaba en el archivo, es porque se está usando el valor por defecto.
-        return Result(False, info.default_value)
-
-    def add_setting(
-        self, settings_name: str, field_name: str, field_values: List[str]
-    ) -> Result:
-        """
-        Agrega elementos a una configuración de tipo lista sin duplicarlos.
-
-        Returns:
-            Tuple[bool, List[str]]: (True si se añadieron elementos nuevos, Lista final resultante)
-        """
-        return self._modify_list_setting(settings_name, field_name, field_values, "add")
-
-    def remove_setting(
-        self, settings_name: str, field_name: str, field_values: List[str]
-    ) -> Result:
-        """
-        Elimina elementos a una configuración de tipo lista.
-
-        Returns:
-            Tuple[bool, List[str]]: (True si se eliminaron elementos nuevos, Lista final resultante)
-        """
-        return self._modify_list_setting(
-            settings_name, field_name, field_values, "remove"
-        )
-
-    def _modify_list_setting(
-        self,
-        settings_name: str,
-        field_name: str,
-        field_values: List[str],
-        operation: Literal["add", "remove"],
-    ) -> Result:
-        """
-        Helper para modificar configuraciones tipo lista de forma segura.
-
-        Args:
-            settings_name (str): Nombre de la configuración
-            field_name (str): Nombre del campo a modificar
-            field_values (List[str]): Valores a agregar o remover
-            operation (Literal["add", "remove"]): Operación a realizar
-
-        Returns:
-            Tuple[bool, List[str]]: (True si se modificaron elementos, Lista final resultante)
-
-        Raises:
-            ValueError: Si el campo no es una lista
-
-        """
-        key_normalized = field_name.lower().strip()
-
-        new_elements = Settings.validate_single_setting(key_normalized, field_values)
-        if not isinstance(new_elements, list):
-            raise ValueError(
-                f"El campo '{key_normalized}' no es una lista, no se puede usar '{operation}'."
-            )
-
-        current_data = self._load_and_sanitize(settings_name)
-        current_list = []
-
-        if key_normalized in current_data:
-            try:
-                current_list = list(
-                    Settings.validate_single_setting(
-                        key_normalized, current_data[key_normalized]
-                    )
-                )
-            except (ValueError, TypeError):
-                # Si el valor en disco estaba corrupto, usamos el default
-                info = cast(InfoField, Settings.get_info(key_normalized))
-                current_list = (
-                    info.default_value.copy()
-                    if isinstance(info.default_value, list)
-                    else []
-                )
-
-        original_count = len(current_list)
-
-        if operation == "add":
-            for item in new_elements:
-                if item not in current_list:
-                    current_list.append(item)
-
-        elif operation == "remove":
-            # Usamos list comprehension para remover todas las instancias de forma segura
-            current_list = [item for item in current_list if item not in new_elements]
-
-        changed = len(current_list) != original_count
-        if changed:
-            current_data[key_normalized] = current_list
-            self._write_all_settings(settings_name, current_data)
-
-        return Result(changed, current_list)
+        return False
 
 
 class ProfileManager:
