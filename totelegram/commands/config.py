@@ -149,11 +149,10 @@ def add_config(
         updates = service.prepare_updates([key, values])  # type: ignore
 
         if is_suspected_glob_expansion(values):
+            # Se pregunta la accion, porque incluso un usuario avanzado en general va querer guardar el patrón *.ext para que aplique a archivos futuros.
             proceed = DisplayConfig.confirm_expanded_pattern("agregar", key, values)
             if not proceed:
-                UI.info(
-                    "Operación cancelada. El archivo de configuración no fue modificado."
-                )
+                UI.info("Operación cancelada.")
                 raise typer.Exit()
 
         for key, val in updates.items():
@@ -195,9 +194,7 @@ def remove_config(
         if is_suspected_glob_expansion(values):
             proceed = DisplayConfig.confirm_expanded_pattern("eliminar", key, values)
             if not proceed:
-                UI.info(
-                    "Operación cancelada. El archivo de configuración no fue modificado."
-                )
+                UI.info("Operación cancelada.")
                 raise typer.Exit()
 
         for key, val in updates.items():

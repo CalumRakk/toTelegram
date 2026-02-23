@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import List, Literal, Optional, Union
 
 import typer
@@ -43,31 +44,46 @@ def get_friendly_chat_name(chat_id: str, database_path: str) -> str:
 
 
 class DisplayConfig:
+
     @staticmethod
     def confirm_expanded_pattern(
         action: Literal["agregar", "eliminar"], key: str, values: List[str]
     ) -> bool:
-        # UI.warn(f"Se detectaron archivos locales en lugar de un patrón global.")
-
-        cmd_example = f"{Commands.CONFIG_ADD_LIST if action == 'agregar' else Commands.CONFIG_REMOVE_LIST} {key} '*.log'"
-        UI.educational_tip(
-            title="Detectado expansión de patrones",
-            message=(
-                "Tu terminal ha expandido el asterisco convirtiéndolo en una lista de archivos "
-                "locales antes de que el programa pudiera leerlo.\n\n"
-                f"Para {action} correctamente un patrón global, envuélvelo en comillas simples:"
-            ),
-            commands=[cmd_example],
-            border_style="yellow",
-            spacing="bottom",
-        )
+        if not values:
+            return False
 
         is_unique = len(values) == 1
-        indicative = (
-            f"el archivo '{values[0]}'" if is_unique else f"{len(values)} archivos"
+        file_example = Path(values[0])
+
+        cmd_example = f"{Commands.CONFIG_ADD_LIST if action == 'agregar' else Commands.CONFIG_REMOVE_LIST} {key} '*{file_example.suffix}'"
+
+        if is_unique:
+            UI.warn(
+                f"No se detectó un patrón comodin (*), pero el valor coincide con el archivo existente: {file_example.name}"
+            )
+            # UI.info(f"Archivo detectado: [bold]{file_example.name}[/]")
+        else:
+            UI.warn(
+                f"No se detectó un patrón, pero se detectaron {len(values)} archivos existentes."
+            )
+            console.print(
+                "[i]Esto sugiere que tu terminal expandió un comodín antes de que el programa lo recibiera.[/]"
+            )
+
+        UI.tip(
+            f"Para {action} un patrón que aplique a archivos futuros, usa comillas simples:",
+            commands=[cmd_example],
+            spacing="top",
         )
+
+        indicative = (
+            f"el archivo '{file_example.name}'"
+            if is_unique
+            else f"estos {len(values)} archivos"
+        )
+
         return typer.confirm(
-            f"¿Seguro deseas {action} {indicative} en lugar del patrón?",
+            f"\n¿Deseas {action} {indicative} literalmente en la configuración?",
             default=False,
         )
 
