@@ -92,28 +92,22 @@ class TestCliConfig(unittest.TestCase):
         self.assertIn("*.tmp", settings.exclude_files)
         self.assertIn("*.bak", settings.exclude_files)
 
-    # def test_list_add_remove_flow(self):
-    #     """Probar el flujo de añadir y quitar elementos de una lista (exclude_files)."""
-    #     # Añadir (confirmando con 'y')
-    #     runner.invoke(
-    #         app, ["add", "exclude_files", "*.tmp", "*.bak"], input="y\n", obj=self.pm
-    #     )
+    def test_list_add_remove_flow(self):
+        """Probar el flujo de añadir y quitar elementos de una lista (exclude_files)."""
+        # Añadir (confirmando con 'y')
+        runner.invoke(
+            app, ["add", "exclude_files", "*.tmp", "*.bak"], input="y\n", obj=self.state
+        )
 
-    #     values = self.pm.get_config_values("test_user")
-    #     self.assertIn("*.tmp", values["exclude_files"])  # type: ignore
-    #     self.assertIn("*.bak", values["exclude_files"])  # type: ignore
+        settings = self.manager.get_settings(self.profile_name)
+        self.assertIn("*.tmp", settings.exclude_files)  # type: ignore
+        self.assertIn("*.bak", settings.exclude_files)  # type: ignore
 
-    #     # Quitar uno
-    #     runner.invoke(
-    #         app, ["remove", "exclude_files", "*.tmp"], input="y\n", obj=self.pm
-    #     )
+        # Quitar uno
+        runner.invoke(
+            app, ["remove", "exclude_files", "*.tmp"], input="y\n", obj=self.state
+        )
 
-    #     values = self.pm.get_config_values("test_user")
-    #     self.assertNotIn("*.tmp", values["exclude_files"])  # type: ignore
-    #     self.assertIn("*.bak", values["exclude_files"])  # type: ignore
-
-    # @patch("totelegram.commands.config.resolve_and_store_chat_logic")
-    # def test_chat_id_trigger_resolution(self, mock_resolve):
-    #     """Verificar que al cambiar el CHAT_ID se intenta resolver el nombre."""
-    #     runner.invoke(app, ["set", "CHAT_ID", "@nuevo_chat"], obj=self.state)
-    #     mock_resolve.assert_called_once()
+        settings = self.manager.get_settings(self.profile_name)
+        self.assertNotIn("*.tmp", settings.exclude_files)  # type: ignore
+        self.assertIn("*.bak", settings.exclude_files)  # type: ignore
