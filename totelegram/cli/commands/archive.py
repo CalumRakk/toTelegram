@@ -4,21 +4,21 @@ from typing import cast
 import typer
 from rich.console import Console
 
-from totelegram.commands.profile import list_profiles
-from totelegram.console import UI
-from totelegram.core.enums import DuplicatePolicy
+from totelegram.cli.commands.profile import list_profiles
+from totelegram.cli.ui.console import UI
+from totelegram.common.enums import DuplicatePolicy
 from totelegram.core.plans import AskUserPlan, PhysicalUploadPlan, SkipPlan
-from totelegram.core.registry import ProfileManager
-from totelegram.core.setting import get_settings
-from totelegram.services.chunking import ChunkingService
-from totelegram.services.discovery import DiscoveryService
-from totelegram.services.discovery_archive import ArchiveDiscoveryService
-from totelegram.services.policy import PolicyExpert
-from totelegram.services.snapshot import SnapshotService
-from totelegram.services.uploader import UploadService
-from totelegram.store.database import DatabaseSession
-from totelegram.store.models import Job, TelegramChat
-from totelegram.telegram import TelegramSession
+from totelegram.logic.chunker import ChunkingService
+from totelegram.logic.discovery import DiscoveryService
+from totelegram.logic.discovery_archive import ArchiveDiscoveryService
+from totelegram.logic.snapshot import SnapshotService
+from totelegram.logic.uploader import UploadService
+from totelegram.manager.database import DatabaseSession
+from totelegram.manager.models import Job, TelegramChat
+from totelegram.manager.registry import ProfileManager
+from totelegram.manager.setting import get_settings
+from totelegram.telegram.client import TelegramSession
+from totelegram.telegram.policy import PolicyExpert
 
 console = Console()
 app = typer.Typer(help="Comandos para archivado de carpetas (Modo Cinta).")

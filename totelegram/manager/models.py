@@ -8,17 +8,17 @@ import peewee
 from playhouse.sqlite_ext import JSONField
 
 from totelegram import __version__
-from totelegram.core.enums import JobStatus, SourceType, Strategy
+from totelegram.common.enums import JobStatus, SourceType, Strategy
 
 if TYPE_CHECKING:
-    from totelegram.core.setting import Settings
+    from totelegram.manager.setting import Settings
     from pyrogram.types import Chat as TgChat
     from pyrogram.types import Message
 
-from totelegram.core.schemas import Inventory, StrategyConfig
-from totelegram.store.database import db_proxy
-from totelegram.store.fields import EnumField, PydanticJSONField
-from totelegram.utils import create_md5sum_by_hashlib, get_mimetype
+from totelegram.common.fields import EnumField, PydanticJSONField
+from totelegram.common.schemas import Inventory, StrategyConfig
+from totelegram.common.utils import create_md5sum_by_hashlib, get_mimetype
+from totelegram.manager.database import db_proxy
 
 logger = logging.getLogger(__name__)
 

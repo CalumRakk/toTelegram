@@ -21,7 +21,7 @@ setup(
     ],
     packages=find_packages(),
     entry_points={
-        "console_scripts": ["totelegram=totelegram.cli:run_script"],
+        "console_scripts": ["totelegram=totelegram.cli.main:run_script"],
     },
     python_requires=">=3.10.0",
 )

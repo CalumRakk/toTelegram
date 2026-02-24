@@ -35,7 +35,7 @@ class DatabaseSession:
         db_proxy.initialize(self.db)
         self.db.connect()
 
-        from totelegram.store.models import (
+        from totelegram.manager.models import (
             ArchiveEntry,
             Job,
             Payload,

@@ -9,8 +9,8 @@ if TYPE_CHECKING:
 from pydantic import BaseModel, Field
 
 from totelegram import __version__
-from totelegram.core.enums import Strategy
-from totelegram.core.registry import SettingsManager
+from totelegram.common.enums import Strategy
+from totelegram.manager.registry import SettingsManager
 
 MANIFEST_VERSION = "4.0"
 

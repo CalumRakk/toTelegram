@@ -3,9 +3,8 @@ from unittest.mock import MagicMock
 
 from peewee import SqliteDatabase
 
-from totelegram.core.setting import Settings
-from totelegram.services.discovery import DiscoveryService
-from totelegram.store.models import (
+from totelegram.logic.discovery import DiscoveryService
+from totelegram.manager.models import (
     Job,
     Payload,
     RemotePayload,
@@ -14,6 +13,7 @@ from totelegram.store.models import (
     TelegramUser,
     db_proxy,
 )
+from totelegram.manager.setting import Settings
 
 
 class TestLogicEngine(unittest.TestCase):

@@ -1,8 +1,8 @@
 import logging
 from typing import Any, Dict, List, Literal, Tuple
 
-from totelegram.core.registry import SettingsManager
-from totelegram.core.setting import Settings
+from totelegram.manager.registry import SettingsManager
+from totelegram.manager.setting import Settings
 
 logger = logging.getLogger(__name__)
 

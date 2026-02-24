@@ -9,11 +9,11 @@ from pathlib import Path
 from time import sleep
 from typing import TYPE_CHECKING, Any, List, Union, cast
 
-from totelegram.console import console
-from totelegram.core.consts import APP_NAME, SELF_CHAT_ALIASES, VALUE_NOT_SET
+from totelegram.cli.ui.console import console
+from totelegram.common.consts import APP_NAME, SELF_CHAT_ALIASES, VALUE_NOT_SET
 
 if TYPE_CHECKING:
-    from totelegram.core.setting import Settings
+    from totelegram.manager.setting import Settings
 
 import filetype
 

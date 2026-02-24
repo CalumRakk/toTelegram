@@ -4,7 +4,7 @@ from pathlib import Path
 # import patch
 from unittest.mock import MagicMock, patch
 
-from totelegram.utils import is_excluded
+from totelegram.common.utils import is_excluded
 
 
 class TestExclusion(unittest.TestCase):

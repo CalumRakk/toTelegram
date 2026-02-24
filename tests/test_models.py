@@ -3,8 +3,7 @@ from pathlib import Path
 
 from peewee import SqliteDatabase
 
-from totelegram.core.setting import Settings
-from totelegram.store.models import (
+from totelegram.manager.models import (
     Job,
     Payload,
     RemotePayload,
@@ -13,6 +12,7 @@ from totelegram.store.models import (
     TelegramUser,
     db_proxy,
 )
+from totelegram.manager.setting import Settings
 
 
 class TestModelsArchitecture(unittest.TestCase):

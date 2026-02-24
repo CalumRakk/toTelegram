@@ -5,14 +5,14 @@ from typing import TYPE_CHECKING, Dict, List, Optional, cast
 
 from pydantic import BaseModel
 
-from totelegram.utils import batched
+from totelegram.common.utils import batched
 
 if TYPE_CHECKING:
     from pyrogram import Client  # type: ignore
     from pyrogram.types import Message  # type: ignore
 
-from totelegram.core.enums import AvailabilityState
-from totelegram.store.models import Job, Payload, RemotePayload, SourceFile
+from totelegram.common.enums import AvailabilityState
+from totelegram.manager.models import Job, Payload, RemotePayload, SourceFile
 
 logger = logging.getLogger(__name__)
 

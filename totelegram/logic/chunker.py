@@ -3,9 +3,9 @@ import math
 from pathlib import Path
 from typing import List, Tuple, Union
 
-from totelegram.core.enums import SourceType, Strategy
-from totelegram.store.models import Job, Payload
-from totelegram.utils import create_md5sum_by_hashlib
+from totelegram.common.enums import SourceType, Strategy
+from totelegram.common.utils import create_md5sum_by_hashlib
+from totelegram.manager.models import Job, Payload
 
 logger = logging.getLogger(__name__)
 

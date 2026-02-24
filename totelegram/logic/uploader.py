@@ -4,10 +4,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, cast
 
 from tartape import TarTape
-from totelegram.console import UI
-from totelegram.services.tar_stream import TapeInspector, TarVolume
-from totelegram.store.database import db_proxy
-from totelegram.utils import batched
+from totelegram.cli.ui.console import UI
+from totelegram.common.utils import batched
+from totelegram.manager.database import db_proxy
+from totelegram.telegram.stream import TapeInspector, TarVolume
 
 if TYPE_CHECKING:
     from pyrogram import Client  # type: ignore
@@ -15,19 +15,19 @@ if TYPE_CHECKING:
 
 from rich.console import Console
 
-from totelegram.core.enums import (
+from totelegram.common.enums import (
     Strategy,
 )
-from totelegram.services.chunking import ChunkingService
-from totelegram.services.discovery import DiscoveryService
-from totelegram.store.models import (
+from totelegram.common.streams import open_upload_source
+from totelegram.logic.chunker import ChunkingService
+from totelegram.logic.discovery import DiscoveryService
+from totelegram.manager.models import (
     ArchiveEntry,
     Job,
     Payload,
     RemotePayload,
     TelegramUser,
 )
-from totelegram.streams import open_upload_source
 
 logger = logging.getLogger(__name__)
 console = Console()

@@ -3,20 +3,20 @@ from typing import TYPE_CHECKING, List, cast
 
 import typer
 
-from totelegram.commands.config import _get_config_tools, handle_config_errors
-from totelegram.commands.views import DisplayUpload
-from totelegram.console import UI, console
-from totelegram.core.consts import VALUE_NOT_SET, Commands
-from totelegram.core.enums import AvailabilityState, Strategy
-from totelegram.core.schemas import CLIState, ScanReport
-from totelegram.services.chunking import ChunkingService
-from totelegram.services.discovery import DiscoveryService
-from totelegram.services.snapshot import SnapshotService
-from totelegram.services.uploader import UploadService
-from totelegram.store.database import DatabaseSession
-from totelegram.store.models import Job, SourceFile, TelegramChat
-from totelegram.telegram import TelegramSession
-from totelegram.utils import is_excluded
+from totelegram.cli.commands.config import _get_config_tools, handle_config_errors
+from totelegram.cli.ui.console import UI, console
+from totelegram.cli.ui.views import DisplayUpload
+from totelegram.common.consts import VALUE_NOT_SET, Commands
+from totelegram.common.enums import AvailabilityState, Strategy
+from totelegram.common.schemas import CLIState, ScanReport
+from totelegram.common.utils import is_excluded
+from totelegram.logic.chunker import ChunkingService
+from totelegram.logic.discovery import DiscoveryService
+from totelegram.logic.snapshot import SnapshotService
+from totelegram.logic.uploader import UploadService
+from totelegram.manager.database import DatabaseSession
+from totelegram.manager.models import Job, SourceFile, TelegramChat
+from totelegram.telegram.client import TelegramSession
 
 if TYPE_CHECKING:
     from pyrogram import Client  # type: ignore

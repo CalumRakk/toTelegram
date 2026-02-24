@@ -1,6 +1,6 @@
 import unittest
 
-from totelegram.services.chunking import FileChunker
+from totelegram.logic.chunker import FileChunker
 
 
 class TestChunkingMath(unittest.TestCase):

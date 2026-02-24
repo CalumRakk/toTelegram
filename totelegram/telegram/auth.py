@@ -1,13 +1,13 @@
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
-from totelegram.core.registry import Profile, SettingsManager
-from totelegram.telegram import TelegramSession
+from totelegram.manager.registry import Profile, SettingsManager
+from totelegram.telegram.client import TelegramSession
 
 if TYPE_CHECKING:
     from pyrogram import Client  # type: ignore
 
-from totelegram.utils import VALUE_NOT_SET
+from totelegram.common.utils import VALUE_NOT_SET
 
 
 class AuthLogic:

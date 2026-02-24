@@ -3,14 +3,14 @@ import logging
 import lzma
 from pathlib import Path
 
-from totelegram.core.schemas import (
+from totelegram.common.schemas import (
     MANIFEST_VERSION,
     RemotePart,
     SourceMetadata,
     UploadManifest,
 )
-from totelegram.store.models import Job, Payload, RemotePayload
-from totelegram.telegram import parse_message_json_data
+from totelegram.manager.models import Job, Payload, RemotePayload
+from totelegram.telegram.client import parse_message_json_data
 
 logger = logging.getLogger(__name__)
 

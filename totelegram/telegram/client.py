@@ -6,7 +6,7 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional, cast
 
-from totelegram.core.registry import SettingsManager
+from totelegram.manager.registry import SettingsManager
 
 if TYPE_CHECKING:
     from pyrogram import Client  # type: ignore

@@ -6,9 +6,9 @@ from tempfile import TemporaryDirectory
 
 from peewee import SqliteDatabase
 
-from totelegram.core.enums import Strategy
-from totelegram.services.snapshot import SnapshotService
-from totelegram.store.models import (
+from totelegram.common.enums import Strategy
+from totelegram.logic.snapshot import SnapshotService
+from totelegram.manager.models import (
     Job,
     Payload,
     RemotePayload,
@@ -52,7 +52,7 @@ class TestSnapshotIntegrity(unittest.TestCase):
         )
 
         # Simulamos un Job ya configurado (ADR-002)
-        from totelegram.core.schemas import StrategyConfig
+        from totelegram.common.schemas import StrategyConfig
 
         config = StrategyConfig(
             tg_max_size=500, user_is_premium=False, app_version="0.1"

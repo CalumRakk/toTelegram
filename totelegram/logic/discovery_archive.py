@@ -8,9 +8,9 @@ from typing import List, Optional, Tuple
 
 from tartape import TarTape
 from totelegram import __version__
-from totelegram.core.enums import SourceType
-from totelegram.core.schemas import Inventory
-from totelegram.store.models import SourceFile
+from totelegram.common.enums import SourceType
+from totelegram.common.schemas import Inventory
+from totelegram.manager.models import SourceFile
 
 logger = logging.getLogger(__name__)
 

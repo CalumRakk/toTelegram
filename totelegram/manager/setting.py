@@ -7,8 +7,8 @@ from pydantic import BaseModel, BeforeValidator, Field, TypeAdapter, ValidationE
 from pydantic.fields import FieldInfo
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from totelegram.core.enums import DuplicatePolicy
-from totelegram.utils import VALUE_NOT_SET, normalize_chat_id
+from totelegram.common.enums import DuplicatePolicy
+from totelegram.common.utils import VALUE_NOT_SET, normalize_chat_id
 
 
 class AccessLevel(IntEnum):

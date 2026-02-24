@@ -1,6 +1,5 @@
 from typer.testing import CliRunner
 
-
 runner = CliRunner()
 
 
@@ -15,8 +14,8 @@ runner = CliRunner()
 #     def tearDown(self):
 #         self.tmp_dir.cleanup()
 
-#     @patch("totelegram.commands.profile.ValidationService")
-#     @patch("totelegram.commands.profile.uuid")
+#     @patch("totelegram.cli.commands.profile.ValidationService")
+#     @patch("totelegram.cli.commands.profile.uuid")
 #     def test_create_profile_happy_path(self, mock_uuid, MockValidator):
 #         # Fijamos el nombre del archivo temporal
 #         mock_uuid.uuid4.return_value.hex = "12345678"
@@ -34,8 +33,8 @@ runner = CliRunner()
 #         instance = MockValidator.return_value
 #         instance.validate_session.side_effect = side_effect_validate_session
 
-#         with patch("totelegram.commands.profile.TelegramSession"), patch(
-#             "totelegram.commands.profile.resolve_and_store_chat_logic"
+#         with patch("totelegram.cli.commands.profile.TelegramSession"), patch(
+#             "totelegram.cli.commands.profile.resolve_and_store_chat_logic"
 #         ) as mock_resolve:
 
 #             mock_resolve.return_value = True
@@ -60,9 +59,9 @@ runner = CliRunner()
 #             temp_path.exists(), "El archivo temporal deberia haber desaparecido"
 #         )
 
-#     @patch("totelegram.commands.profile.TelegramSession")
-#     @patch("totelegram.commands.profile.ValidationService")
-#     @patch("totelegram.commands.profile.uuid")
+#     @patch("totelegram.cli.commands.profile.TelegramSession")
+#     @patch("totelegram.cli.commands.profile.ValidationService")
+#     @patch("totelegram.cli.commands.profile.uuid")
 #     def test_create_profile_validation_failed_aborted(
 #         self, mock_uuid, MockTgProfile, MockValidationService
 #     ):

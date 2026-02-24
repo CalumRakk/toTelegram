@@ -3,34 +3,40 @@ from typing import TYPE_CHECKING, Optional, Union
 
 import typer
 
-from totelegram.core.consts import Commands
-from totelegram.services.chat_search import ChatSearchService
+from totelegram.common.consts import Commands
+from totelegram.telegram.search import ChatSearchService
 
 if TYPE_CHECKING:
-    from pyrogram import Client # type: ignore
+    from pyrogram import Client  # type: ignore
 
-from totelegram.commands.views import DisplayGeneric, DisplayProfile
-from totelegram.console import UI, console
-from totelegram.core.schemas import AccessStatus, CLIState
-from totelegram.core.setting import normalize_chat_id
-from totelegram.services.auth import AuthLogic
-from totelegram.services.chat_access import ChatAccessService
-from totelegram.telegram import TelegramSession
-from totelegram.utils import VALUE_NOT_SET, is_direct_identifier, is_valid_profile_name
+from totelegram.cli.ui.console import UI, console
+from totelegram.cli.ui.views import DisplayGeneric, DisplayProfile
+from totelegram.common.schemas import AccessStatus, CLIState
+from totelegram.common.utils import (
+    VALUE_NOT_SET,
+    is_direct_identifier,
+    is_valid_profile_name,
+)
+from totelegram.manager.setting import normalize_chat_id
+from totelegram.telegram.access import ChatAccessService
+from totelegram.telegram.auth import AuthLogic
+from totelegram.telegram.client import TelegramSession
 
 app = typer.Typer(help="Gestión de perfiles de configuración.")
 
 
-def _run_destination_wizard(client: "Client", current_depth:int=100) -> Optional[Union[str, int]]:
+def _run_destination_wizard(
+    client: "Client", current_depth: int = 100
+) -> Optional[Union[str, int]]:
     """
     Inicia el asistente interactivo para determinar y validar el chat destino.
     Devuelve el identificador del chat (int o str) si se resuelve con éxito,
     o None si el usuario decide omitir la configuración.
     """
 
-    def has_write_permission(target: Union[str, int])-> bool:
+    def has_write_permission(target: Union[str, int]) -> bool:
         with UI.loading("Verificando permisos..."):
-            report= access_service.verify_access(target)
+            report = access_service.verify_access(target)
 
         if report.is_ready and report.chat:
             UI.success("Tienes permisos de escritura.")
@@ -64,8 +70,12 @@ def _run_destination_wizard(client: "Client", current_depth:int=100) -> Optional
             console.print()
 
             while True:
-                with UI.loading(f"Buscando chat que contenga [bold]{query}[/] (profundidad: {current_depth})..."):
-                    resolution = search_service.search_by_name(query, is_exact=False, depth=current_depth)
+                with UI.loading(
+                    f"Buscando chat que contenga [bold]{query}[/] (profundidad: {current_depth})..."
+                ):
+                    resolution = search_service.search_by_name(
+                        query, is_exact=False, depth=current_depth
+                    )
 
                 matches = resolution.all_unique_matches()
 
@@ -76,8 +86,12 @@ def _run_destination_wizard(client: "Client", current_depth:int=100) -> Optional
                 if not matches:
                     DisplayGeneric.show_search_tip()
                     console.print("\n[bold]¿Qué deseas hacer?[/bold]")
-                    console.print(f" [1] Reintentar con '{query}' (Si ya enviaste el mensaje)")
-                    console.print(f" [2] Búsqueda profunda (Escanear más chats antiguos)")
+                    console.print(
+                        f" [1] Reintentar con '{query}' (Si ya enviaste el mensaje)"
+                    )
+                    console.print(
+                        f" [2] Búsqueda profunda (Escanear más chats antiguos)"
+                    )
                     console.print(f" [3] Probar otro nombre.")
                     console.print(f" [4] Volver al menú principal.")
 
@@ -96,7 +110,9 @@ def _run_destination_wizard(client: "Client", current_depth:int=100) -> Optional
 
                 # Si HAY resultados, procesamos la selección
                 try:
-                    choice = typer.prompt("\nSelecciona el numeral (#) o '0' para cancelar", default="0")
+                    choice = typer.prompt(
+                        "\nSelecciona el numeral (#) o '0' para cancelar", default="0"
+                    )
 
                     # Manejo explicíto del 0, se evitan bug de lista [-1]
                     if choice == "0":
@@ -157,8 +173,12 @@ def list_profiles(
     profiles = manager.get_all_profiles()
     if not profiles:
         UI.warn("No se encontraron perfiles en el sistema.")
-        command= f"{Commands.PROFILE_CREATE}"
-        UI.tip(f"Crea un perfil usando el siguiente comando:", commands=command, spacing="top")
+        command = f"{Commands.PROFILE_CREATE}"
+        UI.tip(
+            f"Crea un perfil usando el siguiente comando:",
+            commands=command,
+            spacing="top",
+        )
         return
 
     active_profile = manager.get_active_profile_name()
@@ -166,9 +186,11 @@ def list_profiles(
 
     if not active_profile:
         UI.warn("No hay un perfil activo en el sistema.")
-        UI.tip("Activa un perfil usando el comando:", commands=f"{Commands.PROFILE_SWITCH} [NOMBRE]", spacing="top")
-
-
+        UI.tip(
+            "Activa un perfil usando el comando:",
+            commands=f"{Commands.PROFILE_SWITCH} [NOMBRE]",
+            spacing="top",
+        )
 
 
 @app.command("create")
@@ -180,7 +202,9 @@ def create_profile(
     chat_id: Optional[str] = typer.Option(
         VALUE_NOT_SET, help="Chat ID (opcional para saltar asistente)"
     ),
-    force: bool = typer.Option(False, "--force", "-f", help="Forzar creación incluso si el perfil ya existe")
+    force: bool = typer.Option(
+        False, "--force", "-f", help="Forzar creación incluso si el perfil ya existe"
+    ),
 ):
     """Crea una nueva identidad y la vincula con tu cuenta de Telegram."""
 
@@ -202,7 +226,9 @@ def create_profile(
             raise typer.Exit(1)
         else:
             manager.delete_profile(existing_profile)
-            UI.warn(f"Perfil '{profile_name}' existente eliminado por opción '--force'.")
+            UI.warn(
+                f"Perfil '{profile_name}' existente eliminado por opción '--force'."
+            )
 
     DisplayProfile.announce_start_profile_creation(profile_name)
 
@@ -251,7 +277,6 @@ def create_profile(
                 UI.success("Configuración 'chat_id' actualizada.")
             else:
                 UI.info("Configuración de destino omitida. Puedes hacerlo luego.")
-
 
 
 @app.command("switch")

@@ -6,14 +6,14 @@ from rich.markup import escape
 from rich.panel import Panel
 from rich.table import Table
 
-from totelegram.console import UI, console
-from totelegram.core.consts import COLORS, Commands
-from totelegram.core.registry import Profile, SettingsManager
-from totelegram.core.schemas import ChatMatch, ScanReport
-from totelegram.core.setting import AccessLevel, Settings
-from totelegram.store.database import DatabaseSession
-from totelegram.store.models import TelegramChat
-from totelegram.utils import VALUE_NOT_SET
+from totelegram.cli.ui.console import UI, console
+from totelegram.common.consts import COLORS, Commands
+from totelegram.common.schemas import ChatMatch, ScanReport
+from totelegram.common.utils import VALUE_NOT_SET
+from totelegram.manager.database import DatabaseSession
+from totelegram.manager.models import TelegramChat
+from totelegram.manager.registry import Profile, SettingsManager
+from totelegram.manager.setting import AccessLevel, Settings
 
 
 def get_friendly_chat_name(chat_id: str, database_path: str) -> str:

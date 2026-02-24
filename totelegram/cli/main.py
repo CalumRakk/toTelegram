@@ -6,15 +6,15 @@ from typing import Optional
 
 import typer
 
-from totelegram.core.schemas import CLIState
-from totelegram.utils import APP_NAME, get_user_config_dir
+from totelegram.common.schemas import CLIState
+from totelegram.common.utils import APP_NAME, get_user_config_dir
 
 logging.getLogger("dotenv").setLevel(logging.CRITICAL)
 
-from totelegram.commands import config, profile, upload
-from totelegram.console import UI, console
-from totelegram.core.registry import SettingsManager
-from totelegram.logging_config import setup_logging
+from totelegram.cli.commands import config, profile, upload
+from totelegram.cli.ui.console import UI, console
+from totelegram.common.logging_config import setup_logging
+from totelegram.manager.registry import SettingsManager
 
 logger = logging.getLogger(__name__)
 COMMANDS_IGNORING_USE = ["profile", "version"]
@@ -88,11 +88,11 @@ def run_script():
         sys.argv = [f"ID:{arg}" if regex.match(arg) else arg for arg in sys.argv]
 
     try:
-        from totelegram.cli import app
+        from totelegram.cli.main import app
 
         app()
     except Exception as e:
-        from totelegram.console import UI
+        from totelegram.cli.ui.console import UI
 
         UI.error(str(e))
         sys.exit(1)

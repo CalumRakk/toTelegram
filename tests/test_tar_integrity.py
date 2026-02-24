@@ -4,7 +4,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from tartape import TarTape
-from totelegram.services.tar_stream import TapeInspector, TarVolume
+from totelegram.telegram.stream import TapeInspector, TarVolume
 
 
 class TestTarTapeStreaming(unittest.TestCase):

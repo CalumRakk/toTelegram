@@ -1,7 +1,7 @@
 import logging
 from typing import TYPE_CHECKING, Generator, List
 
-from totelegram.core.schemas import ChatMatch, ChatResolution
+from totelegram.common.schemas import ChatMatch, ChatResolution
 
 if TYPE_CHECKING:
     from pyrogram import Client  # type: ignore

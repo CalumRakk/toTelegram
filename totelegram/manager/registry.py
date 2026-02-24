@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional
 from dotenv import dotenv_values
 from pydantic import BaseModel, ValidationError
 
-from totelegram.core.setting import Settings
+from totelegram.manager.setting import Settings
 
 logger = logging.getLogger(__name__)
 

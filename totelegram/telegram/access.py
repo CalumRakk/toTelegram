@@ -3,8 +3,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Optional, Union, cast
 
-from totelegram.core.schemas import AccessReport, AccessStatus, ChatMatch
-from totelegram.core.setting import normalize_chat_id
+from totelegram.common.schemas import AccessReport, AccessStatus, ChatMatch
+from totelegram.manager.setting import normalize_chat_id
 
 if TYPE_CHECKING:
     from pyrogram import Client  # type: ignore
