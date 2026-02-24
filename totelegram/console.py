@@ -66,7 +66,7 @@ class UI:
     ):
         """Muestra una sugerencia al usuario. Opcionalmente formatea un comando."""
 
-        UI._print(f"[dim cyan] Tip:[/] {message}", spacing=spacing, **kwarg)
+        UI._print(f"[dim cyan]  Tip:[/] {message}", spacing=spacing, **kwarg)
 
         if commands:
             # Estandariza cómo se ven los comandos
@@ -74,7 +74,7 @@ class UI:
                 commands = [commands]
 
             for command in commands:
-                console.print(f"   [bold yellow]> {command}[/]")
+                console.print(f"    [bold yellow]> {command}[/]")
 
     @staticmethod
     def educational_tip(
