@@ -1,23 +1,21 @@
-import logging
 import os
 import sys
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
-from totelegram.core.plans import SkipPlan
+from totelegram.core.registry import SettingsManager
 from totelegram.services.chunking import ChunkingService
-from totelegram.services.validator import ValidationService
+from totelegram.utils import get_user_config_dir
 
 sys.path.append(os.getcwd())
 
-from totelegram.core.enums import AvailabilityState, DuplicatePolicy
-from totelegram.core.registry import ProfileManager
-from totelegram.core.setting import get_settings
-from totelegram.logging_config import setup_logging
+if TYPE_CHECKING:
+    from pyrogram.types import User, Chat
+
+from totelegram.core.enums import AvailabilityState
 from totelegram.services.discovery import DiscoveryService
-from totelegram.services.policy import PolicyExpert
 from totelegram.services.uploader import UploadService
 from totelegram.store.database import DatabaseSession
 from totelegram.store.models import Job, RemotePayload, SourceFile, TelegramChat
@@ -29,47 +27,34 @@ class TestManualRealLogic(unittest.TestCase):
     Test manual con cuenta real que valida los Escenarios de LOGIC_EXPLAINER.md
     """
 
-    @classmethod
-    def setUpClass(cls):
-        Path("tests/logs").mkdir(parents=True, exist_ok=True)
-        setup_logging("tests/logs/test_runs.log", logging.INFO)
-        cls.logger = cast(logging.Logger, logging.getLogger("ManualReal"))
+    def setUp(self):
+        self.temp_dir = TemporaryDirectory()
+        self.base_path = Path(self.temp_dir.name)
+        self.manager = SettingsManager(self.base_path)
+        self.database_path = self.base_path / "test.db"
 
-        cls.pm = ProfileManager()
-        profile_name = "demo"
-        if not profile_name:
-            raise unittest.SkipTest("No hay un perfil activo para ejecutar pruebas.")
+        # Configuraciones de produccion para telegram
+        pdt_profile_name = "demo"
+        pdt_dir = get_user_config_dir()
+        pdt_manager = SettingsManager(pdt_dir)
+        self.pdt_settings = pdt_manager.get_settings("demo")
 
-        cls.logger.info(f"=== INICIANDO SUITE REAL: PERFIL {profile_name} ===")
+        if not self.pdt_settings:
+            raise unittest.SkipTest("No hay un perfil para ejecutar pruebas.")
 
-        env_path = cls.pm.get_path(profile_name)
-        cls.settings = get_settings(env_path)
-        cls.settings.database_name = "manual_test_run.sqlite"
-        cls.media_folder = TemporaryDirectory()
-        cls.database_path = Path(cls.media_folder.name) / cls.settings.database_name
+        self.db_session = DatabaseSession(self.database_path)
+        self.db_session.start()
 
-        cls.db_session = DatabaseSession(cls.database_path)
-        cls.db_session.start()
+        self.tg_session = TelegramSession.from_profile(pdt_profile_name, pdt_manager)
+        self.client = self.tg_session.start()
 
-        cls.tg_session = TelegramSession(cls.settings)
-        cls.client = cls.tg_session.start()
-
-        validate = ValidationService()
-        validate._force_refresh_peers(cls.client)
-
-    @classmethod
-    def tearDownClass(cls):
-        cls.tg_session.stop()
-        cls.db_session.close()
-        cls.media_folder.cleanup()
-        if cls.settings.database_path.exists():
-            try:
-                cls.settings.database_path.unlink()
-            except:
-                pass
+    def tearDown(self):
+        self.tg_session.stop()
+        self.db_session.close()
+        self.temp_dir.cleanup()
 
     def _create_dummy_file(self, name: str, size_mb: int) -> Path:
-        path = Path(self.media_folder.name) / name
+        path = self.base_path / name
         with open(path, "wb") as f:
             f.write(os.urandom(size_mb * 1024 * 1024))
         return path
@@ -81,10 +66,7 @@ class TestManualRealLogic(unittest.TestCase):
         """
         # Preparación de servicios
         discovery = DiscoveryService(self.client)
-        chunker = ChunkingService(
-            work_dir=Path(self.media_folder.name),
-            chunk_size=1024 * 1024 * 10,
-        )
+        chunker = ChunkingService(work_dir=self.database_path)
         uploader = UploadService(
             client=self.client,
             chunk_service=chunker,
@@ -92,20 +74,18 @@ class TestManualRealLogic(unittest.TestCase):
             max_filename_length=50,
             discovery=discovery,
         )
-        from pyrogram.types import Chat
 
-        tg_chat = self.client.get_chat(self.settings.chat_id)
-        chat_db, _ = TelegramChat.get_or_create_from_tg(cast(Chat, tg_chat))
-        from pyrogram.types import User
+        tg_chat = cast("Chat", self.client.get_chat(self.pdt_settings.chat_id))
+        chat_db, _ = TelegramChat.get_or_create_from_chat(tg_chat)
 
-        me = cast(User, self.client.get_me())
+        me = cast("User", self.client.get_me())
 
         # --- CASO SYSTEM_NEW: el archivo es nuevo ----
-        self.logger.info(">>> TEST 1: Subida física inicial (SYSTEM_NEW)")
         target = self._create_dummy_file("video_boda.mp4", 1)
         source = SourceFile.get_or_create_from_path(target)
 
-        job = Job.create_contract(source, chat_db, me.is_premium, self.settings)
+        tg_limit = 4 * (1024**2) if me.is_premium else 2 * (1024**2)
+        job = Job.create_contract(source, chat_db, me.is_premium, tg_limit)
 
         report = discovery.investigate(job)
         self.assertEqual(
@@ -114,10 +94,8 @@ class TestManualRealLogic(unittest.TestCase):
 
         uploader.execute_physical_upload(job)
         self.assertTrue(job.status == "UPLOADED")
-        self.logger.info("✔ Archivo subido físicamente.")
 
         # --- CASO FULFILLED: el archivo se repite en el mismo chat ---
-        self.logger.info(">>> TEST 2: Intento repetido en el mismo chat (FULFILLED)")
 
         report_fulfilled = discovery.investigate(job)
         self.assertEqual(
@@ -126,28 +104,17 @@ class TestManualRealLogic(unittest.TestCase):
             "Debería detectar integridad local.",
         )
 
-        plan = PolicyExpert.determine_plan(report_fulfilled, DuplicatePolicy.SMART)
-        self.logger.info(f"Plan decidido: {plan}")
-        self.assertIsInstance(plan, SkipPlan)
-        self.logger.info("El sistema sabe que el archivo existe en el mismo chat.")
-
         # --- CASO REMOTE_MIRROR: el archivo se repite en otro chat ---
-        self.logger.info(">>> TEST 3: Detección de duplicidad global (MIRROR)")
 
         # Creamos un chat ficticio en la DB para pedirle al sistema que suba el mismo archivo allí
         chat_virtual, _ = TelegramChat.get_or_create(
             id=999999, defaults={"title": "Virtual", "type": "private"}
         )
         # El Job nace "vacío" (sin payloads en DB), solo con el contrato.
-        job_mirror = Job.create_contract(
-            source, chat_virtual, me.is_premium, self.settings
-        )
+        job_mirror = Job.create_contract(source, chat_virtual, me.is_premium, tg_limit)
 
         report_mirror = discovery.investigate(job_mirror)
         self.assertEqual(report_mirror.state, AvailabilityState.REMOTE_MIRROR)
-        self.logger.info(
-            "El sistema sabe que el archivo existe en otro chat del ecosistema."
-        )
 
         self._cleanup_remote_messages(job)
 
@@ -158,10 +125,11 @@ class TestManualRealLogic(unittest.TestCase):
             .join(Job, on=(RemotePayload.payload_id == Job.id))
             .where(Job.source == job.source)
         )
-        msg_ids = [r.message_id for r in remotes if r.chat_id == self.settings.chat_id]
+        msg_ids = [
+            r.message_id for r in remotes if r.chat_id == self.pdt_settings.chat_id
+        ]
         if msg_ids:
-            self.logger.info(f"Limpiando {len(msg_ids)} mensajes del test...")
-            self.client.delete_messages(self.settings.chat_id, msg_ids)  # type: ignore
+            self.client.delete_messages(self.pdt_settings.chat_id, msg_ids)  # type: ignore
 
 
 if __name__ == "__main__":

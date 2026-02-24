@@ -50,7 +50,7 @@ class TelegramChat(BaseModel):
     last_verified = peewee.DateTimeField(null=True)
 
     @staticmethod
-    def get_or_create_from_tg(tg_chat: "TgChat") -> Tuple["TelegramChat", bool]:
+    def get_or_create_from_chat(tg_chat: "TgChat") -> Tuple["TelegramChat", bool]:
         """
         tg_chat puede ser un objeto Chat de Pyrogram.
         """
@@ -167,57 +167,60 @@ class SourceFile(BaseModel):
         return changed
 
     @staticmethod
-    def get_or_create_from_path(path: Path, work_dir: Path) -> "SourceFile":
-        from totelegram.services.discovery_archive import ArchiveDiscoveryService
+    def get_or_create_from_path(path: Path) -> "SourceFile":
+        # from totelegram.services.discovery_archive import ArchiveDiscoveryService
 
-        path = path.absolute()
+        # path = path.absolute()
 
-        if path.is_dir():
-            # TODO: Hay que diferenciar si es una carpeta nueva o ya existente.
-            discovery = ArchiveDiscoveryService(path, work_dir=work_dir)
-            inventory = discovery._create_inventory(path)
+        # if path.is_dir():
+        #     # TODO: Hay que diferenciar si es una carpeta nueva o ya existente.
+        #     discovery = ArchiveDiscoveryService(path, work_dir=work_dir)
+        #     inventory = discovery._create_inventory(path)
 
-            source, created = SourceFile.get_or_create(
-                md5sum=inventory.fingerprint,
-                defaults={
-                    "type": SourceType.FOLDER,
-                    "path_str": str(path),
-                    "size": inventory.total_size,
-                    "mtime": path.stat().st_mtime,
-                    "mimetype": "application/x-directory",
-                },
-            )
+        #     source, created = SourceFile.get_or_create(
+        #         md5sum=inventory.fingerprint,
+        #         defaults={
+        #             "type": SourceType.FOLDER,
+        #             "path_str": str(path),
+        #             "size": inventory.total_size,
+        #             "mtime": path.stat().st_mtime,
+        #             "mimetype": "application/x-directory",
+        #         },
+        #     )
+        #     return source
+        # else:
+
+        stat = path.stat()
+        current_size = stat.st_size
+        current_mtime = stat.st_mtime
+        path_str = str(path)
+
+        # Intento rápido por ruta y metadatos
+        cached = SourceFile.get_or_none(
+            (SourceFile.path_str == path_str)
+            & (SourceFile.size == current_size)
+            & (SourceFile.mtime == current_mtime)
+        )
+        if cached:
+            return cached
+
+        # Si falló el rápido, calculamos MD5
+        md5sum = create_md5sum_by_hashlib(path)
+
+        source = cast(
+            Optional[SourceFile], SourceFile.get_or_none(SourceFile.md5sum == md5sum)
+        )
+        if source:
+            source.update_if_needed(path)
             return source
-        else:
-            stat = path.stat()
-            current_size = stat.st_size
-            current_mtime = stat.st_mtime
-            path_str = str(path)
 
-            # Intento rápido por ruta y metadatos
-            cached = SourceFile.get_or_none(
-                (SourceFile.path_str == path_str)
-                & (SourceFile.size == current_size)
-                & (SourceFile.mtime == current_mtime)
-            )
-            if cached:
-                return cached
-
-            # Si falló el rápido, calculamos MD5
-            md5sum = create_md5sum_by_hashlib(path)
-            source, created = SourceFile.get_or_create(
-                md5sum=md5sum,
-                defaults={
-                    "path_str": path_str,
-                    "size": current_size,
-                    "mtime": current_mtime,
-                    "mimetype": get_mimetype(path),
-                },
-            )
-            if not created:
-                source.update_if_needed(path)
-
-            return source
+        return SourceFile.create(
+            md5sum=md5sum,
+            path_str=path_str,
+            size=current_size,
+            mtime=current_mtime,
+            mimetype=get_mimetype(path),
+        )
 
 
 class Job(BaseModel):
@@ -252,16 +255,11 @@ class Job(BaseModel):
         source: "SourceFile",
         chat: "TelegramChat",
         is_premium: bool,
-        settings: "Settings",
+        tg_limit: int,
     ) -> "Job":
         """
         Crea un Job basado en la estrategía y la configuración de la cuenta.
         """
-        # Determinamos el límite técnico según el estado de la cuenta
-        tg_limit = (
-            settings.TG_MAX_SIZE_PREMIUM if is_premium else settings.TG_MAX_SIZE_NORMAL
-        )
-
         # Evaluamos la estrategia
         strategy = Strategy.evaluate(source.size, tg_limit)
 
@@ -279,6 +277,13 @@ class Job(BaseModel):
             status=JobStatus.PENDING,
             config=config,
         )
+
+    @staticmethod
+    def get_for_source_in_chat(
+        source: "SourceFile", chat: "TelegramChat"
+    ) -> Optional["Job"]:
+        """Devuelve el Job que existe para el source en el chat especificado."""
+        return Job.get_or_none((Job.source == source) & (Job.chat == chat))
 
 
 class Payload(BaseModel):

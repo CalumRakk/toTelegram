@@ -291,7 +291,3 @@ class SettingsManager:
             return True
 
         return False
-
-
-class ProfileManager:
-    pass

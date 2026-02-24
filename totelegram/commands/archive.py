@@ -100,7 +100,7 @@ def archive_folder(
         )
 
         report = discovery.investigate(job)
-        plan = PolicyExpert.determine_plan(report, policy)
+        plan = PolicyExpert.resolve_plan(report, policy)
         uploader = UploadService(
             client=client,
             chunk_service=chunker,

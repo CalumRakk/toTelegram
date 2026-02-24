@@ -2,7 +2,7 @@ import re
 
 APP_NAME = "toTelegram"
 CLI_BIN = "totelegram"
-VALUE_NOT_SET = "NOT_SET"
+VALUE_NOT_SET = "NOT-SET"
 ID_PREFIX_RE = re.compile(r"^id:", re.IGNORECASE)
 SELF_CHAT_ALIASES = ["me", "mensajes guardados", "saved messages", "self"]
 

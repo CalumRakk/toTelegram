@@ -151,7 +151,7 @@ def is_direct_identifier(chat_id: Union[str, int, None]) -> bool:
     clean = str(chat_id).strip().lower()
 
     # Aunque terminaria como False, se especifica para hacerlo explicito.
-    if clean == VALUE_NOT_SET:
+    if clean.upper() == VALUE_NOT_SET:
         return False
 
     # IDs numéricos (incluyendo negativos)

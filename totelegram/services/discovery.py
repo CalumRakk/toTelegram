@@ -11,7 +11,7 @@ if TYPE_CHECKING:
     from pyrogram import Client  # type: ignore
     from pyrogram.types import Message  # type: ignore
 
-from totelegram.core.enums import AvailabilityState, Strategy
+from totelegram.core.enums import AvailabilityState
 from totelegram.store.models import Job, Payload, RemotePayload, SourceFile
 
 logger = logging.getLogger(__name__)
@@ -284,15 +284,6 @@ class DiscoveryService:
 
     def _get_expected_count(self, job: Job) -> int:
         """
-        Determina cuántas piezas esperamos para este archivo.
-        Si ya existen en DB, usa ese valor. Si no, lo calcula según el contrato.
+        Calcula el número de piezas que debería tener el archivo.
         """
-        db_count = job.payloads.count()
-        if db_count > 0:
-            return db_count
-
-        if job.strategy == Strategy.SINGLE:
-            return 1
-
-        # TODO : encapsular la lógica de CHUNKED si es posible.
         return math.ceil(job.source.size / job.config.tg_max_size)
