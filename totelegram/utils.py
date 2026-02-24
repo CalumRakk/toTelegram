@@ -131,6 +131,12 @@ def get_user_config_dir(app_name: str = APP_NAME) -> Path:
         return Path(os.getenv("XDG_CONFIG_HOME", Path.home() / ".config")) / app_name
 
 
+def is_potential_username(value: str) -> bool:
+    """Verifica si un string cumple con las reglas básicas de un username de Telegram (sin el @)."""
+    # Letras, números y guiones bajos. Longitud entre 5 y 32.
+    return bool(re.fullmatch(r"[a-zA-Z][a-zA-Z0-9_]{4,31}", str(value).strip()))
+
+
 def is_direct_identifier(chat_id: Union[str, int, None]) -> bool:
     """Devuelve True si el chat_id es un identificador de pyrogram/telegram.
 

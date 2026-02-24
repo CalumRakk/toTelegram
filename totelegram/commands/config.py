@@ -6,8 +6,8 @@ from typing import TYPE_CHECKING, List, Literal, Tuple, cast
 import typer
 
 from totelegram.commands.views import DisplayConfig, DisplayGeneric, DisplayProfile
-from totelegram.console import UI, console
-from totelegram.core.consts import Commands
+from totelegram.console import UI
+from totelegram.core.consts import VALUE_NOT_SET, Commands
 from totelegram.core.schemas import CLIState
 from totelegram.core.setting import normalize_chat_id
 from totelegram.services.chat_access import ChatAccessService
@@ -16,6 +16,7 @@ from totelegram.services.config_service import ConfigService
 from totelegram.telegram import TelegramSession
 from totelegram.utils import (
     is_direct_identifier,
+    is_potential_username,
     is_suspected_glob_expansion,
     validate_item,
 )
@@ -178,58 +179,73 @@ def remove_config(
 
 
 @app.command("check")
+@handle_config_errors
 def check_config(ctx: typer.Context):
     """Verifica que el perfil actual esté listo para subir archivos."""
-    # FIX: si `.session` no existe, el comando creara uno en la carpeta de perfiles. ocacionando confusion con la trinidad.
     state: CLIState = ctx.obj
     manager = state.manager
-    settings_name = cast(
-        str, manager.resolve_profile_name(state.profile_name, strict=False)
-    )
+
+    profile_name = manager.resolve_profile_name(state.profile_name, strict=False)
+    if not profile_name:
+        UI.error("No hay un perfil activo o el perfil especificado no existe.")
+        raise typer.Exit(1)
 
     with UI.loading(
-        f"Comprobando integridad del perfil: [bold]{state.profile_name}[/]"
+        f"Comprobando integridad local del perfil: [bold]{profile_name}[/]"
     ):
-        time.sleep(0.2)  # Simular carga
-        profile = state.manager.get_profile(settings_name)
+        time.sleep(0.2)
+        profile = manager.get_profile(profile_name)
+
         if not profile:
-            UI.error(f"Perfil global no encontrado.")
+            UI.error(f"Perfil '{profile_name}' no encontrado.")
             raise typer.Exit(1)
 
-        if not profile.is_trinity and not profile.has_env:
-            UI.error("Perfil incompleto: No tiene [bold].env[/]\n")
-            console.print(
-                f"Créalo de nuevo: [cyan]totelegram profile create --force --profile-name {settings_name}[/]"
+        if not profile.is_trinity:
+            UI.error(f"El perfil '{profile_name}' está incompleto.")
+            if not profile.has_env:
+                UI.info("Falta el archivo de configuración (.env).")
+            if not profile.has_session:
+                UI.info("Falta el archivo de sesión de Telegram (.session).")
+
+            command = f"{Commands.PROFILE_CREATE} --force"
+            UI.tip(
+                f"Créalo de nuevo usando el siguiente comando:",
+                commands=command,
+                spacing="top",
             )
             raise typer.Exit(1)
 
-    # try:
-    #     with TelegramSession(
-    #         session_name=settings_name,
-    #         api_hash=settings.api_hash,
-    #         api_id=settings.api_id,
-    #         profiles_dir=manager.profiles_dir,
-    #     ) as client:
-    #         from pyrogram.types import Chat
+    settings = manager.get_settings(profile_name)
 
-    #         if settings.chat_id == "NOT_SET":
-    #             DisplayConfig.show_config_table(manager, state.is_debug, settings)
-    #             UI.warn("CHAT_ID no configurado.")
-    #             raise typer.Exit(code=1)
+    if settings.chat_id == VALUE_NOT_SET:
+        UI.warn("El destino (chat_id) no está configurado.")
+        UI.tip(
+            "Configura el destino usando uno de estos comandos:",
+            commands=[
+                f"{Commands.CONFIG_SET} chat_id <ID>",
+                f"{Commands.CONFIG_SEARCH} <NOMBRE>",
+            ],
+        )
+        raise typer.Exit(code=1)
 
-    #         with UI.loading("Verificando permisos..."):
-    #             validator = ChatAccessService(client)
-    #             access_report = validator.verify_access(settings.chat_id)
+    with TelegramSession.from_profile(profile_name, manager) as client:
+        with UI.loading("Verificando conexión y permisos en Telegram..."):
+            validator = ChatAccessService(client)
+            access_report = validator.verify_access(settings.chat_id)
 
-    #         if not access_report.is_ready:
-    #             UI.warn("No tienes permisos de escritura en el chat.")
-    #             raise typer.Exit(code=1)
+        if not access_report.is_ready:
+            UI.warn("No tienes permisos de escritura en el chat destino.")
+            UI.info(f"Motivo: {access_report.reason}")
+            if access_report.hint:
+                UI.info(access_report.hint)
+            raise typer.Exit(code=1)
 
-    #         UI.success("Perfil listo para subir archivos.")
-
-    # except Exception as e:
-    #     UI.error(f"Error de configuracion {str(e)}")
-    #     raise typer.Exit(code=1)
+        UI.success(f"Perfil '{profile_name}' verificado y listo para operar.")
+        if access_report.chat:
+            UI.info(
+                f"Destino confirmado: [bold]{access_report.chat.title}[/] "
+                f"[dim](ID: {access_report.chat.id})[/dim]"
+            )
 
 
 @app.command("search")
@@ -252,16 +268,27 @@ def search_config(
         chat_access = ChatAccessService(client)
         chat_searcher = ChatSearchService(client)
 
+        me = cast("User", client.get_me())
+        UI.info(f"Telegram Session: [bold]{me.username or me.first_name}[/]")
+
         target_chat_id = None
 
         if is_direct_identifier(query):
             target_chat_id = normalize_chat_id(query)
         else:
             is_exact = not contains
-            result = chat_searcher.search_by_name(query, depth, is_exact)
+            search_desc = (
+                f"llamado exactamente '[bold]{query}[/]'"
+                if is_exact
+                else f"que contenga '[bold]{query}[/]' (sin distinción de mayúsculas y minúsculas)"
+            )
+            UI.info(f"Buscando chat {search_desc}")
+            with UI.loading("Explorando los chats recientes..."):
+                result = chat_searcher.search_by_name(query, depth, is_exact)
 
             if result.is_resolved and result.winner:
                 target_chat_id = result.winner.id
+
             elif result.is_ambiguous:
                 conflicts = len(result.conflicts)
                 UI.warn(f"Ambigüedad: Hay {conflicts} chats con ese nombre.")
@@ -270,7 +297,9 @@ def search_config(
                 )
                 UI.info("Usa el ID exacto: [bold]config set chat_id <ID>[/]")
                 raise typer.Exit(1)
+
             elif result.needs_help:
+
                 DisplayGeneric.show_chat_table(
                     result.suggestions, "Quizás quisiste decir:"
                 )
@@ -280,8 +309,17 @@ def search_config(
                 raise typer.Exit(1)
             else:
                 UI.error(
-                    f"No se encontró ningún chat relacionado con '{result.query}'."
+                    f"No se encontró ningún chat relacionado con '{result.query}' en los primeros {result.search_depth} chats recientes."
                 )
+                if is_potential_username(result.query):
+                    UI.tip(
+                        message="Puedes hacer una busqueda más profunda con [bold]--depth[/] o especificar el chat directamente con @username o t.me/username.",
+                        commands=[
+                            f"{Commands.CONFIG_SEARCH} {result.query} --depth 200",
+                            f"{Commands.CONFIG_SEARCH} @{result.query}",
+                        ],
+                    )
+
                 raise typer.Exit(1)
 
         # Verificación de permisos
