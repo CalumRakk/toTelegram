@@ -132,6 +132,9 @@ class Settings(BaseSettings):
         description="Ruta del archivo de log. Si está vacío, se usa la ruta por defecto en la carpeta de trabajo.",
     )
 
+    def all_exclusion_patterns(self) -> List[str]:
+        return self.exclude_files + self.exclude_files_default
+
     @classmethod
     def get_info(cls, field_name: str) -> Optional[InfoField]:
         """Extrae la informacion de un campo de Settings.

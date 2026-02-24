@@ -1,23 +1,71 @@
 from pathlib import Path
-from typing import cast
+from typing import List
 
 import typer
-from rich.markup import escape
 
-from totelegram.commands.profile import list_profiles
+from totelegram.commands.config import _get_config_tools
+from totelegram.commands.views import DisplayUpload
 from totelegram.console import UI, console
-from totelegram.core.enums import AvailabilityState, DuplicatePolicy, Strategy
-from totelegram.core.plans import AskUserPlan, PhysicalUploadPlan, SkipPlan
-from totelegram.core.registry import ProfileManager
-from totelegram.services.chunking import ChunkingService
-from totelegram.services.discovery import DiscoveryService
-from totelegram.services.policy import PolicyExpert
-from totelegram.services.snapshot import SnapshotService
+from totelegram.core.enums import AvailabilityState, DuplicatePolicy
+from totelegram.core.plans import AskUserPlan
+from totelegram.core.schemas import CLIState, ScanReport
 from totelegram.services.uploader import UploadService
-from totelegram.store.database import DatabaseSession
-from totelegram.store.models import Job, SourceFile, TelegramChat
-from totelegram.telegram import TelegramSession
+from totelegram.store.models import Job
 from totelegram.utils import is_excluded
+
+
+def _scan_and_filter(
+    target: Path | List[Path], patterns: list[str], max_filesize_bytes: int
+) -> ScanReport:
+    """
+    Escanea el objetivo y aplica reglas de exclusión.
+    Retorna un ScanReport con los archivos válidos y las omisiones categorizadas.
+    """
+    report = ScanReport()
+
+    def has_snapshot(file_path: Path) -> bool:
+        filename_plus_ext = file_path.with_name(f"{file_path.name}.json.xz")
+        stem_plus_ext = file_path.with_name(f"{file_path.stem}.json.xz")
+        return filename_plus_ext.exists() or stem_plus_ext.exists()
+
+    def process_candidate(p: Path):
+        # report.total_scanned += 1
+        # if p.name.endswith(".json.xz"):
+        #     report.snapshots_found += 1
+
+        # Exclusión por Patrón (user config)
+        if is_excluded(p, patterns):
+            report.skipped_by_exclusion.append(p)
+            return
+
+        # Exclusión por Snapshot
+        if has_snapshot(p):
+            report.skipped_by_snapshot.append(p)
+            return
+
+        # Exclusión por Tamaño
+        if p.stat().st_size > max_filesize_bytes:
+            report.skipped_by_size.append(p)
+            return
+
+        # Si pasa todo, es un archivo válido
+        report.found.append(p)
+
+    if isinstance(target, list):
+        candidates = target
+    elif isinstance(target, Path):
+        if target.is_file():
+            candidates = [target]
+        else:
+            candidates = list(target.rglob("*"))
+    else:
+        raise ValueError(f"Invalid target type: {type(target)}")
+
+    for p in candidates:
+        if p.is_file():
+            process_candidate(p)
+
+    return report
 
 
 def _handle_redundancy_interaction(
@@ -70,233 +118,172 @@ def upload_file(
     """
     Sube archivos o archivos de un directorio a Telegram.
     """
-    try:
-        pm: ProfileManager = ctx.obj
-        profile_name = pm.resolve_name()
-        settings = pm.get_settings(profile_name)
-    except ValueError as e:
-        UI.error(f"Error de perfil: {e}")
-        list_profiles(ctx, quiet=True)
-        raise typer.Exit(code=1)
+    state: CLIState = ctx.obj
+    profile_name, service = _get_config_tools(ctx)
 
-    exclusion_patterns = settings.exclude_files_default + settings.exclude_files
-    all_paths = _resolver_target_paths(
-        target, exclusion_patterns, settings.max_filesize_bytes
-    )
+    settings = state.manager.get_settings(profile_name)
+
+    exclusion_patterns = settings.all_exclusion_patterns()
+    with console.status(f"[dim]Escaneando {target}...[/dim]"):
+        scan_report = _scan_and_filter(
+            target, exclusion_patterns, settings.max_filesize_bytes
+        )
+
+    all_paths = scan_report.found
     if not all_paths:
         if target.is_dir():
-            UI.warn("No se encontraron archivos para procesar.")
+            UI.warn("No se encontraron archivos válidos para procesar.")
         raise typer.Exit(0)
 
-    _print_upload_summary(all_paths)
-    if len(all_paths) > 7 and not force:
-        if not typer.confirm(f"¿Deseas procesar estos {len(all_paths)} archivos?"):
-            return
-
-    console.print(f"\n[bold cyan]Iniciando sesión:[/bold cyan] {profile_name}\n")
-    with DatabaseSession(settings.database_path), TelegramSession(settings) as client:
-        from pyrogram.types import Chat, User
-
-        tg_chat = cast(Chat, client.get_chat(settings.chat_id))
-        chat_db, _ = TelegramChat.get_or_create_from_tg(tg_chat)
-        chunker = ChunkingService(work_dir=settings.worktable)
-        discovery = DiscoveryService(client)
-        uploader = UploadService(
-            client=client,
-            chunk_service=chunker,
-            upload_limit_rate_kbps=settings.upload_limit_rate_kbps,
-            max_filename_length=settings.max_filename_length,
-            discovery=discovery,
-        )
-        me = cast(User, client.get_me())
-
-        UI.info(
-            f"Destino: [bold cyan]{tg_chat.title or 'Privado'}[/] [dim](Id: {settings.chat_id})[/dim]"
-        )
-        for path in all_paths:
-            source = SourceFile.get_or_create_from_path(path,settings.worktable)  # TODO: avisar
-            job = Job.get_or_none(Job.source == source, Job.chat == chat_db)
-
-            if not job:
-                job = Job.create_contract(source, chat_db, me.is_premium, settings)
-                UI.info(f"Estrategia fijada: [bold]{job.strategy.value}[/]")
-                if job.strategy == Strategy.SINGLE:
-                    UI.info(f"[bold]Archivo único:[/bold] [blue]{path.name}[/blue]")
-                else:
-                    parts_count = discovery._get_expected_count(job)
-                    UI.info(
-                        f"[bold]Fragmentando en {parts_count} partes:[/bold] [blue]{path.name}[/blue]"
-                    )
-
-            report = discovery.investigate(job)
-            plan = PolicyExpert.determine_plan(report, settings.duplicate_policy)
-            if isinstance(plan, SkipPlan):
-                UI.info(f"[dim]{plan.reason}[/dim]")
-                if plan.is_already_fulfilled:
-                    job.set_uploaded()
-
-            elif isinstance(plan, PhysicalUploadPlan):
-                uploader.execute_physical_upload(job)
-
-            elif isinstance(plan, AskUserPlan):
-                if plan.state == AvailabilityState.REMOTE_RESTRICTED:
-                    # TODO: ¿Si existe en varios lugares?¿como sé cual es el mejor?
-                    if typer.confirm("Existe pero no tienes acceso. ¿Subir de nuevo?"):
-                        uploader.execute_physical_upload(job)
-                else:
-                    _handle_redundancy_interaction(job, uploader, plan)
-
-            SnapshotService.generate_snapshot(job)
-
-
-def _print_skip_report(
-    by_snapshot: list[Path],
-    by_size: list[Path],
-    by_exclusion: list[Path],
-    patterns: list[str],
-):
-    """
-    Muestra un reporte.
-    - Pocos archivos (<5): Lista detallada línea por línea.
-    - Muchos archivos: Bloques de resumen con ejemplos en una sola línea.
-    """
-    total_skipped = len(by_snapshot) + len(by_size) + len(by_exclusion)
-
-    if total_skipped == 0:
-        return
-
-    # FORMATO DETALLADO (Pocos archivos)
-    if total_skipped < 5:
-        console.print()
-        for p in by_snapshot:
-            console.print(f"[yellow]Omitido (Ya tiene Snapshot):[/] {escape(p.name)}")
-        for p in by_exclusion:
-            console.print(
-                f"[dim yellow]Omitido (Excluido por Patron):[/] {escape(p.name)}"
-            )
-        for p in by_size:
-            console.print(f"[red]Omitido (Excede peso maximo):[/] {escape(p.name)}")
-        console.print()
-        return
-
-    # FORMATO CONSOLIDADO (Muchos archivos)
-
-    console.print(f"\n    Contenido omitido: ({total_skipped})")
-
-    def print_block(label: str, style: str, files: list[Path], current_patterns=None):
-        if not files:
-            return
-
-        count = len(files)
-
-        # Formateo de patrones (Para quitar el None y la lista cruda)
-        pat_str = ""
-        if current_patterns:
-            clean_list = ", ".join(current_patterns)
-            pat_str = f"[dim]({clean_list})[/dim]"
-
-        # Categoría, Cantidad y Patrones (si existen)
-        console.print(f"\t[bold {style}]{label}:[/] [bold white]{count}[/] {pat_str}")
-
-        # Mostramos hasta 3 ejemplos
-        limit = 3
-        for f in files[:limit]:
-            console.print(f"\t    [dim]{escape(f.as_posix())}[/dim]", highlight=False)
-
-        # Mostramos el resto. Si el resto es 1, lo mostramos.
-        remaining = count - limit
-        if remaining > 0:
-            if remaining == 1:
-                console.print(
-                    f"\t    [dim]{escape(files[-1].name)}[/dim]", highlight=False
-                )
-            else:
-                console.print(f"\t    [dim]{remaining} archivos mas...[/dim]")
-
-    print_block("Ya tienen Snapshot", "yellow", by_snapshot)
-    print_block("Excluidos por Patron", "yellow", by_exclusion, patterns)
-    print_block("Exceden peso maximo", "red", by_size)
-
-    console.print()
-
-
-def _resolver_target_paths(
-    target: Path, patterns: list[str], max_filesize_bytes: int
-) -> list[Path]:
-    """
-    Escanea el objetivo, aplica reglas y genera un reporte de omisiones.
-    """
-    found = []
-
-    # Listas para categorizar las omisiones
-    skipped_by_snapshot = []
-    skipped_by_size = []
-    skipped_by_exclusion = []
-
-    stats = {"total": 0, "snapshots": 0}
-
-    def has_snapshot(file_path: Path) -> bool:
-        filename_plus_ext = file_path.with_name(f"{file_path.name}.json.xz")
-        stem_plus_ext = file_path.with_name(f"{file_path.stem}.json.xz")
-        return filename_plus_ext.exists() or stem_plus_ext.exists()
-
-    with console.status(f"[dim]Escaneando {target}...[/dim]"):
-
-        def process_candidate(p: Path):
-            stats["total"] += 1
-            if p.name.endswith(".json.xz"):
-                stats["snapshots"] += 1
-
-            # Exclusión por Patrón (user config)
-            if is_excluded(p, patterns):
-                skipped_by_exclusion.append(p)
-                return
-
-            # Exclusión por Snapshot
-            if has_snapshot(p):
-                skipped_by_snapshot.append(p)
-                return
-
-            # Exclusión por Tamaño
-            if p.stat().st_size > max_filesize_bytes:
-                skipped_by_size.append(p)
-                return
-
-            # Si pasa todo, es un archivo válido
-            found.append(p)
-
-        if target.is_file():
-            process_candidate(target)
-        else:
-            for p in target.rglob("*"):
-                if p.is_file():
-                    process_candidate(p)
-
-    # Imprime el escaneo si un directorio
     if target.is_dir():
-        _print_scan_context(stats["total"], stats["snapshots"])
+        # Si es una carpeta, muestra lo que encontro.
+        DisplayUpload.announces_total_files_found(scan_report)
 
-    # Imprime el reporte.
-    _print_skip_report(
-        skipped_by_snapshot, skipped_by_size, skipped_by_exclusion, patterns
+    # Reporta la exclusion de un archivo o miles.
+    verbose = False if scan_report.total_files > 7 else True
+    DisplayUpload.show_skip_report(
+        scan_report,
+        verbose,
     )
+    print(f"\nprocessando {len(all_paths)} archivos")
 
-    return found
+    # _print_upload_summary(all_paths)
+
+    # if len(all_paths) > 7 and not force:
+    #     if not typer.confirm(f"\n¿Deseas procesar estos {len(all_paths)} archivos?"):
+    #         UI.info("Operación cancelada.")
+    #         return
+
+    # if not all_paths:
+    #     if target.is_dir():
+    #         UI.warn("No se encontraron archivos para procesar.")
+    #     raise typer.Exit(0)
+
+    # _print_upload_summary(all_paths)
+    # if len(all_paths) > 7 and not force:
+    #     if not typer.confirm(f"¿Deseas procesar estos {len(all_paths)} archivos?"):
+    #         return
+
+    # console.print(f"\n[bold cyan]Iniciando sesión:[/bold cyan] {profile_name}\n")
+    # with DatabaseSession(settings.database_path), TelegramSession(settings) as client:
+    #     from pyrogram.types import Chat, User
+
+    #     tg_chat = cast(Chat, client.get_chat(settings.chat_id))
+    #     chat_db, _ = TelegramChat.get_or_create_from_tg(tg_chat)
+    #     chunker = ChunkingService(work_dir=settings.worktable)
+    #     discovery = DiscoveryService(client)
+    #     uploader = UploadService(
+    #         client=client,
+    #         chunk_service=chunker,
+    #         upload_limit_rate_kbps=settings.upload_limit_rate_kbps,
+    #         max_filename_length=settings.max_filename_length,
+    #         discovery=discovery,
+    #     )
+    #     me = cast(User, client.get_me())
+
+    #     UI.info(
+    #         f"Destino: [bold cyan]{tg_chat.title or 'Privado'}[/] [dim](Id: {settings.chat_id})[/dim]"
+    #     )
+    #     for path in all_paths:
+    #         source = SourceFile.get_or_create_from_path(
+    #             path, settings.worktable
+    #         )  # TODO: avisar
+    #         job = Job.get_or_none(Job.source == source, Job.chat == chat_db)
+
+    #         if not job:
+    #             job = Job.create_contract(source, chat_db, me.is_premium, settings)
+    #             UI.info(f"Estrategia fijada: [bold]{job.strategy.value}[/]")
+    #             if job.strategy == Strategy.SINGLE:
+    #                 UI.info(f"[bold]Archivo único:[/bold] [blue]{path.name}[/blue]")
+    #             else:
+    #                 parts_count = discovery._get_expected_count(job)
+    #                 UI.info(
+    #                     f"[bold]Fragmentando en {parts_count} partes:[/bold] [blue]{path.name}[/blue]"
+    #                 )
+
+    #         report = discovery.investigate(job)
+    #         plan = PolicyExpert.determine_plan(report, settings.duplicate_policy)
+    #         if isinstance(plan, SkipPlan):
+    #             UI.info(f"[dim]{plan.reason}[/dim]")
+    #             if plan.is_already_fulfilled:
+    #                 job.set_uploaded()
+
+    #         elif isinstance(plan, PhysicalUploadPlan):
+    #             uploader.execute_physical_upload(job)
+
+    #         elif isinstance(plan, AskUserPlan):
+    #             if plan.state == AvailabilityState.REMOTE_RESTRICTED:
+    #                 # TODO: ¿Si existe en varios lugares?¿como sé cual es el mejor?
+    #                 if typer.confirm("Existe pero no tienes acceso. ¿Subir de nuevo?"):
+    #                     uploader.execute_physical_upload(job)
+    #             else:
+    #                 _handle_redundancy_interaction(job, uploader, plan)
+
+    #         SnapshotService.generate_snapshot(job)
 
 
-def _print_scan_context(total: int, snapshots: int):
-    """
-    Muestra un resumen rápido de lo encontrado en un directorio
-    """
-    content_files = total - snapshots
+# def _scan_and_filter(
+#     target: Path, patterns: list[str], max_filesize_bytes: int
+# ) -> list[Path]:
+#     """
+#     Escanea el objetivo, aplica reglas y genera un reporte de omisiones.
+#     """
+#     found = []
 
-    console.print()
+#     # Listas para categorizar las omisiones
+#     skipped_by_snapshot = []
+#     skipped_by_size = []
+#     skipped_by_exclusion = []
 
-    summary = (
-        f"\n[dim]Total archivos encontrado:[/dim] [bold]{total}[/bold] archivos  "
-        f"({content_files} contenido, {snapshots} snapshots)"
-    )
-    console.print(summary)
+#     stats = {"total": 0, "snapshots": 0}
+
+#     def has_snapshot(file_path: Path) -> bool:
+#         filename_plus_ext = file_path.with_name(f"{file_path.name}.json.xz")
+#         stem_plus_ext = file_path.with_name(f"{file_path.stem}.json.xz")
+#         return filename_plus_ext.exists() or stem_plus_ext.exists()
+
+#     with console.status(f"[dim]Escaneando {target}...[/dim]"):
+
+#         def process_candidate(p: Path):
+#             stats["total"] += 1
+#             if p.name.endswith(".json.xz"):
+#                 stats["snapshots"] += 1
+
+#             # Exclusión por Patrón (user config)
+#             if is_excluded(p, patterns):
+#                 skipped_by_exclusion.append(p)
+#                 return
+
+#             # Exclusión por Snapshot
+#             if has_snapshot(p):
+#                 skipped_by_snapshot.append(p)
+#                 return
+
+#             # Exclusión por Tamaño
+#             if p.stat().st_size > max_filesize_bytes:
+#                 skipped_by_size.append(p)
+#                 return
+
+#             # Si pasa todo, es un archivo válido
+#             found.append(p)
+
+#         if target.is_file():
+#             process_candidate(target)
+#         else:
+#             for p in target.rglob("*"):
+#                 if p.is_file():
+#                     process_candidate(p)
+
+#     # Imprime el escaneo si un directorio
+#     if target.is_dir():
+#         _print_scan_context(stats["total"], stats["snapshots"])
+
+#     # Imprime el reporte.
+#     _print_skip_report(
+#         skipped_by_snapshot, skipped_by_size, skipped_by_exclusion, patterns
+#     )
+
+#     return found
 
 
 def _print_upload_summary(paths: list[Path]):
@@ -307,8 +294,6 @@ def _print_upload_summary(paths: list[Path]):
     size_str = f"{total_size_mb:.2f} MB"
     if total_size_mb > 1024:
         size_str = f"{total_size_mb/1024:.2f} GB"
-
-    console.print("Preparación de Subida...\n")
 
     string_files = "Archivos" if len(paths) > 1 else "Archivo"
     string_size = "Peso total" if len(paths) > 1 else "Peso"

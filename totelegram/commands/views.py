@@ -9,7 +9,7 @@ from rich.table import Table
 from totelegram.console import UI, console
 from totelegram.core.consts import COLORS, Commands
 from totelegram.core.registry import Profile, SettingsManager
-from totelegram.core.schemas import ChatMatch
+from totelegram.core.schemas import ChatMatch, ScanReport
 from totelegram.core.setting import AccessLevel, Settings
 from totelegram.store.database import DatabaseSession
 from totelegram.store.models import TelegramChat
@@ -41,6 +41,104 @@ def get_friendly_chat_name(chat_id: str, database_path: str) -> str:
         except Exception:
             return chat_id
     return chat_id
+
+
+class DisplayUpload:
+    @staticmethod
+    def announces_total_files_found(scan_report: ScanReport) -> None:
+        summary = (
+            f"[dim]Se encontraron [bold]{scan_report.total_files}[/bold] archivos "
+            f"({scan_report.content_files} contenido, {len(scan_report.skipped_by_snapshot)} snapshots)"
+        )
+        UI.info(summary)
+
+    @classmethod
+    def _print_block(
+        cls, label: str, style: str, files: list[Path], current_patterns=None
+    ):
+        if not files:
+            return
+
+        count = len(files)
+
+        # Formateo de patrones (Para quitar el None y la lista cruda)
+        pat_str = ""
+        if current_patterns:
+            clean_list = ", ".join(current_patterns)
+            pat_str = f"[dim]({clean_list})[/dim]"
+
+        # Categoría, Cantidad y Patrones (si existen)
+        console.print(f"  [bold {style}]{label}:[/] [bold white]{count}[/] {pat_str}")
+
+        # Mostramos hasta 3 ejemplos
+        limit = 3
+        for f in files[:limit]:
+            console.print(f"     [dim]{escape(f.as_posix())}[/dim]", highlight=False)
+
+        # Mostramos el resto. Si el resto es 1, lo mostramos.
+        remaining = count - limit
+        if remaining > 0:
+            if remaining == 1:
+                console.print(
+                    f"     [dim]{escape(files[-1].name)}[/dim]", highlight=False
+                )
+            else:
+                console.print(f"     [dim]{remaining} archivos mas...[/dim]")
+
+    @classmethod
+    def show_skip_report(
+        cls,
+        scan_report: ScanReport,
+        verbose: bool,
+    ) -> None:
+        """
+        Muestra un reporte.
+        - Pocos archivos (<5): Lista detallada línea por línea.
+        - Muchos archivos: Bloques de resumen con ejemplos en una sola línea.
+        """
+        by_snapshot = scan_report.skipped_by_snapshot
+        by_size = scan_report.skipped_by_size
+        by_exclusion = scan_report.skipped_by_exclusion
+        patterns = scan_report.exclusion_patterns
+
+        total_skipped = len(by_snapshot) + len(by_size) + len(by_exclusion)
+
+        if total_skipped == 0:
+            return
+
+        # FORMATO DETALLADO (Pocos archivos)
+        if verbose:
+            console.print()
+            for idx, p in enumerate(by_snapshot):
+                if idx > 5:
+                    console.print(f"...")
+                    break
+                console.print(
+                    f"[yellow]Omitido (Ya tiene Snapshot):[/] {escape(p.name)}"
+                )
+            for idx, p in enumerate(by_exclusion):
+                if idx > 5:
+                    console.print(f"...")
+                    break
+                console.print(
+                    f"[dim yellow]Omitido (Excluido por Patron):[/] {escape(p.name)}"
+                )
+            for idx, p in enumerate(by_size):
+                if idx > 5:
+                    console.print(f"...")
+                    break
+                console.print(f"[red]Omitido (Excede peso maximo):[/] {escape(p.name)}")
+
+        # FORMATO CONSOLIDADO (Muchos archivos)
+        else:
+            is_unique = total_skipped == 1
+            if is_unique:
+                UI.info(f"Se excluyo un archivo por:")
+            else:
+                UI.info(f"Se excluyeron {total_skipped} archivos por:")
+            cls._print_block("Ya tienen Snapshot", "yellow", by_snapshot)
+            cls._print_block("Patron de exclusion", "yellow", by_exclusion, patterns)
+            cls._print_block("Exceden peso maximo", "red", by_size)
 
 
 class DisplayConfig:

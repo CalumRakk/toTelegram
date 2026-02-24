@@ -1,5 +1,6 @@
 from datetime import datetime
 from enum import Enum
+from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List, Optional
 
 if TYPE_CHECKING:
@@ -172,6 +173,7 @@ class ChatResolution(BaseModel):
                 unique_matches.append(m)
         return unique_matches
 
+
 class IntentType(str, Enum):
     DIRECT_ID = "direct_id"
     DIRECT_USERNAME = "direct_username"
@@ -191,3 +193,38 @@ class IntentType(str, Enum):
     @property
     def is_search(self) -> bool:
         return self == IntentType.SEARCH_QUERY
+
+
+class ScanReport(BaseModel):
+    found: list[Path] = Field(
+        default_factory=list, description="Archivos validos para subir."
+    )
+    skipped_by_snapshot: list[Path] = Field(
+        default_factory=list, description="Archivos que son un snapshot."
+    )
+    skipped_by_size: list[Path] = Field(
+        default_factory=list, description="Archivos demasiado grandes."
+    )
+    skipped_by_exclusion: list[Path] = Field(
+        default_factory=list,
+        description="Archivos excluidos por patron de exclusión.",
+    )
+    exclusion_patterns: list[str] = Field(default_factory=list)
+
+    @property
+    def total_skipped(self) -> int:
+        return (
+            len(self.skipped_by_snapshot)
+            + len(self.skipped_by_size)
+            + len(self.skipped_by_exclusion)
+        )
+
+    @property
+    def total_files(self) -> int:
+        """Devuelve el total de archivos encontrados."""
+        return len(self.found) + self.total_skipped
+
+    @property
+    def content_files(self) -> int:
+        """Devuelve el total de archivos encontrados que no son snapshots."""
+        return self.total_files - len(self.skipped_by_snapshot)
