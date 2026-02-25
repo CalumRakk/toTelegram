@@ -35,6 +35,7 @@ class SettingsManager:
         self.worktable = worktable
         self.settings_active_path = self.worktable / "active_profile_name"
         self.profiles_dir = self.worktable / "profiles"
+        self.inventories_dir = self.worktable / "inventories"
         self.database_path = self.worktable / f"{self.worktable.name}.sqlite"
 
     def _get_all_profile_names(self) -> List[str]:

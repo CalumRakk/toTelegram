@@ -9,10 +9,7 @@ db_proxy = peewee.Proxy()
 
 
 class DatabaseSession:
-    """
-    Administrador de contexto para la base de datos SQLite.
-    Incluye una protección para evitar escrituras accidentales en producción durante tests.
-    """
+    """Administrador de contexto para la base de datos. Encapsula la inicializacion, creacion de tablas y su cierre."""
 
     def __init__(self, db_path: Union[Union[str, Path], Literal[":memory:"]]):
         self.db_path = Path(db_path) if db_path != ":memory:" else db_path

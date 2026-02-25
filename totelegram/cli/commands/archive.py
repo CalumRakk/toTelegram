@@ -1,24 +1,23 @@
 from pathlib import Path
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 import typer
 from rich.console import Console
 
-from totelegram.cli.commands.profile import list_profiles
+from totelegram.cli.commands.config import _get_config_tools
 from totelegram.cli.ui.console import UI
-from totelegram.common.enums import DuplicatePolicy
-from totelegram.core.plans import AskUserPlan, PhysicalUploadPlan, SkipPlan
+from totelegram.common.consts import VALUE_NOT_SET, Commands
+from totelegram.common.schemas import CLIState
+from totelegram.logic.archive_archive import ArchiveService
 from totelegram.logic.chunker import ChunkingService
 from totelegram.logic.discovery import DiscoveryService
-from totelegram.logic.discovery_archive import ArchiveDiscoveryService
-from totelegram.logic.snapshot import SnapshotService
 from totelegram.logic.uploader import UploadService
 from totelegram.manager.database import DatabaseSession
 from totelegram.manager.models import Job, TelegramChat
-from totelegram.manager.registry import ProfileManager
-from totelegram.manager.setting import get_settings
 from totelegram.telegram.client import TelegramSession
-from totelegram.telegram.policy import PolicyExpert
+
+if TYPE_CHECKING:
+    from pyrogram.types import Chat, User
 
 console = Console()
 app = typer.Typer(help="Comandos para archivado de carpetas (Modo Cinta).")
@@ -30,95 +29,133 @@ def archive_folder(
     folder_path: Path = typer.Argument(
         ..., exists=True, file_okay=False, dir_okay=True, help="Carpeta a archivar."
     ),
-    policy: DuplicatePolicy = typer.Option(
-        DuplicatePolicy.SMART,
-        "--policy",
-        "-p",
-        help="Política frente a carpetas ya existentes en el ecosistema.",
+    force: bool = typer.Option(
+        False,
+        "--force",
+        "-f",
+        help="Ignora la red y fuerza la subida física de los bytes.",
     ),
 ):
     """
     Convierte una carpeta en una Cinta de Datos (TAR) y la distribuye en volúmenes.
     """
-    try:
-        pm: ProfileManager = ctx.obj
-        profile_name = pm.resolve_name()
-        settings = get_settings(pm.get_path(profile_name))
-    except ValueError as e:
-        UI.error(f"Error de perfil: {e}")
-        list_profiles(ctx, quiet=True)
-        raise typer.Exit(code=1)
+    state: CLIState = ctx.obj
+    profile_name, service = _get_config_tools(ctx)
+
+    settings = state.manager.get_settings(profile_name)
+
+    if settings.chat_id == VALUE_NOT_SET:
+        UI.error("El chat destino no está configurado.")
+        commands = [
+            f"{Commands.CONFIG_SET} chat_id <ID>",
+            f"{Commands.CONFIG_SEARCH} <QUERY>",
+        ]
+        UI.tip("puedes configurarlo usando uno de estos comandos:", commands)
+        raise typer.Exit(1)
 
     console.print(
         f"\n[bold cyan]Iniciando Operación de Archivado:[/bold cyan] {folder_path.name}\n"
     )
 
-    with DatabaseSession(settings.database_path), TelegramSession(settings) as client:
-        archive_service = ArchiveDiscoveryService(
-            root_path=folder_path,
-            work_dir=settings.worktable,
-            exclusion_patterns=settings.exclude_files + settings.exclude_files_default,
-        )
+    with DatabaseSession(state.manager.database_path), TelegramSession.from_profile(
+        profile_name, state.manager
+    ) as client:
 
-        with console.status(
-            "[bold green]Generando inventario y huella digital (T0)...[/bold green]"
-        ):
-            source, is_resume, is_ok = archive_service.discover_or_create_session()
+        with UI.loading("Sincronizando con Telegram..."):
+            tg_chat = cast("Chat", client.get_chat(settings.chat_id))
+            me = cast("User", client.get_me())
 
-        if is_resume and is_ok:
-            UI.info(f"Sesión recuperada. Huella: [dim]{source.md5sum[:8]}...[/dim]")
-            job = source.jobs.get()  # type: ignore
-        elif is_resume is False and is_ok:
-            assert source.inventory is not None
-            UI.success(
-                f"Inventario creado. Huella: [bold green]{source.md5sum[:8]}...[/bold green]"
+        UI.success(f"Conectado como [bold]{me.first_name or me.username}[/]")
+        UI.info(f"Destino: [bold cyan]{tg_chat.title}[/] [dim](ID: {tg_chat.id})[/dim]")
+
+        archive_service = ArchiveService()
+        inventories_dir = state.manager.inventories_dir
+        exclusion_patterns = settings.all_exclusion_patterns()
+        with UI.loading("Analizando estructura de la carpeta..."):
+            source, is_resume, is_modified = archive_service.get_or_create_session(
+                folder_path, inventories_dir, exclusion_patterns
             )
-            UI.info(
-                f"Contenido: {source.inventory.total_files} archivos, {source.size / (1024*1024):.2f} MB"
-            )
-            from pyrogram.types import Chat, User
 
-            tg_chat = cast(Chat, client.get_chat(settings.chat_id))
-            chat_db, _ = TelegramChat.get_or_create_from_tg(tg_chat)
-            me = cast(User, client.get_me())
-
-            job = Job.create_contract(source, chat_db, me.is_premium, settings)
+        if is_resume:
+            if is_modified:
+                UI.error("¡Cinta Comprometida! La carpeta ha sido modificada.")
+                UI.info(f"Ruta: [dim]{folder_path}[/dim]")
+                UI.warn(
+                    "Para garantizar la integridad, no se puede reanudar una cinta alterada."
+                )
+                UI.tip(
+                    "Si deseas archivar la nueva versión, debes eliminar el rastro anterior:",
+                    commands=f"totelegram profile delete-source (proximamente) o limpiar la DB.",
+                )
+                raise typer.Exit(1)
+            else:
+                UI.success(
+                    "Estructura válida detectada. Reanudando proceso existente..."
+                )
         else:
-            UI.error("Error al crear el inventario.")
-            # TODO: Mejorar el manejo de errores
-            raise typer.Exit(code=1)
+            UI.success(f"Nueva carpeta detectada. Firma: [bold]{source.md5sum}[/]")
 
+        chat_db, _ = TelegramChat.get_or_create_from_chat(tg_chat)
+        job = Job.get_for_source_in_chat(source, chat_db)
+        if not job:
+            tg_limit = (
+                settings.tg_max_size_premium
+                if me.is_premium
+                else settings.tg_max_size_normal
+            )
+            job = Job.create_contract(source, chat_db, me.is_premium, tg_limit)
+            UI.info(
+                f"Contrato de archivado creado (Límite: {tg_limit / (1024*1024):.0f}MB por vol)."
+            )
+
+        chunker = ChunkingService(work_dir=state.manager.worktable)
         discovery = DiscoveryService(client)
-        chunker = ChunkingService(work_dir=settings.worktable)
 
         if job.payloads.count() == 0:
             chunker.process_job(job)
 
-        expected_volumes = job.payloads.count()
-        UI.info(
-            f"Estrategia: [bold]Cinta Virtual[/bold] en {expected_volumes} volúmenes."
-        )
-
-        report = discovery.investigate(job)
-        plan = PolicyExpert.resolve_plan(report, policy)
         uploader = UploadService(
             client=client,
             chunk_service=chunker,
             upload_limit_rate_kbps=settings.upload_limit_rate_kbps,
+            max_filename_length=settings.MAX_FILENAME_LENGTH,
             discovery=discovery,
         )
 
-        if isinstance(plan, SkipPlan):
-            UI.info(f"[yellow]Omitido:[/yellow] {plan.reason}")
-            if plan.is_already_fulfilled:
-                job.set_uploaded()
+        # discovery_report = discovery.investigate(job)
 
-        elif isinstance(plan, PhysicalUploadPlan):
-            uploader.execute_upload_strategy(job)
+        # if force:
+        #     UI.warn("Subida física forzada (--force).")
+        #     uploader.execute_upload_strategy(job)
+        # else:
+        #     if discovery_report.state == AvailabilityState.SYSTEM_NEW:
+        #         UI.info("Iniciando subida de nuevos volúmenes...")
+        #         uploader.execute_upload_strategy(job)
 
-        elif isinstance(plan, AskUserPlan):
-            if typer.confirm("El archivo ya existe en la red. ¿Re-subir forzosamente?"):
-                uploader.execute_upload_strategy(job)
+        #     elif discovery_report.state == AvailabilityState.FULFILLED:
+        #         UI.success(
+        #             "¡Operación completada! Todos los volúmenes ya están en el destino."
+        #         )
+        #         job.set_uploaded()
 
-        SnapshotService.generate_snapshot(job)
-        UI.success("Manifiesto de recuperación generado correctamente.")
+        #     elif discovery_report.state in [
+        #         AvailabilityState.REMOTE_MIRROR,
+        #         AvailabilityState.REMOTE_PUZZLE,
+        #     ]:
+        #         UI.info(
+        #             "Carpeta encontrada en el ecosistema. Clonando volúmenes (Smart Forward)..."
+        #         )
+        #         if discovery_report.remotes:
+        #             uploader.execute_smart_forward(job, discovery_report.remotes)
+        #         else:
+        #             UI.error("Error al localizar las piezas en la red.")
+
+        #     elif discovery_report.state == AvailabilityState.REMOTE_RESTRICTED:
+        #         UI.warn(
+        #             "Se detectaron registros pero los archivos no son accesibles. Re-subiendo..."
+        #         )
+        #         uploader.execute_physical_upload(job)
+
+        # # Generar Snapshot final
+        # SnapshotService.generate_snapshot(job)
+        # UI.success("Proceso de archivado finalizado correctamente.")

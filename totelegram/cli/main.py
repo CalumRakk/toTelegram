@@ -70,7 +70,7 @@ def main(
     profile_name = use or config_manager.get_active_profile_name()
     if debug is True:
         setup_logging("debug_execution.log", logging.DEBUG)
-        UI.info(f"\n[bold yellow]MODO DEBUG ACTIVADO[/]")
+        UI.info(f"[bold yellow]MODO DEBUG ACTIVADO[/]")
     else:
         # setup_logging("execution.log", logging.INFO)
         pass

@@ -106,7 +106,7 @@ class TestDiscoveryInvestigation(unittest.TestCase):
             json_metadata={},
         )
 
-        # El usuario intenta subir el mismo archivo al mismo chat.
+        # El usuario intenta subir el mismo a otro chat al que tenemos acceso.
         job_new = Job.create_contract(source, self.chat_target, False, 100)
 
         self._simulate_jit(success=True)
