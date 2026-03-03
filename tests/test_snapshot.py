@@ -4,10 +4,9 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from peewee import SqliteDatabase
-
 from totelegram.common.enums import Strategy
 from totelegram.logic.snapshot import SnapshotService
+from totelegram.manager.database import DatabaseSession
 from totelegram.manager.models import (
     Job,
     Payload,
@@ -15,28 +14,24 @@ from totelegram.manager.models import (
     SourceFile,
     TelegramChat,
     TelegramUser,
-    db_proxy,
 )
 
 
 class TestSnapshotIntegrity(unittest.TestCase):
     def setUp(self):
-        # DB en memoria para tests
-        self.test_db = SqliteDatabase(":memory:")
-        db_proxy.initialize(self.test_db)
-        self.test_db.create_tables(
-            [SourceFile, Job, TelegramChat, Payload, RemotePayload, TelegramUser]
-        )
+
+        self.test_db = DatabaseSession(":memory:")
+        self.test_db.start()
 
         self.temp_dir = TemporaryDirectory()
         self.base_path = Path(self.temp_dir.name)
 
     def tearDown(self):
         self.temp_dir.cleanup()
+        self.test_db.close()
 
     def test_rehydration_seed_completeness(self):
         """Verifica que el manifiesto contenga todo para reconstruir la DB."""
-        # 1. Crear entorno de datos
         chat = TelegramChat.create(id=-1001, title="Test Chat", type="channel")
         user = TelegramUser.create(id=123, first_name="Tester")
 
@@ -51,7 +46,6 @@ class TestSnapshotIntegrity(unittest.TestCase):
             mimetype="video/mp4",
         )
 
-        # Simulamos un Job ya configurado (ADR-002)
         from totelegram.common.schemas import StrategyConfig
 
         config = StrategyConfig(
@@ -85,27 +79,21 @@ class TestSnapshotIntegrity(unittest.TestCase):
             json_metadata=json.dumps(fake_msg),
         )
 
-        # 2. Ejecutar generador
-        manifest = SnapshotService.generate_snapshot(job)
+        SnapshotService.generate_snapshot(job)
 
-        # 3. Validar archivo físico
+        # Verificamos que el manifiesta se haya formado bien.
         snapshot_file = file_path.with_name(f"{file_path.name}.json.xz")
         self.assertTrue(snapshot_file.exists())
-
-        # 4. Validar contenido de rehidratación
         with lzma.open(snapshot_file, "rt") as f:
             data = json.load(f)
 
-            # ¿Están los campos de reconstrucción de Job?
             self.assertEqual(data["chunk_size"], 500)
             self.assertEqual(data["strategy"], "pieces-file")
 
-            # ¿Están los campos de reconstrucción de Payload?
             part = data["parts"][0]
             self.assertEqual(part["part_md5sum"], "part_md5")
             self.assertEqual(part["message_id"], 99)
 
-            # ¿Está la identidad del dueño?
             self.assertEqual(data["owner_id"], 123)
 
 

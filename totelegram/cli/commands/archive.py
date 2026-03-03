@@ -7,10 +7,12 @@ from rich.console import Console
 from totelegram.cli.commands.config import _get_config_tools
 from totelegram.cli.ui.console import UI
 from totelegram.common.consts import VALUE_NOT_SET, Commands
+from totelegram.common.enums import AvailabilityState
 from totelegram.common.schemas import CLIState
 from totelegram.logic.archive_archive import ArchiveService
 from totelegram.logic.chunker import ChunkingService
 from totelegram.logic.discovery import DiscoveryService
+from totelegram.logic.snapshot import SnapshotService
 from totelegram.logic.uploader import UploadService
 from totelegram.manager.database import DatabaseSession
 from totelegram.manager.models import Job, TelegramChat
@@ -122,40 +124,40 @@ def archive_folder(
             discovery=discovery,
         )
 
-        # discovery_report = discovery.investigate(job)
+        discovery_report = discovery.investigate(job)
 
-        # if force:
-        #     UI.warn("Subida física forzada (--force).")
-        #     uploader.execute_upload_strategy(job)
-        # else:
-        #     if discovery_report.state == AvailabilityState.SYSTEM_NEW:
-        #         UI.info("Iniciando subida de nuevos volúmenes...")
-        #         uploader.execute_upload_strategy(job)
+        if force:
+            UI.warn("Subida física forzada (--force).")
+            uploader.execute_upload_strategy(job)
+        else:
+            if discovery_report.state == AvailabilityState.SYSTEM_NEW:
+                UI.info("Iniciando subida de nuevos volúmenes...")
+                uploader.execute_upload_strategy(job)
 
-        #     elif discovery_report.state == AvailabilityState.FULFILLED:
-        #         UI.success(
-        #             "¡Operación completada! Todos los volúmenes ya están en el destino."
-        #         )
-        #         job.set_uploaded()
+            elif discovery_report.state == AvailabilityState.FULFILLED:
+                UI.success(
+                    "¡Operación completada! Todos los volúmenes ya están en el destino."
+                )
+                job.set_uploaded()
 
-        #     elif discovery_report.state in [
-        #         AvailabilityState.REMOTE_MIRROR,
-        #         AvailabilityState.REMOTE_PUZZLE,
-        #     ]:
-        #         UI.info(
-        #             "Carpeta encontrada en el ecosistema. Clonando volúmenes (Smart Forward)..."
-        #         )
-        #         if discovery_report.remotes:
-        #             uploader.execute_smart_forward(job, discovery_report.remotes)
-        #         else:
-        #             UI.error("Error al localizar las piezas en la red.")
+            elif discovery_report.state in [
+                AvailabilityState.REMOTE_MIRROR,
+                AvailabilityState.REMOTE_PUZZLE,
+            ]:
+                UI.info(
+                    "Carpeta encontrada en el ecosistema. Clonando volúmenes (Smart Forward)..."
+                )
+                if discovery_report.remotes:
+                    uploader.execute_smart_forward(job, discovery_report.remotes)
+                else:
+                    UI.error("Error al localizar las piezas en la red.")
 
-        #     elif discovery_report.state == AvailabilityState.REMOTE_RESTRICTED:
-        #         UI.warn(
-        #             "Se detectaron registros pero los archivos no son accesibles. Re-subiendo..."
-        #         )
-        #         uploader.execute_physical_upload(job)
+            elif discovery_report.state == AvailabilityState.REMOTE_RESTRICTED:
+                UI.warn(
+                    "Se detectaron registros pero los archivos no son accesibles. Re-subiendo..."
+                )
+                uploader.execute_physical_upload(job)
 
-        # # Generar Snapshot final
-        # SnapshotService.generate_snapshot(job)
-        # UI.success("Proceso de archivado finalizado correctamente.")
+        # Generar Snapshot final
+        SnapshotService.generate_snapshot(job)
+        UI.success("Proceso de archivado finalizado correctamente.")

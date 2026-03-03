@@ -1,7 +1,8 @@
 import logging
-import math
 from pathlib import Path
 from typing import List, Tuple, Union
+
+import tartape
 
 from totelegram.common.enums import SourceType, Strategy
 from totelegram.common.utils import create_md5sum_by_hashlib
@@ -139,41 +140,6 @@ class ChunkingService:
         else:
             return self._process_physical_file(job)
 
-    def _plan_virtual_volumes(self, job: Job) -> List[Payload]:
-        """
-        Crea 'Promesas de Volumen' en la DB usando identificadores virtuales.
-        """
-        total_size = job.source.size
-        limit = job.config.tg_max_size
-        num_volumes = math.ceil(total_size / limit)
-
-        logger.info(
-            f"Planificando {num_volumes} volúmenes virtuales para carpeta: {job.source.path_str}"
-        )
-
-        payloads = []
-        for i in range(num_volumes):
-            start_offset = i * limit
-            current_size = min(limit, total_size - start_offset)
-
-            # Identificador virtual para que el Uploader sepa qué hacer
-            virtual_path = f"virtual://{job.id}/vol_{i}"
-
-            # MD5 Temporal (Placeholder determinista)
-            # Se actualizará con el valor real al finalizar la subida del volumen
-            pending_md5 = f"PENDING:{job.source.md5sum}:{i}"
-
-            payload = Payload.create(
-                job=job,
-                sequence_index=i,
-                temp_path=virtual_path,
-                md5sum=pending_md5,
-                size=current_size,
-            )
-            payloads.append(payload)
-
-        return payloads
-
     def _process_physical_file(self, job: Job) -> List[Payload]:
         """
         Procesa un Job y devuelve una lista de Payloads listos para ser subidos.
@@ -227,3 +193,30 @@ class ChunkingService:
             raise Exception(
                 "Error de integridad: La pieza re-generada no coincide con el registro original."
             )
+
+    def _plan_virtual_volumes(self, job: Job) -> List[Payload]:
+        if not job.source.inventory:
+            raise ValueError("El Job necesita un inventario.")
+
+        tape = tartape.open(job.source.path_str)
+        limit = job.config.tg_max_size
+
+        logger.info(f"Planificando volúmenes con TarTape para: {job.source.path_str}")
+
+        payloads = []
+        for vol_idx, (volume_stream, manifest) in enumerate(
+            tape.iter_volumes(size=limit)
+        ):
+
+            virtual_path = f"virtual://{job.id}/vol_{vol_idx}"
+
+            payload = Payload.create(
+                job=job,
+                sequence_index=vol_idx,
+                temp_path=virtual_path,
+                md5sum=f"PENDING:{tape.fingerprint}:{vol_idx}",
+                size=volume_stream.size,
+            )
+            payloads.append(payload)
+
+        return payloads
