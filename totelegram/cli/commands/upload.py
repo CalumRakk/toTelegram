@@ -7,16 +7,14 @@ from totelegram.cli.commands.config import _get_config_tools, handle_config_erro
 from totelegram.cli.ui.console import UI, console
 from totelegram.cli.ui.views import DisplayUpload
 from totelegram.common.consts import VALUE_NOT_SET, Commands
-from totelegram.common.enums import AvailabilityState, Strategy
+from totelegram.common.enums import Strategy
 from totelegram.common.schemas import CLIState, ScanReport
 from totelegram.common.utils import is_excluded
 from totelegram.logic.chunker import ChunkingService
 from totelegram.logic.discovery import DiscoveryService
 from totelegram.logic.snapshot import SnapshotService
 from totelegram.logic.uploader import UploadService
-from totelegram.manager.database import DatabaseSession
 from totelegram.manager.models import Job, SourceFile, TelegramChat
-from totelegram.telegram.client import TelegramSession
 
 if TYPE_CHECKING:
     from pyrogram import Client  # type: ignore
@@ -135,9 +133,7 @@ def upload_file(
 
     UI.info(f"[dim]Procesando {len(scan_report.found)} archivos[/dim]")
 
-    with DatabaseSession(state.manager.database_path), TelegramSession.from_profile(
-        profile_name, state.manager
-    ) as client:
+    with state.scope() as client:
 
         with UI.loading("Sincronizando con Telegram..."):
             tg_chat = cast("Chat", client.get_chat(settings.chat_id))
@@ -180,30 +176,8 @@ def upload_file(
 
             discovery_report = discovery.investigate(job)
             if force:
-                UI.warn(f"Subida física forzada: [dim]{path.name}[/]")
-                uploader.execute_physical_upload(job)
-                SnapshotService.generate_snapshot(job)
-                continue
-
-            if discovery_report.state == AvailabilityState.SYSTEM_NEW:
-                UI.info(f"Subiendo nuevo: [dim]{path.name}[/]")
-                uploader.execute_physical_upload(job)
-
-            elif discovery_report.state == AvailabilityState.FULFILLED:
-                UI.info(f"Omitido (Ya disponible): [dim]{path.name}[/]")
-                job.set_uploaded()
-
-            elif discovery_report.state in [
-                AvailabilityState.REMOTE_MIRROR,
-                AvailabilityState.REMOTE_PUZZLE,
-            ]:
-                UI.info(f"Clonando desde la red (Smart Forward): [dim]{path.name}[/]")
-                if discovery_report.remotes:
-                    uploader.execute_smart_forward(job, discovery_report.remotes)
-                else:
-                    UI.error("No se encontraron remotes para clonar.")
-            elif discovery_report.state == AvailabilityState.REMOTE_RESTRICTED:
-                UI.warn(f"Enlace roto en la red. Re-subiendo: [dim]{path.name}[/]")
-                uploader.execute_physical_upload(job)
+                uploader._execute_physical_upload(job)
+            else:
+                uploader.run(job, discovery_report)
 
             SnapshotService.generate_snapshot(job)

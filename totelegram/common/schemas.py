@@ -1,7 +1,8 @@
+from contextlib import contextmanager
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING, Dict, List, Optional
+from typing import TYPE_CHECKING, Dict, List, Optional, cast
 
 if TYPE_CHECKING:
     from pyrogram.types import Chat
@@ -84,6 +85,18 @@ class CLIState(BaseModel):
     is_debug: bool = False
 
     model_config = {"arbitrary_types_allowed": True}
+
+    @contextmanager
+    def scope(self):
+        """Unifica el ciclo de vida de la DB y la Sesión."""
+        from totelegram.manager.database import DatabaseSession
+        from totelegram.telegram.client import TelegramSession
+
+        profile_name = cast(str, self.manager.resolve_profile_name(self.profile_name))
+
+        with DatabaseSession(self.manager.database_path) as db:
+            with TelegramSession.from_profile(profile_name, self.manager) as client:
+                yield client
 
 
 class AccessStatus(str, Enum):

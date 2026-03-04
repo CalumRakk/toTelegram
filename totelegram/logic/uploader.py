@@ -1,7 +1,7 @@
 import logging
 from collections import defaultdict
 from pathlib import Path
-from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, cast
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple, cast
 
 import tartape
 from tartape import Tape
@@ -18,6 +18,7 @@ if TYPE_CHECKING:
 from rich.console import Console
 
 from totelegram.common.enums import (
+    AvailabilityState,
     Strategy,
 )
 from totelegram.common.streams import open_upload_source
@@ -77,6 +78,48 @@ class UploadService:
 
         me = cast("User", client.get_me())
         self.current_user = TelegramUser.get_or_create_from_tg(me)
+        self._dispatch_map: Dict[AvailabilityState, Callable[[Job, Any], None]] = {
+            AvailabilityState.SYSTEM_NEW: self._handle_new,
+            AvailabilityState.FULFILLED: self._handle_fulfilled,
+            AvailabilityState.REMOTE_MIRROR: self._handle_smart_forward_strategy,
+            AvailabilityState.REMOTE_PUZZLE: self._handle_smart_forward_strategy,
+            AvailabilityState.REMOTE_RESTRICTED: self._handle_restricted,
+        }
+
+    def run(self, job: Job, discovery_report: Any):
+        """
+        Punto único de entrada para ejecutar la estrategia según el reporte.
+        """
+        handler = self._dispatch_map.get(discovery_report.state)
+        if not handler:
+            raise NotImplementedError(
+                f"Estrategia para {discovery_report.state} no implementada."
+            )
+
+        handler(job, discovery_report)
+
+    def _handle_new(self, job: Job, report: Any):
+        UI.info("Iniciando subida de nuevos volúmenes...")
+        self.execute_upload_strategy(job)
+
+    def _handle_fulfilled(self, job: Job, report: Any):
+        UI.success("¡Operación completada! Todos los volúmenes ya están en el destino.")
+        job.set_uploaded()
+
+    def _handle_smart_forward_strategy(self, job: Job, report: Any):
+        UI.info(
+            "Carpeta encontrada en el ecosistema. Clonando volúmenes (Smart Forward)..."
+        )
+        if report.remotes:
+            self._execute_smart_forward(job, report.remotes)
+        else:
+            UI.error("Error al localizar las piezas en la red.")
+
+    def _handle_restricted(self, job: Job, report: Any):
+        UI.warn(
+            "Se detectaron registros pero los archivos no son accesibles. Re-subiendo..."
+        )
+        self.execute_upload_strategy(job)
 
     def execute_upload_strategy(self, job: Job):
         if job.payloads.count() == 0:
@@ -200,81 +243,7 @@ class UploadService:
             if is_chunk:
                 self._cleanup_temp_payload(path)
 
-    # def _upload_virtual_payload(
-    #     self, job: Job, payload: Payload, index: int, total: int
-    # ):
-    #     """
-    #     Maneja la subida de carpetas usando TarVolumeStream.
-    #     """
-    #     if not job.source.inventory:
-    #         raise ValueError(
-    #             "El Job es de tipo carpeta pero no tiene inventario asociado."
-    #         )
-    #     # Se ocupa la DB del inventario
-    #     # TODO: buscar una solucion para mejorar la necesita de la ruta de db tartape
-    #     tape = TarTape(index_path=str(job.source.inventory.db_path))
-
-    #     start_offset = payload.sequence_index * job.config.tg_max_size
-
-    #     total = TapeInspector.get_total_size(tape)
-    #     stream = TarVolume(
-    #         tape=tape,
-    #         start_offset=start_offset,
-    #         max_volume_size=payload.size,
-    #         total_tape_size=total,
-    #         vol_index=payload.sequence_index,
-    #     )
-
-    #     folder_name = Path(job.source.path_str).name
-    #     filename = "{root_name}.tar.{str(index + 1).zfill(3)}"
-    #     caption = f"Volumen {index + 1}/{total} de {folder_name}"
-
-    #     progress = UploadProgress(filename, is_chunk=True, part_index=index)
-
-    #     try:
-    #         tg_message = self.client.send_document(
-    #             chat_id=job.chat.id,
-    #             document=stream,  # type: ignore
-    #             file_name=filename,
-    #             caption=caption,
-    #             progress=progress,
-    #         )
-
-    #         real_md5, entries = stream.get_completed_files()
-
-    #         with db_proxy.atomic():
-    #             payload.md5sum = real_md5
-    #             payload.save()
-
-    #             RemotePayload.register_upload(
-    #                 payload=payload, tg_message=tg_message, owner=self.current_user
-    #             )
-
-    #             entries_to_create = []
-    #             for entry in entries:
-    #                 entries_to_create.append(
-    #                     {
-    #                         "source": job.source,
-    #                         "relative_path": entry["path"],
-    #                         "start_offset": entry["start_offset"],
-    #                         "end_offset": entry["end_offset"],
-    #                         "start_volume_index": entry["start_vol"],
-    #                         "end_volume_index": entry["end_vol"],
-    #                     }
-    #                 )
-
-    #             if entries_to_create:
-    #                 ArchiveEntry.insert_many(entries_to_create).execute()
-
-    #         logger.debug(f"Volumen virtual {index} subido y commiteado.")
-
-    #     except Exception as e:
-    #         logger.error(f"Fallo subiendo volumen virtual {index}: {e}")
-    #         raise e
-    #     finally:
-    #         stream.close()
-
-    def execute_smart_forward(self, job: Job, source_remotes: List[RemotePayload]):
+    def _execute_smart_forward(self, job: Job, source_remotes: List[RemotePayload]):
         """
         Reenvia de forma atomica los RemotePayloads específicados al chat de destino que contiene el job.
 
@@ -369,7 +338,7 @@ class UploadService:
                         pass
             raise e
 
-    def execute_physical_upload(self, job: Job):
+    def _execute_physical_upload(self, job: Job):
         """Realiza la subida fisica de un Job."""
         if job.payloads.count() == 0:
             payloads = self.chunker.process_job(job)

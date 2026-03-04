@@ -8,7 +8,6 @@ from rich.console import Console
 from totelegram.cli.commands.config import _get_config_tools
 from totelegram.cli.ui.console import UI
 from totelegram.common.consts import VALUE_NOT_SET, Commands
-from totelegram.common.enums import AvailabilityState
 from totelegram.common.schemas import CLIState
 from totelegram.logic.chunker import ChunkingService
 from totelegram.logic.discovery import DiscoveryService
@@ -70,8 +69,6 @@ def archive_folder(
         UI.success(f"Conectado como [bold]{me.first_name or me.username}[/]")
         UI.info(f"Destino: [bold cyan]{tg_chat.title}[/] [dim](ID: {tg_chat.id})[/dim]")
 
-        # archive_service = ArchiveService()
-        # inventories_dir = state.manager.inventories_dir
         exclusion_patterns = settings.all_exclusion_patterns()
         if not tartape.exists(folder_path):
             with UI.loading("Generando cinta..."):
@@ -128,39 +125,10 @@ def archive_folder(
         )
 
         discovery_report = discovery.investigate(job)
-
         if force:
-            UI.warn("Subida física forzada (--force).")
-            uploader.execute_upload_strategy(job)
+            uploader._execute_physical_upload(job)
         else:
-            if discovery_report.state == AvailabilityState.SYSTEM_NEW:
-                UI.info("Iniciando subida de nuevos volúmenes...")
-                uploader.execute_upload_strategy(job)
+            uploader.run(job, discovery_report)
 
-            elif discovery_report.state == AvailabilityState.FULFILLED:
-                UI.success(
-                    "¡Operación completada! Todos los volúmenes ya están en el destino."
-                )
-                job.set_uploaded()
-
-            elif discovery_report.state in [
-                AvailabilityState.REMOTE_MIRROR,
-                AvailabilityState.REMOTE_PUZZLE,
-            ]:
-                UI.info(
-                    "Carpeta encontrada en el ecosistema. Clonando volúmenes (Smart Forward)..."
-                )
-                if discovery_report.remotes:
-                    uploader.execute_smart_forward(job, discovery_report.remotes)
-                else:
-                    UI.error("Error al localizar las piezas en la red.")
-
-            elif discovery_report.state == AvailabilityState.REMOTE_RESTRICTED:
-                UI.warn(
-                    "Se detectaron registros pero los archivos no son accesibles. Re-subiendo..."
-                )
-                uploader.execute_physical_upload(job)
-
-        # Generar Snapshot final
         SnapshotService.generate_snapshot(job)
         UI.success("Proceso de archivado finalizado correctamente.")

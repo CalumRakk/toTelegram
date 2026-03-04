@@ -1,31 +1,23 @@
 # ADR 007: El Enfoque de "Cinta de Datos" para archivar Carpetas
 
 ## Estado
-Aceptado
+Aceptado (Evolucionado a orquestación vía `tartape`)
 
 ## Contexto
-Subir una carpeta a Telegram archivo por archivo presenta desafíos logísticos importantes. Si intentamos subir un proyecto con 10,000 archivos pequeños (como una carpeta de dependencias), saturamos la API de Telegram y perdemos la jerarquía de directorios. Además, gestionar la redundancia de cada pequeño archivo individual generaría un ruido innecesario en nuestra base de datos.
-
-Necesitamos una forma de transformar una estructura compleja de carpetas en algo que Telegram entienda bien, respetando la integridad del conjunto y asegurando que el usuario pueda recuperar su información incluso años después, sin depender exclusivamente de esta herramienta.
+Subir carpetas complejas (miles de archivos pequeños) a Telegram presenta retos logísticos: saturación de API, pérdida de jerarquía y ruido en la base de datos por el manejo individual de archivos. Necesitábamos transformar estructuras complejas en un flujo continuo y determinista.
 
 ## Decisión
-Hemos decidido tratar el archivamiento de carpetas no como una colección de archivos, sino como una **"Cinta de Datos Continua"** (formato `tar`) para preservar la jerarquía y optimizar la comunicación con la API de Telegram.
+Hemos decidido adoptar el **Enfoque de "Cinta de Datos"** utilizando la librería `tartape` como motor de serialización y segmentación.
 
-1.  **La Carpeta como un Todo:** En lugar de cajas separadas, convertimos toda la carpeta en un flujo único de información. Esto preserva nombres, rutas y permisos de forma nativa.
-2.  **Corte por Volúmenes:** Como Telegram tiene límites de tamaño (2GB o 4GB), cortaremos esa "cinta" de forma matemática en volúmenes numerados. Cada volumen es lo que finalmente se sube como un mensaje.
-3.  **Mapa de Navegación:** Generaremos un Manifiesto que actúe como un índice detallado. Este índice dirá exactamente en qué parte de la cinta se encuentra cada archivo (por ejemplo: "La tesis empieza en el byte 500 del Volumen 1 y termina en el Volumen 2").
-4.  **Prioridad a la Simplicidad:** Para mantener el proceso ágil, no buscaremos archivos duplicados dentro de la carpeta. La prioridad es crear una "foto fija" fiel y rápida de la estructura completa.
-5.  **Inmutabilidad Estricta del Escaneo:** El proceso se basa en un inventario estático realizado en el tiempo T0.
-    *   **Por qué:** Si permitiéramos añadir archivos durante el proceso, correríamos el riesgo del "Efecto Vacío". Si un usuario mueve un archivo de una subcarpeta aún no procesada a una ya procesada, el sistema lo ignoraría, creando un backup incompleto.
-    *   **Seguridad:** La rigidez del escaneo no es una limitación, sino una garantía de que el backup es una representación fiel y completa de lo que el usuario vio al pulsar "Enter".
-
-5.  **Autonomía de los Datos:** Al usar el formato `tar` estándar, garantizamos que el usuario sea el dueño real de su backup. Si une los archivos descargados (`.001`, `.002`...), obtendrá un archivo comprimido que puede abrir con cualquier software común.
+1.  **Cinta como Abstracción Única:** La carpeta se trata como un flujo continuo (`tar`). `tartape` encapsula la jerarquía, nombres y permisos, asegurando que el contenido sea independiente de `toTelegram`.
+2.  **Corte por Volúmenes Delegado:** La división física en volúmenes (`.tar.001`, etc.) y el tamaño de los mismos es gestionado internamente por `tartape`. `toTelegram` simplemente consume el iterador de volúmenes que la librería expone.
+3.  **Mapa de Navegación (Catálogo):** La generación del índice detallado de qué archivo vive en qué byte de qué volumen es responsabilidad de `tartape`. `toTelegram` persiste este catálogo en la base de datos para permitir búsquedas y recuperación eficiente.
+4.  **Inmutabilidad del Escaneo:** El proceso sigue siendo una "foto fija" en el tiempo T0. La rigidez no es un límite, sino una garantía de fidelidad del backup.
+5.  **Autonomía de los Datos:** Al usar el estándar `tar` gestionado por `tartape`, garantizamos que el usuario no queda atrapado en nuestra lógica; puede extraer su backup con cualquier herramienta estándar si une los volúmenes.
 
 ## Consecuencias
-*   **Positivas:**
-    *   **Limpieza Operativa:** Telegram recibe pocos mensajes grandes en lugar de miles de mensajes pequeños.
-    *   **Portabilidad:** El backup es universal y no depende de la lógica interna de `toTelegram` para ser extraído en el futuro.
-    *   **Resistencia a Fallos:** Si la subida se interrumpe, podemos retomar exactamente en el byte donde nos quedamos, sin repetir trabajo ya hecho.
-*   **Negativas:**
-    *   **Acceso Selectivo:** Para recuperar un solo archivo de 1KB, el sistema debe procesar el volumen completo que lo contiene (un costo asumible para un sistema de backup).
-    *   **Rigidez durante el proceso:** Si la carpeta cambia mientras se está "grabando la cinta", el proceso debe detenerse para evitar una copia inconsistente,  lo cual es un compromiso aceptable para una operación de "congelación".
+
+### Positivas
+*   **Limpieza Operativa:** Telegram recibe bloques grandes y optimizados. La lógica de segmentación se ha movido fuera de `toTelegram`, eliminando código crítico propenso a errores en nuestra base.
+*   **Portabilidad:** La estructura del backup sigue el estándar `tar`, garantizando que el usuario mantenga el control total sobre sus archivos a largo plazo.
+*   **Resiliencia:** Al delegar la lectura del flujo a `tartape`, podemos retomar subidas desde cualquier offset con mayor precisión técnica.
