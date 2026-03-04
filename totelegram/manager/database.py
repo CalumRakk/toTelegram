@@ -42,11 +42,12 @@ class DatabaseSession:
         self.db.connect()
 
         from totelegram.manager.models import (
-            ArchiveEntry,
             Job,
             Payload,
             RemotePayload,
             SourceFile,
+            TapeMember,
+            TapeMemberGPS,
             TelegramChat,
             TelegramUser,
         )
@@ -59,7 +60,8 @@ class DatabaseSession:
                 RemotePayload,
                 TelegramChat,
                 TelegramUser,
-                ArchiveEntry,
+                TapeMember,
+                TapeMemberGPS,
             ],
             safe=True,
         )

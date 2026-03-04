@@ -103,7 +103,7 @@ class FileChunker:
                 f.seek(start)
                 remaining = end - start
 
-                # Naming convention: nombre_original_1-5, nombre_original_2-5, etc.
+                # Naming convention: video.mp4_1-5, video.mp4_2-5, etc.
                 chunk_filename = f"{file_path.name}_{idx}-{total_parts}"
                 chunk_path = folder / chunk_filename
 
@@ -195,7 +195,7 @@ class ChunkingService:
             )
 
     def _plan_virtual_volumes(self, job: Job) -> List[Payload]:
-        if not job.source.inventory:
+        if not job.source.tape_catalog:
             raise ValueError("El Job necesita un inventario.")
 
         tape = tartape.open(job.source.path_str)
@@ -204,9 +204,7 @@ class ChunkingService:
         logger.info(f"Planificando volúmenes con TarTape para: {job.source.path_str}")
 
         payloads = []
-        for vol_idx, (volume_stream, manifest) in enumerate(
-            tape.iter_volumes(size=limit)
-        ):
+        for vol_idx, (volume_stream, _) in enumerate(tape.iter_volumes(size=limit)):
 
             virtual_path = f"virtual://{job.id}/vol_{vol_idx}"
 

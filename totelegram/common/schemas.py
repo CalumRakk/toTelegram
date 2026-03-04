@@ -68,13 +68,13 @@ class ProfileRegistry(BaseModel):
     profiles: Dict[str, str] = Field(default_factory=dict)
 
 
-class Inventory(BaseModel):
+class TapeCatalog(BaseModel):
     fingerprint: str
     total_size: int
     total_files: int
-    scan_date: float
-    scan_version: str
-    db_path: str
+    created_at: float
+    tartape_version: str
+    exclude_patterns: str
 
 
 class CLIState(BaseModel):

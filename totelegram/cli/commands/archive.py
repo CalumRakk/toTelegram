@@ -1,6 +1,7 @@
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
+import tartape
 import typer
 from rich.console import Console
 
@@ -9,13 +10,12 @@ from totelegram.cli.ui.console import UI
 from totelegram.common.consts import VALUE_NOT_SET, Commands
 from totelegram.common.enums import AvailabilityState
 from totelegram.common.schemas import CLIState
-from totelegram.logic.archive_archive import ArchiveService
 from totelegram.logic.chunker import ChunkingService
 from totelegram.logic.discovery import DiscoveryService
 from totelegram.logic.snapshot import SnapshotService
 from totelegram.logic.uploader import UploadService
 from totelegram.manager.database import DatabaseSession
-from totelegram.manager.models import Job, TelegramChat
+from totelegram.manager.models import Job, SourceFile, TelegramChat
 from totelegram.telegram.client import TelegramSession
 
 if TYPE_CHECKING:
@@ -70,16 +70,25 @@ def archive_folder(
         UI.success(f"Conectado como [bold]{me.first_name or me.username}[/]")
         UI.info(f"Destino: [bold cyan]{tg_chat.title}[/] [dim](ID: {tg_chat.id})[/dim]")
 
-        archive_service = ArchiveService()
-        inventories_dir = state.manager.inventories_dir
+        # archive_service = ArchiveService()
+        # inventories_dir = state.manager.inventories_dir
         exclusion_patterns = settings.all_exclusion_patterns()
-        with UI.loading("Analizando estructura de la carpeta..."):
-            source, is_resume, is_modified = archive_service.get_or_create_session(
-                folder_path, inventories_dir, exclusion_patterns
-            )
-
-        if is_resume:
-            if is_modified:
+        if not tartape.exists(folder_path):
+            with UI.loading("Generando cinta..."):
+                tape = tartape.create(
+                    folder_path,
+                    exclude=exclusion_patterns,
+                    calculate_hashes=True,
+                )
+                try:
+                    source = SourceFile.from_tape(folder_path, tape)
+                except Exception as e:
+                    tape.destroy()
+                    raise
+        else:
+            tape = tartape.open(folder_path)
+            source = SourceFile.get(SourceFile.md5sum == tape.fingerprint)
+            if not tape.verify():
                 UI.error("¡Cinta Comprometida! La carpeta ha sido modificada.")
                 UI.info(f"Ruta: [dim]{folder_path}[/dim]")
                 UI.warn(
@@ -90,12 +99,6 @@ def archive_folder(
                     commands=f"totelegram profile delete-source (proximamente) o limpiar la DB.",
                 )
                 raise typer.Exit(1)
-            else:
-                UI.success(
-                    "Estructura válida detectada. Reanudando proceso existente..."
-                )
-        else:
-            UI.success(f"Nueva carpeta detectada. Firma: [bold]{source.md5sum}[/]")
 
         chat_db, _ = TelegramChat.get_or_create_from_chat(tg_chat)
         job = Job.get_for_source_in_chat(source, chat_db)

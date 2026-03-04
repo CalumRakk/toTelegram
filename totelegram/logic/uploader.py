@@ -3,11 +3,13 @@ from collections import defaultdict
 from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, cast
 
-from tartape import TarTape
+import tartape
+from tartape import Tape
+from tartape.schemas import ManifestEntry
+
 from totelegram.cli.ui.console import UI
 from totelegram.common.utils import batched
 from totelegram.manager.database import db_proxy
-from totelegram.telegram.stream import TapeInspector, TarVolume
 
 if TYPE_CHECKING:
     from pyrogram import Client  # type: ignore
@@ -22,10 +24,11 @@ from totelegram.common.streams import open_upload_source
 from totelegram.logic.chunker import ChunkingService
 from totelegram.logic.discovery import DiscoveryService
 from totelegram.manager.models import (
-    ArchiveEntry,
     Job,
     Payload,
     RemotePayload,
+    SourceFile,
+    TapeMember,
     TelegramUser,
 )
 
@@ -76,34 +79,91 @@ class UploadService:
         self.current_user = TelegramUser.get_or_create_from_tg(me)
 
     def execute_upload_strategy(self, job: Job):
-        """
-        Despachador Principal: Decide si sube archivos físicos o volúmenes virtuales.
-        """
         if job.payloads.count() == 0:
             payloads = self.chunker.process_job(job)
         else:
             payloads = list(job.payloads.order_by(Payload.sequence_index))
 
-        count = len(payloads)
-        label = "volúmenes virtuales" if job.source.is_folder else "fragmentos"
-
-        if job.strategy == Strategy.SINGLE:
-            UI.info(f"Subiendo archivo único...")
+        if job.source.is_folder:
+            with tartape.open(job.source.path_str) as tape:
+                self._process_archive_volumes(job, payloads, tape)
         else:
-            UI.info(f"Iniciando subida de {count} {label}...")
-
-        for idx, payload in enumerate(payloads):
-            if RemotePayload.select().where(RemotePayload.payload == payload).exists():
-                logger.debug(f"Parte {idx} ya subida. Saltando.")
-                continue
-
-            if payload.temp_path and payload.temp_path.startswith("virtual://"):
-                self._upload_virtual_payload(job, payload, idx, count)
-            else:
-                self._upload_physical_payload(job, payload, idx, count)
+            for idx, payload in enumerate(payloads):
+                if (
+                    RemotePayload.select()
+                    .where(RemotePayload.payload == payload)
+                    .exists()
+                ):
+                    continue
+                self._upload_physical_payload(job, payload, idx, len(payloads))
 
         job.set_uploaded()
-        UI.success("Subida completa.")
+
+    def _process_archive_volumes(self, job: Job, payloads: List[Payload], tape: Tape):
+        fingerprint = job.source.md5sum
+        folder_name = Path(job.source.path_str).name
+        vol_size = job.config.tg_max_size
+        total_volumes = len(payloads)
+
+        naming_template = (
+            "{name}_{part}-{total}.tar"
+            if len(folder_name) <= self.max_filename_len
+            else fingerprint + "_{part}-{total}"
+        )
+        for v_idx, (volume, manifest) in enumerate(
+            tape.iter_volumes(size=vol_size, naming_template=naming_template)
+        ):
+            current_payload = payloads[v_idx]
+
+            if current_payload.remote_exists:
+                logger.debug(f"Volumen {v_idx + 1} ya está en Telegram. Saltando...")
+                continue
+
+            filename = f"{Path(job.source.path_str).name}.tar.{str(v_idx + 1).zfill(3)}"
+            progress = UploadProgress(filename, is_chunk=True, part_index=v_idx)
+
+            UI.info(f"Subiendo volumen {v_idx + 1}/{total_volumes}...")
+
+            try:
+                tg_message = cast(
+                    "Message",
+                    self.client.send_document(
+                        chat_id=job.chat.id,
+                        document=volume,  # type: ignore
+                        caption=f"Volumen {v_idx + 1} de {Path(job.source.path_str).name}",
+                        progress=progress,
+                    ),
+                )
+
+                self._commit_volume_success(
+                    job.source,
+                    current_payload,
+                    tg_message,
+                    manifest.entries,
+                    volume.md5sum,
+                )
+
+            except Exception as e:
+                logger.error(f"Fallo en volumen {v_idx + 1}: {e}")
+                raise e
+
+    def _commit_volume_success(
+        self,
+        source: SourceFile,
+        payload: Payload,
+        tg_message: "Message",
+        manifest: List[ManifestEntry],
+        md5sum: str,
+    ):
+        with db_proxy.atomic():
+            payload.md5sum = md5sum
+            payload.save(only=[Payload.md5sum])
+            RemotePayload.register_upload(
+                payload=payload, tg_message=tg_message, owner=self.current_user
+            )
+            TapeMember.register_manifest_entries(
+                source=source, payload=payload, entries=manifest
+            )
 
     def _upload_physical_payload(
         self, job: Job, payload: Payload, index: int, total: int
@@ -140,79 +200,79 @@ class UploadService:
             if is_chunk:
                 self._cleanup_temp_payload(path)
 
-    def _upload_virtual_payload(
-        self, job: Job, payload: Payload, index: int, total: int
-    ):
-        """
-        Maneja la subida de carpetas usando TarVolumeStream.
-        """
-        if not job.source.inventory:
-            raise ValueError(
-                "El Job es de tipo carpeta pero no tiene inventario asociado."
-            )
-        # Se ocupa la DB del inventario
-        # TODO: buscar una solucion para mejorar la necesita de la ruta de db tartape
-        tape = TarTape(index_path=str(job.source.inventory.db_path))
+    # def _upload_virtual_payload(
+    #     self, job: Job, payload: Payload, index: int, total: int
+    # ):
+    #     """
+    #     Maneja la subida de carpetas usando TarVolumeStream.
+    #     """
+    #     if not job.source.inventory:
+    #         raise ValueError(
+    #             "El Job es de tipo carpeta pero no tiene inventario asociado."
+    #         )
+    #     # Se ocupa la DB del inventario
+    #     # TODO: buscar una solucion para mejorar la necesita de la ruta de db tartape
+    #     tape = TarTape(index_path=str(job.source.inventory.db_path))
 
-        start_offset = payload.sequence_index * job.config.tg_max_size
+    #     start_offset = payload.sequence_index * job.config.tg_max_size
 
-        total = TapeInspector.get_total_size(tape)
-        stream = TarVolume(
-            tape=tape,
-            start_offset=start_offset,
-            max_volume_size=payload.size,
-            total_tape_size=total,
-            vol_index=payload.sequence_index,
-        )
+    #     total = TapeInspector.get_total_size(tape)
+    #     stream = TarVolume(
+    #         tape=tape,
+    #         start_offset=start_offset,
+    #         max_volume_size=payload.size,
+    #         total_tape_size=total,
+    #         vol_index=payload.sequence_index,
+    #     )
 
-        folder_name = Path(job.source.path_str).name
-        filename = f"{folder_name}.tar.{str(index + 1).zfill(3)}"
-        caption = f"Volumen {index + 1}/{total} de {folder_name}"
+    #     folder_name = Path(job.source.path_str).name
+    #     filename = "{root_name}.tar.{str(index + 1).zfill(3)}"
+    #     caption = f"Volumen {index + 1}/{total} de {folder_name}"
 
-        progress = UploadProgress(filename, is_chunk=True, part_index=index)
+    #     progress = UploadProgress(filename, is_chunk=True, part_index=index)
 
-        try:
-            tg_message = self.client.send_document(
-                chat_id=job.chat.id,
-                document=stream,  # type: ignore
-                file_name=filename,
-                caption=caption,
-                progress=progress,
-            )
+    #     try:
+    #         tg_message = self.client.send_document(
+    #             chat_id=job.chat.id,
+    #             document=stream,  # type: ignore
+    #             file_name=filename,
+    #             caption=caption,
+    #             progress=progress,
+    #         )
 
-            real_md5, entries = stream.get_completed_files()
+    #         real_md5, entries = stream.get_completed_files()
 
-            with db_proxy.atomic():
-                payload.md5sum = real_md5
-                payload.save()
+    #         with db_proxy.atomic():
+    #             payload.md5sum = real_md5
+    #             payload.save()
 
-                RemotePayload.register_upload(
-                    payload=payload, tg_message=tg_message, owner=self.current_user
-                )
+    #             RemotePayload.register_upload(
+    #                 payload=payload, tg_message=tg_message, owner=self.current_user
+    #             )
 
-                entries_to_create = []
-                for entry in entries:
-                    entries_to_create.append(
-                        {
-                            "source": job.source,
-                            "relative_path": entry["path"],
-                            "start_offset": entry["start_offset"],
-                            "end_offset": entry["end_offset"],
-                            "start_volume_index": entry["start_vol"],
-                            "end_volume_index": entry["end_vol"],
-                        }
-                    )
+    #             entries_to_create = []
+    #             for entry in entries:
+    #                 entries_to_create.append(
+    #                     {
+    #                         "source": job.source,
+    #                         "relative_path": entry["path"],
+    #                         "start_offset": entry["start_offset"],
+    #                         "end_offset": entry["end_offset"],
+    #                         "start_volume_index": entry["start_vol"],
+    #                         "end_volume_index": entry["end_vol"],
+    #                     }
+    #                 )
 
-                if entries_to_create:
-                    ArchiveEntry.insert_many(entries_to_create).execute()
+    #             if entries_to_create:
+    #                 ArchiveEntry.insert_many(entries_to_create).execute()
 
-            logger.debug(f"Volumen virtual {index} subido y commiteado.")
+    #         logger.debug(f"Volumen virtual {index} subido y commiteado.")
 
-        except Exception as e:
-            logger.error(f"Fallo subiendo volumen virtual {index}: {e}")
-            raise e
-        finally:
-            stream.close()
+    #     except Exception as e:
+    #         logger.error(f"Fallo subiendo volumen virtual {index}: {e}")
+    #         raise e
+    #     finally:
+    #         stream.close()
 
     def execute_smart_forward(self, job: Job, source_remotes: List[RemotePayload]):
         """

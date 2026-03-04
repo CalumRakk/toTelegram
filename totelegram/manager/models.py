@@ -2,10 +2,13 @@ import json
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Generator, Optional, Tuple, cast
+from typing import TYPE_CHECKING, Generator, List, Optional, Tuple, cast
 
 import peewee
+import tartape
 from playhouse.sqlite_ext import JSONField
+from tartape import Tape
+from tartape.schemas import EntryState, ManifestEntry
 
 from totelegram import __version__
 from totelegram.common.enums import JobStatus, SourceType, Strategy
@@ -16,8 +19,8 @@ if TYPE_CHECKING:
     from pyrogram.types import Message
 
 from totelegram.common.fields import EnumField, PydanticJSONField
-from totelegram.common.schemas import Inventory, StrategyConfig
-from totelegram.common.utils import create_md5sum_by_hashlib, get_mimetype
+from totelegram.common.schemas import StrategyConfig, TapeCatalog
+from totelegram.common.utils import batched, create_md5sum_by_hashlib, get_mimetype
 from totelegram.manager.database import db_proxy
 
 logger = logging.getLogger(__name__)
@@ -124,7 +127,10 @@ class SourceFile(BaseModel):
     mtime = cast(float, peewee.FloatField())
     mimetype = cast(str, peewee.CharField())
     type = cast(SourceType, EnumField(SourceType, default=SourceType.FILE))
-    inventory = cast(Optional[Inventory], PydanticJSONField(Inventory, null=True))
+
+    tape_catalog = cast(
+        Optional[TapeCatalog], PydanticJSONField(TapeCatalog, null=True)
+    )
 
     @property
     def path(self) -> Path:
@@ -168,28 +174,6 @@ class SourceFile(BaseModel):
 
     @staticmethod
     def get_or_create_from_path(path: Path) -> "SourceFile":
-        # from totelegram.services.discovery_archive import ArchiveDiscoveryService
-
-        # path = path.absolute()
-
-        # if path.is_dir():
-        #     # TODO: Hay que diferenciar si es una carpeta nueva o ya existente.
-        #     discovery = ArchiveDiscoveryService(path, work_dir=work_dir)
-        #     inventory = discovery._create_inventory(path)
-
-        #     source, created = SourceFile.get_or_create(
-        #         md5sum=inventory.fingerprint,
-        #         defaults={
-        #             "type": SourceType.FOLDER,
-        #             "path_str": str(path),
-        #             "size": inventory.total_size,
-        #             "mtime": path.stat().st_mtime,
-        #             "mimetype": "application/x-directory",
-        #         },
-        #     )
-        #     return source
-        # else:
-
         stat = path.stat()
         current_size = stat.st_size
         current_mtime = stat.st_mtime
@@ -221,6 +205,35 @@ class SourceFile(BaseModel):
             mtime=current_mtime,
             mimetype=get_mimetype(path),
         )
+
+    @staticmethod
+    def from_tape(folder_path, tape: Tape):
+
+        exclude_patterns = (
+            json.dumps(tape.exclude_patterns)
+            if isinstance(tape.exclude_patterns, list)
+            else tape.exclude_patterns
+        )
+
+        catalog = TapeCatalog(
+            fingerprint=tape.fingerprint,
+            total_size=tape.total_size,
+            total_files=tape.count_files,
+            tartape_version=tartape.__version__,
+            created_at=tape.created_at,
+            exclude_patterns=exclude_patterns,
+        )
+
+        source = SourceFile.create(
+            path_str=str(folder_path),
+            md5sum=catalog.fingerprint,
+            size=catalog.total_size,
+            mtime=tape.created_at,
+            mimetype="application/x-tar",
+            tape_catalog=catalog,
+            type=SourceType.FOLDER,
+        )
+        return source
 
 
 class Job(BaseModel):
@@ -326,6 +339,10 @@ class Payload(BaseModel):
                 saved_payloads.append(payload)
         return saved_payloads
 
+    @property
+    def remote_exists(self) -> bool:
+        return RemotePayload.select().where(RemotePayload.payload == self).exists()
+
 
 class RemotePayload(BaseModel):
     """Representa el Acceso Efectivo: El vínculo entre el Payload y el mensaje en Telegram."""
@@ -339,14 +356,8 @@ class RemotePayload(BaseModel):
     owner = cast(
         TelegramUser, peewee.ForeignKeyField(TelegramUser, backref="remote_contents")
     )
-    json_metadata = cast(
-        dict, JSONField()
-    )  # Backup completo del objeto Message de Pyrogram
-
-    # TODO: Se ha elimiano los campos source_message_id y is_forward, porque
-    # es dificil se seguir cuando se hace un reenvio masivo.
-    # source_message_id = cast(Optional[int], peewee.IntegerField(null=True))
-    # is_forward = cast(bool, peewee.BooleanField(default=False))
+    # Backup completo del objeto Message de Pyrogram
+    json_metadata = cast(dict, JSONField())
 
     @staticmethod
     def register_upload(
@@ -361,30 +372,81 @@ class RemotePayload(BaseModel):
             json_metadata=json.loads(str(tg_message)),
         )
 
-    # @staticmethod
-    # def register_forward(
-    #     payload: Payload, tg_message: "Message", source_msg_id: int, owner: TelegramUser
-    # ):
-    #     """Registra un reenvío como una nueva entrada de acceso."""
-    #     return RemotePayload.create(
-    #         payload=payload,
-    #         message_id=tg_message.id,
-    #         chat_id=tg_message.chat.id,
-    #         owner=owner,
-    #         source_message_id=source_msg_id,
-    #         is_forward=True,
-    #         json_metadata=json.loads(str(tg_message)),
-    #     )
 
+class TapeMember(BaseModel):
+    """
+    Representa un archivo individual dentro de una carpeta archivada.
+    Es el registro lógico para búsquedas.
+    """
 
-class ArchiveEntry(BaseModel):
-    """El GPS de los archivos dentro de la cinta TAR."""
-
-    source = peewee.ForeignKeyField(SourceFile, backref="entries")
+    id: int
+    source = cast("SourceFile", peewee.ForeignKeyField(SourceFile, backref="members"))
     relative_path = cast(str, peewee.CharField())
+    size = cast(int, peewee.BigIntegerField())
+    md5sum = cast(str, peewee.CharField())
 
-    start_offset = cast(int, peewee.BigIntegerField())
-    end_offset = cast(int, peewee.BigIntegerField())
+    class Meta:  # type: ignore
+        indexes = (
+            # Un archivo solo puede estar una vez en una carpeta específica
+            (("source", "relative_path"), True),
+        )
 
-    start_volume_index = cast(int, peewee.IntegerField())
-    end_volume_index = cast(int, peewee.IntegerField())
+    @classmethod
+    def register_manifest_entries(
+        cls, source: "SourceFile", payload: "Payload", entries: list[ManifestEntry]
+    ):
+        """
+        Registra los archivos de un volumen (TapeMembers) y su GPS en el volumen.
+        """
+        BATCH_SIZE = 100
+
+        for batch in batched(entries, BATCH_SIZE):
+            batch: List[ManifestEntry]
+            member_data = [
+                {
+                    "source": source,
+                    "relative_path": e.arc_path,
+                    "size": e.size,
+                    "md5sum": e.md5sum,
+                }
+                for e in batch
+                if not e.is_dir
+            ]
+            cls.insert_many(member_data).on_conflict_ignore().execute()
+
+        path_to_id = {}
+        for batch in batched(entries, BATCH_SIZE):
+            paths = [e.arc_path for e in batch]
+
+            # `<<` (operador IN de Peewee)
+            query = cls.select(cls.id, cls.relative_path).where(
+                (cls.source == source) & (cls.relative_path << paths)  # type: ignore
+            )
+
+            for member in query:
+                path_to_id[member.relative_path] = member.id
+
+        # Registra el GPS de cada archivo en el volumen
+        for batch in batched(entries, BATCH_SIZE):
+            gps_data = [
+                {
+                    "member": path_to_id[e.arc_path],
+                    "payload": payload,
+                    "state": e.state.value,
+                    "offset_in_volume": e.offset_in_volume,
+                    "bytes_in_volume": e.bytes_in_volume,
+                }
+                for e in batch
+                if not e.is_dir
+            ]
+            TapeMemberGPS.insert_many(gps_data).execute()
+
+
+class TapeMemberGPS(BaseModel):
+
+    member = cast(TapeMember, peewee.ForeignKeyField(TapeMember, backref="fragments"))
+    payload = cast("Payload", peewee.ForeignKeyField(Payload, backref="fragments"))
+
+    state = cast(EntryState, EnumField(EntryState))
+    offset_in_volume = cast(int, peewee.BigIntegerField())
+    bytes_in_volume = cast(int, peewee.BigIntegerField())
