@@ -1,23 +1,25 @@
 import logging
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Tuple, cast
 
 from totelegram.cli.ui.console import UI
+from totelegram.common.types import AvailabilityReport
+from totelegram.logic.chunker import Chunker
 
 if TYPE_CHECKING:
     from pyrogram import Client  # type: ignore
     from pyrogram.types import User, Message
-
-from rich.console import Console
+    from totelegram.cli.commands.upload import UploadContext
 
 from totelegram.common.streams import VirtualFileStream, open_upload_source
 from totelegram.manager.models import (
+    Job,
     Payload,
     RemotePayload,
 )
 
 logger = logging.getLogger(__name__)
-console = Console()
 
 
 class UploadProgress:
@@ -35,16 +37,45 @@ class UploadProgress:
 
 
 class UploadService:
+    # TODO: Luego de consolidar la logica. Hay que sacar los UI de aqui.
     def __init__(
         self,
-        client: "Client",
-        upload_limit_rate_kbps: int = 0,
-        max_filename_length: int = 60,
+        u_ctx: "UploadContext",
     ):
+        self.u_ctx = u_ctx
+        self.client = u_ctx.client
+        self.limit_rate_kbps = u_ctx.settings.upload_limit_rate_kbps
+        self.max_filename_len = u_ctx.settings.max_filename_length
 
-        self.client = client
-        self.limit_rate_kbps = upload_limit_rate_kbps
-        self.max_filename_len = max_filename_length
+    def execute_physical_upload(self, job: Job, path: Path):
+        payloads = Chunker.get_or_create(self.u_ctx.db, job)
+        md5sum = job.source.md5sum
+        for payload in payloads:
+            if payload.has_remote:
+                continue
+
+            message = self._upload_payload(md5sum, path, payload)
+            RemotePayload.register_upload(payload, message, self.u_ctx.owner)
+        job.set_uploaded()
+
+    def execute_smart_forward(self, job: Job, report: AvailabilityReport):
+        mirrros = {r.payload.sequence_index: r for r in report.remotes}
+        UI.info(f"Reenviando {len(mirrros)} partes...")
+
+        job_adopted = job.adopt_job(report.remotes[0].payload.job)
+        md5sum = job_adopted.source.md5sum
+        for payload_adopted in Chunker.get_or_create(self.u_ctx.db, job_adopted):
+            if payload_adopted.has_remote:
+                continue
+
+            remote_mirror = mirrros[payload_adopted.sequence_index]
+            message = self._smart_forward_strategy(
+                md5sum, payload_adopted, remote_mirror
+            )
+            RemotePayload.register_upload(payload_adopted, message, self.u_ctx.owner)
+            time.sleep(1)
+
+        job_adopted.set_uploaded()
 
     def resolve_naming_payload(
         self, source_md5sum: str, payload: "Payload"
@@ -60,21 +91,17 @@ class UploadService:
 
         return filename, caption
 
-    def upload_payload(
-        self, chat_id: int, path: Path, payload: Payload, source_md5sum: str
-    ):
-        """Sube un archivo individual (trozo o archivo único) a Telegram."""
-
+    def _upload_payload(self, md5sum: str, path: Path, payload: Payload):
         volumen = VirtualFileStream(
             path, start_offset=payload.start_offset, end_offset=payload.end_offset
         )
 
         with open_upload_source(volumen, self.limit_rate_kbps) as doc_stream:  # type: ignore
-            filename, caption = self.resolve_naming_payload(source_md5sum, payload)
+            filename, caption = self.resolve_naming_payload(md5sum, payload)
             tg_message = cast(
                 "Message",
                 self.client.send_document(
-                    chat_id=chat_id,
+                    chat_id=self.u_ctx.tg_chat.id,
                     document=doc_stream,
                     file_name=filename,
                     caption=caption,
@@ -83,18 +110,18 @@ class UploadService:
             )
             return tg_message
 
-    def smart_forward_strategy(
-        self, chat_id: int, remote: RemotePayload, payload: Payload, source_md5sum: str
-    ):
-        """
-        Adopta un espejo completo reenviando sus mensajes.
-        """
-        filename, caption = self.resolve_naming_payload(source_md5sum, payload)
+    def _smart_forward_strategy(
+        self,
+        md5sum: str,
+        payload_adopted: Payload,
+        remote_mirror: RemotePayload,
+    ) -> "Message":
+        filename, caption = self.resolve_naming_payload(md5sum, payload_adopted)
         return cast(
             "Message",
             self.client.send_document(
-                chat_id=chat_id,
-                document=remote.message.document.file_id,
+                chat_id=self.u_ctx.tg_chat.id,
+                document=remote_mirror.message.document.file_id,
                 file_name=filename,
                 caption=caption,
             ),

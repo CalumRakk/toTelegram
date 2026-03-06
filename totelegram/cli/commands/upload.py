@@ -1,4 +1,3 @@
-import time
 from pathlib import Path
 from typing import TYPE_CHECKING, List, Tuple, cast
 
@@ -11,15 +10,13 @@ from totelegram.cli.ui.views import DisplayUpload
 from totelegram.common.consts import VALUE_NOT_SET, Commands
 from totelegram.common.enums import AvailabilityState
 from totelegram.common.schemas import CLIState, ScanReport
+from totelegram.common.types import UploadContext
 from totelegram.common.utils import is_excluded
-from totelegram.logic.chunker import Chunker
 from totelegram.logic.discovery import DiscoveryService
 from totelegram.logic.snapshot import SnapshotService
 from totelegram.logic.uploader import UploadService
 from totelegram.manager.models import (
     Job,
-    Payload,
-    RemotePayload,
     SourceFile,
     TelegramChat,
     TelegramUser,
@@ -31,13 +28,11 @@ if TYPE_CHECKING:
     from pyrogram.types import Chat, User
 
 
-def get_or_create_job(
-    path: Path, tg_chat: "Chat", is_premium: bool, settings: Settings
-) -> Tuple[Job, bool, SourceFile]:
-    chat_db, _ = TelegramChat.get_or_create_from_chat(tg_chat)
+def get_or_create_job(path: Path, u_ctx: UploadContext) -> Tuple[Job, bool]:
+    chat_db, _ = TelegramChat.get_or_create_from_chat(u_ctx.tg_chat)
 
     if path.is_dir():
-        exclusion_patterns = settings.all_exclusion_patterns()
+        exclusion_patterns = u_ctx.settings.all_exclusion_patterns()
         if not tartape.exists(path):
             with UI.loading("Generando cinta..."):
                 tape = tartape.create(
@@ -71,15 +66,17 @@ def get_or_create_job(
     job = Job.get_for_source_in_chat(source, chat_db)
     if not job:
         tg_limit = (
-            settings.tg_max_size_premium if is_premium else settings.tg_max_size_normal
+            u_ctx.settings.tg_max_size_premium
+            if u_ctx.owner.is_premium
+            else u_ctx.settings.tg_max_size_normal
         )
-        job = Job.formalize_intent(source, chat_db, is_premium, tg_limit)
+        job = Job.formalize_intent(source, chat_db, u_ctx.owner.is_premium, tg_limit)
         UI.info(
             f"Nuevo contrato de disponibilidad creado (Límite: {tg_limit / (1024*1024):.0f}MB)"
         )
-        return job, True, source
+        return job, True
 
-    return job, False, source
+    return job, False
 
 
 def _scan_and_filter(
@@ -139,6 +136,34 @@ def _scan_and_filter(
     return report
 
 
+def prepare_upload_context(client: "Client", db, settings: Settings) -> UploadContext:
+    """
+    Centraliza la inicialización de servicios y validación de red.
+    Lanza typer.Exit si algo falla, limpiando el comando principal.
+    """
+    with UI.loading("Sincronizando con Telegram..."):
+        try:
+            tg_chat = cast("Chat", client.get_chat(settings.chat_id))
+            me = cast("User", client.get_me())
+            owner = TelegramUser.get_or_create_from_tg(me)
+        except Exception as e:
+            UI.error(f"Error de conexión: {e}")
+            raise typer.Exit(1)
+    discovery = DiscoveryService(client, db)
+
+    UI.success(f"Conectado como [bold]{me.first_name or me.username}[/]")
+    UI.info(f"Destino: [bold cyan]{tg_chat.title}[/] [dim](ID: {tg_chat.id})[/]")
+
+    return UploadContext(
+        client=client,
+        db=db,
+        discovery=discovery,
+        tg_chat=tg_chat,
+        owner=owner,
+        settings=settings,
+    )
+
+
 @handle_config_errors
 def upload_file(
     ctx: typer.Context,
@@ -196,61 +221,21 @@ def upload_file(
     # --- Subida de lo encontrado ---
     UI.info(f"[dim]Procesando {len(scan_report.found)} archivos[/dim]")
     with state.scope() as (client, db):
-        upload_limit_rate_kbps = settings.upload_limit_rate_kbps
-        max_filename_length = settings.max_filename_length
-        discovery = DiscoveryService(client, db)
-        uploader = UploadService(client, upload_limit_rate_kbps, max_filename_length)
 
-        with UI.loading("Sincronizando con Telegram..."):
-            tg_chat = cast("Chat", client.get_chat(settings.chat_id))
-            me = cast("User", client.get_me())
-            owner = TelegramUser.get_or_create_from_tg(me)
-
-        UI.success(f"Conectado como [bold]{me.first_name or me.username}[/]")
-        UI.info(f"Destino: [bold cyan]{tg_chat.title}[/] [dim](ID: {tg_chat.id})[/]")
+        u_ctx = prepare_upload_context(client, db, settings)
+        uploader = UploadService(u_ctx)
 
         for path in scan_report.found:
-            job, _, source = get_or_create_job(path, tg_chat, me.is_premium, settings)
+            job, _ = get_or_create_job(path, u_ctx)
 
-            report = discovery.investigate(job)
+            report = u_ctx.discovery.investigate(job)
             if report.state == AvailabilityState.FULFILLED:
-                UI.success(
-                    "¡Operación completada! Todos los volúmenes ya están en el destino."
-                )
                 job.set_uploaded()
-                continue
-
             elif report.state == AvailabilityState.NEEDS_UPLOAD:
-                payloads = Chunker.get_or_create(job)
-                Payload.bulk_create(payloads)
-                for payload in payloads:
-                    if payload.has_remote:
-                        continue
-
-                    message = uploader.upload_payload(
-                        tg_chat.id, path, payload, source.md5sum
-                    )
-                    RemotePayload.register_upload(payload, message, owner)
-
+                uploader.execute_physical_upload(job, path)
             elif report.state == AvailabilityState.CAN_FORWARD:
-                job = report.remotes[0].job  # type: ignore
-                payloads = Chunker.get_or_create(job)
-                Payload.bulk_create(payloads)
-                for payload in payloads:
-                    if payload.has_remote:
-                        continue
-                    remote = next(
-                        i
-                        for i in report.remotes
-                        if i.payload.sequence_index == payload.sequence_index
-                    )
-                    message = uploader.smart_forward_strategy(
-                        tg_chat.id, remote, payload, source.md5sum
-                    )
-                    RemotePayload.register_upload(payload, message, owner)
-                    time.sleep(1)
+                uploader.execute_smart_forward(job, report)
             else:
                 raise ValueError(f"Invalid state: {report.state}")
 
-            job.set_uploaded()
             SnapshotService.generate_snapshot(job)

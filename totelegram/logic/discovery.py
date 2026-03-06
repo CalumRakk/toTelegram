@@ -4,9 +4,9 @@ import time
 from typing import TYPE_CHECKING, List
 
 import peewee
-from pydantic import BaseModel, Field
 
 from totelegram.common.enums import AvailabilityState, JobStatus
+from totelegram.common.types import AvailabilityReport
 from totelegram.common.utils import batched
 from totelegram.manager.models import Job, Payload, RemotePayload
 
@@ -15,17 +15,6 @@ if TYPE_CHECKING:
     from pyrogram.types import Message
 
 logger = logging.getLogger(__name__)
-
-
-class AvailabilityReport(BaseModel):
-    state: AvailabilityState
-    remotes: List[RemotePayload] = Field(default_factory=list)
-
-    model_config = {"arbitrary_types_allowed": True}
-
-    @property
-    def can_forward(self) -> bool:
-        return self.state == AvailabilityState.CAN_FORWARD and len(self.remotes) > 0
 
 
 class DiscoveryService:

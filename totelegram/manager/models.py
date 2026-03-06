@@ -348,6 +348,11 @@ class RemotePayload(BaseModel):
         )
 
     @property
+    def sequence_index(self) -> int:
+        return self.payload.sequence_index
+
+
+    @property
     def is_fresh(self) -> bool:
         """Determina si la validación aún es confiable (15 minutos)."""
         if not self.last_verified_at:

@@ -1,6 +1,7 @@
 import logging
 from typing import List, Tuple
 
+import peewee
 import tartape
 
 from totelegram.common.enums import SourceType
@@ -32,17 +33,18 @@ def chunk_ranges(file_size: int, chunk_size: int) -> List[Tuple[int, int]]:
 
 class Chunker:
     @classmethod
-    def get_or_create(cls, job: Job) -> List[Payload]:
+    def get_or_create(cls, db: peewee.SqliteDatabase, job: Job) -> List[Payload]:
         """Decide la segmentación basándose en el tipo de recurso."""
 
         if job.payloads.count() > 0:
             logger.debug(f"El Job {job.id} ya tiene payloads. Saltando segmentación.")
             return list(job.payloads.order_by(Payload.sequence_index))
 
-        if job.source.type == SourceType.FOLDER:
-            return cls._process_folder_job(job)
-        else:
-            return cls._process_file_job(job)
+        with db.atomic():
+            if job.source.type == SourceType.FOLDER:
+                return cls._process_folder_job(job)
+            else:
+                return cls._process_file_job(job)
 
     @classmethod
     def _process_file_job(cls, job: Job) -> List[Payload]:
