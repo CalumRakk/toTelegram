@@ -5,10 +5,10 @@ from typing import TYPE_CHECKING, List
 
 import peewee
 
-from totelegram.common.enums import AvailabilityState, JobStatus
-from totelegram.common.types import AvailabilityReport
-from totelegram.common.utils import batched
-from totelegram.manager.models import Job, Payload, RemotePayload
+from totelegram.models import Job, Payload, RemotePayload
+from totelegram.schemas import AvailabilityState, JobStatus
+from totelegram.types import AvailabilityReport
+from totelegram.utils import batched
 
 if TYPE_CHECKING:
     from pyrogram import Client  # type: ignore

@@ -7,15 +7,15 @@ if TYPE_CHECKING:
     from pyrogram import Client  # type: ignore
     from pyrogram.types import Chat, Message, User
 
-    from totelegram.common.enums import AvailabilityState
-    from totelegram.logic.chunker import Chunker
-    from totelegram.logic.discovery import DiscoveryService
-    from totelegram.logic.uploader import UploadService
-    from totelegram.manager.models import (
+    from totelegram.discovery import DiscoveryService
+    from totelegram.models import (
         RemotePayload,
         TelegramUser,
     )
-    from totelegram.manager.setting import Settings
+    from totelegram.packaging import Chunker
+    from totelegram.schemas import AvailabilityState
+    from totelegram.settings import Settings
+    from totelegram.uploader import UploadService
 
 
 @dataclass
@@ -35,6 +35,6 @@ class AvailabilityReport:
 
     @property
     def can_forward(self) -> bool:
-        from totelegram.common.enums import AvailabilityState
+        from totelegram.schemas import AvailabilityState
 
         return self.state == AvailabilityState.CAN_FORWARD and len(self.remotes) > 0

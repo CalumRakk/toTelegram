@@ -1,6 +1,6 @@
 import unittest
 
-from totelegram.logic.chunker import chunk_ranges
+from totelegram.packaging import chunk_ranges
 
 
 class TestChunkingMath(unittest.TestCase):

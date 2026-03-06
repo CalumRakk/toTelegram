@@ -7,22 +7,22 @@ import tartape
 from tartape.player import TapePlayer
 from tartape.volume import TarVolume
 
-from totelegram.cli.ui.console import UI
-from totelegram.common.enums import SourceType
-from totelegram.common.types import AvailabilityReport
-from totelegram.logic.chunker import Chunker
+from totelegram.cli.console import UI
+from totelegram.packaging import Chunker
+from totelegram.schemas import SourceType
+from totelegram.types import AvailabilityReport
 
 if TYPE_CHECKING:
     from pyrogram import Client  # type: ignore
     from pyrogram.types import User, Message
-    from totelegram.cli.commands.upload import UploadContext
+    from totelegram.cli.upload import UploadContext
 
-from totelegram.common.streams import VirtualFileStream, open_upload_source
-from totelegram.manager.models import (
+from totelegram.models import (
     Job,
     Payload,
     RemotePayload,
 )
+from totelegram.stream import VirtualFileStream, open_upload_source
 
 logger = logging.getLogger(__name__)
 
@@ -47,13 +47,19 @@ class UploadService:
         self,
         u_ctx: "UploadContext",
     ):
-        self.u_ctx = u_ctx
         self.client = u_ctx.client
         self.limit_rate_kbps = u_ctx.settings.upload_limit_rate_kbps
         self.max_filename_len = u_ctx.settings.max_filename_length
 
+        self.settings = u_ctx.settings
+        self.client = u_ctx.client
+        self.db = u_ctx.db
+        self.u_ctx = u_ctx
+        self.owner = u_ctx.owner
+        self.tg_chat = u_ctx.tg_chat
+
     def execute_physical_upload(self, job: Job, path: Path):
-        payloads = Chunker.get_or_create(self.u_ctx.db, job)
+        payloads = Chunker.get_or_create(self.db, job)
         md5sum = job.source.md5sum
         for payload in payloads:
             if payload.has_remote:
@@ -62,11 +68,11 @@ class UploadService:
             message, part_md5 = self._upload_payload(
                 job.source.type, md5sum, path, payload
             )
-            RemotePayload.register_upload(payload, message, self.u_ctx.owner)
+            RemotePayload.register_upload(payload, message, self.owner)
             with self.u_ctx.db.atomic():
                 payload.md5sum = part_md5
                 payload.save(only=[Payload.md5sum])
-                RemotePayload.register_upload(payload, message, self.u_ctx.owner)
+                RemotePayload.register_upload(payload, message, self.owner)
 
         job.set_uploaded()
 
@@ -76,7 +82,7 @@ class UploadService:
 
         job_adopted = job.adopt_job(report.remotes[0].payload.job)
         md5sum = job_adopted.source.md5sum
-        for payload_adopted in Chunker.get_or_create(self.u_ctx.db, job_adopted):
+        for payload_adopted in Chunker.get_or_create(self.db, job_adopted):
             if payload_adopted.has_remote:
                 continue
 
@@ -84,7 +90,7 @@ class UploadService:
             message = self._smart_forward_strategy(
                 md5sum, payload_adopted, remote_mirror
             )
-            RemotePayload.register_upload(payload_adopted, message, self.u_ctx.owner)
+            RemotePayload.register_upload(payload_adopted, message, self.owner)
             time.sleep(1)
 
         job_adopted.set_uploaded()
@@ -129,7 +135,7 @@ class UploadService:
             tg_message = cast(
                 "Message",
                 self.client.send_document(
-                    chat_id=self.u_ctx.tg_chat.id,
+                    chat_id=self.tg_chat.id,
                     document=doc_stream,
                     file_name=filename,
                     caption=caption,
@@ -149,7 +155,7 @@ class UploadService:
         return cast(
             "Message",
             self.client.send_document(
-                chat_id=self.u_ctx.tg_chat.id,
+                chat_id=self.tg_chat.id,
                 document=remote_mirror.message.document.file_id,
                 file_name=filename,
                 caption=caption,

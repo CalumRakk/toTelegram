@@ -4,14 +4,12 @@ from typing import TYPE_CHECKING
 import typer
 from rich.console import Console
 
-from totelegram.cli.commands.config import _get_config_tools
-from totelegram.cli.commands.upload import get_or_create_job, prepare_upload_context
-from totelegram.cli.ui.console import UI
-from totelegram.common.consts import VALUE_NOT_SET, Commands
-from totelegram.common.enums import AvailabilityState
-from totelegram.common.schemas import CLIState
-from totelegram.logic.snapshot import SnapshotService
-from totelegram.logic.uploader import UploadService
+from totelegram.cli.config import _get_config_tools
+from totelegram.cli.console import UI
+from totelegram.cli.upload import get_or_create_job, prepare_upload_context
+from totelegram.packaging import SnapshotService
+from totelegram.schemas import VALUE_NOT_SET, AvailabilityState, CLIState, Commands
+from totelegram.uploader import UploadService
 
 if TYPE_CHECKING:
     from pyrogram.types import Chat, User

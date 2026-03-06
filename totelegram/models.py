@@ -10,18 +10,17 @@ from playhouse.sqlite_ext import JSONField
 from tartape.schemas import EntryState, ManifestEntry
 
 from totelegram import __version__
-from totelegram.common.enums import JobStatus, SourceType, Strategy
+from totelegram.schemas import JobStatus, SourceType, Strategy
 from totelegram.telegram.client import parse_message_json_data
 
 if TYPE_CHECKING:
-    from totelegram.manager.setting import Settings
+    from totelegram.settings import Settings
     from pyrogram.types import Chat as TgChat
     from pyrogram.types import Message
 
-from totelegram.common.fields import EnumField, PydanticJSONField
-from totelegram.common.schemas import StrategyConfig, TapeCatalog
-from totelegram.common.utils import batched, create_md5sum_by_hashlib, get_mimetype
-from totelegram.manager.database import db_proxy
+from totelegram.database import EnumField, PydanticJSONField, db_proxy
+from totelegram.schemas import StrategyConfig, TapeCatalog
+from totelegram.utils import batched, create_md5sum_by_hashlib, get_mimetype
 
 logger = logging.getLogger(__name__)
 

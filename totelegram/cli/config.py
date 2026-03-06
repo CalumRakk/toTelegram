@@ -5,21 +5,20 @@ from typing import TYPE_CHECKING, List, Literal, Tuple, cast
 
 import typer
 
-from totelegram.cli.ui.console import UI
-from totelegram.cli.ui.views import DisplayConfig, DisplayGeneric, DisplayProfile
-from totelegram.common.consts import VALUE_NOT_SET, Commands
-from totelegram.common.schemas import CLIState
-from totelegram.common.utils import (
-    is_direct_identifier,
-    is_potential_username,
-    is_suspected_glob_expansion,
-    validate_item,
-)
-from totelegram.logic.config_service import ConfigService
-from totelegram.manager.setting import normalize_chat_id
+from totelegram.cli.console import UI
+from totelegram.cli.views import DisplayConfig, DisplayGeneric, DisplayProfile
+from totelegram.identity import ConfigService
+from totelegram.schemas import VALUE_NOT_SET, CLIState, Commands
 from totelegram.telegram.access import ChatAccessService
 from totelegram.telegram.client import TelegramSession
 from totelegram.telegram.search import ChatSearchService
+from totelegram.utils import (
+    is_direct_identifier,
+    is_potential_username,
+    is_suspected_glob_expansion,
+    normalize_chat_id,
+    validate_item,
+)
 
 if TYPE_CHECKING:
     from pyrogram import Client  # type: ignore

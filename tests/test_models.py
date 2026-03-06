@@ -2,13 +2,13 @@ import unittest
 
 import peewee
 
-from totelegram.common.enums import Strategy
-from totelegram.manager.database import DatabaseSession  # type: ignore
-from totelegram.manager.models import (
+from totelegram.database import DatabaseSession  # type: ignore
+from totelegram.models import (
     Job,
     Source,
     TelegramChat,
 )
+from totelegram.schemas import Strategy
 
 
 class TestModelsArchitecture(unittest.TestCase):

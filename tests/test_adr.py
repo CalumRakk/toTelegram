@@ -1,6 +1,7 @@
 import unittest
 
-from totelegram.manager.setting import AccessLevel, Settings
+from totelegram.identity import Settings
+from totelegram.schemas import AccessLevel
 
 
 class TestArchitectureRules(unittest.TestCase):

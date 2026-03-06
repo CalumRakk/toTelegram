@@ -5,9 +5,9 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING, cast
 
-from totelegram.common.utils import get_user_config_dir
-from totelegram.logic.chunker import ChunkingService
-from totelegram.manager.registry import SettingsManager
+from totelegram.identity import SettingsManager
+from totelegram.packaging import ChunkingService
+from totelegram.utils import get_user_config_dir
 
 sys.path.append(os.getcwd())
 
@@ -15,11 +15,11 @@ if TYPE_CHECKING:
     from pyrogram.types import User, Chat
 
 from totelegram.common.enums import AvailabilityState
-from totelegram.logic.discovery import DiscoveryService
-from totelegram.logic.uploader import UploadService
-from totelegram.manager.database import DatabaseSession
-from totelegram.manager.models import Job, RemotePayload, Source, TelegramChat
+from totelegram.database import DatabaseSession
+from totelegram.discovery import DiscoveryService
+from totelegram.models import Job, RemotePayload, Source, TelegramChat
 from totelegram.telegram.client import TelegramSession
+from totelegram.uploader import UploadService
 
 
 class TestManualRealLogic(unittest.TestCase):

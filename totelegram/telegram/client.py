@@ -6,8 +6,6 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional, cast
 
-from totelegram.manager.registry import SettingsManager
-
 if TYPE_CHECKING:
     from pyrogram import Client  # type: ignore
     from pyrogram import enums
@@ -21,6 +19,8 @@ if TYPE_CHECKING:
         UsernameInvalid,
     )
     from pyrogram.types import Chat, Message
+
+    from totelegram.identity import SettingsManager
 
 
 logger = logging.getLogger(__name__)
@@ -102,7 +102,7 @@ class TelegramSession:
 
     @classmethod
     def from_profile(
-        cls, profile_name: str, manager: SettingsManager
+        cls, profile_name: str, manager: "SettingsManager"
     ) -> "TelegramSession":
         """
         Construye una `TelegramSession` a partir de un perfil válido.

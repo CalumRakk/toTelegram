@@ -3,24 +3,24 @@ from typing import TYPE_CHECKING, Optional, Union
 
 import typer
 
-from totelegram.common.consts import Commands
+from totelegram.schemas import Commands
 from totelegram.telegram.search import ChatSearchService
 
 if TYPE_CHECKING:
     from pyrogram import Client  # type: ignore
 
-from totelegram.cli.ui.console import UI, console
-from totelegram.cli.ui.views import DisplayGeneric, DisplayProfile
-from totelegram.common.schemas import AccessStatus, CLIState
-from totelegram.common.utils import (
-    VALUE_NOT_SET,
-    is_direct_identifier,
-    is_valid_profile_name,
-)
-from totelegram.manager.setting import normalize_chat_id
+from totelegram.cli.console import UI, console
+from totelegram.cli.views import DisplayGeneric, DisplayProfile
+from totelegram.schemas import AccessStatus, CLIState
 from totelegram.telegram.access import ChatAccessService
 from totelegram.telegram.auth import AuthLogic
 from totelegram.telegram.client import TelegramSession
+from totelegram.utils import (
+    VALUE_NOT_SET,
+    is_direct_identifier,
+    is_valid_profile_name,
+    normalize_chat_id,
+)
 
 app = typer.Typer(help="Gestión de perfiles de configuración.")
 

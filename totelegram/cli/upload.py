@@ -3,24 +3,28 @@ from typing import TYPE_CHECKING, List, Tuple, cast
 
 import typer
 
-from totelegram.cli.commands.config import _get_config_tools, handle_config_errors
-from totelegram.cli.ui.console import UI, console
-from totelegram.cli.ui.views import DisplayUpload
-from totelegram.common.consts import VALUE_NOT_SET, Commands
-from totelegram.common.enums import AvailabilityState
-from totelegram.common.schemas import CLIState, ScanReport
-from totelegram.common.types import UploadContext
-from totelegram.common.utils import is_excluded
-from totelegram.logic.discovery import DiscoveryService
-from totelegram.logic.snapshot import SnapshotService
-from totelegram.logic.uploader import UploadService
-from totelegram.manager.models import (
+from totelegram.cli.config import _get_config_tools, handle_config_errors
+from totelegram.cli.console import UI, console
+from totelegram.cli.views import DisplayUpload
+from totelegram.discovery import DiscoveryService
+from totelegram.models import (
     Job,
     Source,
     TelegramChat,
     TelegramUser,
 )
-from totelegram.manager.setting import Settings
+from totelegram.packaging import SnapshotService
+from totelegram.schemas import (
+    VALUE_NOT_SET,
+    AvailabilityState,
+    CLIState,
+    Commands,
+    ScanReport,
+)
+from totelegram.settings import Settings
+from totelegram.types import UploadContext
+from totelegram.uploader import UploadService
+from totelegram.utils import is_excluded
 
 if TYPE_CHECKING:
     from pyrogram import Client  # type: ignore

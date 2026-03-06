@@ -1,14 +1,188 @@
 import json
 import logging
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Annotated, Any, ClassVar, Dict, List, Literal, Optional, Tuple, cast
 
 from dotenv import dotenv_values
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, Field, TypeAdapter, ValidationError
+from pydantic.fields import FieldInfo
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from totelegram.manager.setting import Settings
+from totelegram.schemas import (
+    VALUE_NOT_SET,
+    AccessLevel,
+    InfoField,
+)
+from totelegram.utils import ChatID, CommaSeparatedList, get_type_annotation
 
 logger = logging.getLogger(__name__)
+
+
+class Settings(BaseSettings):
+    # TODO: agrega un default que impida subir archivo muy pequeños.
+
+    max_filename_length: ClassVar[int] = 55
+    chat_id: ChatID = Field(
+        default=VALUE_NOT_SET,
+        description="ID del chat destino. NOT_SET indica configuración pendiente.",
+        json_schema_extra={"is_sensitive": False, "access": AccessLevel.EDITABLE},
+    )
+    exclude_files: CommaSeparatedList = Field(
+        default_factory=list,
+        json_schema_extra={"is_sensitive": False, "access": AccessLevel.EDITABLE},
+        description="Patrones (glob). Ej: '*.log', 'node_modules' (ignora contenido), 'src/*.tmp'.",
+    )
+    upload_limit_rate_kbps: int = Field(
+        default=0,
+        description="Límite de velocidad de subida en KB/s. 0 = sin límite",
+        json_schema_extra={"is_sensitive": False, "access": AccessLevel.EDITABLE},
+    )
+
+    api_id: int = Field(
+        default=611335,
+        description="Telegram API ID",
+        json_schema_extra={"is_sensitive": False, "access": AccessLevel.DEBUG_READONLY},
+    )
+    api_hash: str = Field(
+        default="d524b414d21f4d37f08684c1df41ac9c",
+        description="Telegram API hash",
+        json_schema_extra={"is_sensitive": True, "access": AccessLevel.DEBUG_READONLY},
+    )
+    profile_name: str = Field(
+        description="Nombre de la sesión",
+        json_schema_extra={"is_sensitive": False, "access": AccessLevel.DEBUG_READONLY},
+    )
+
+    tg_max_size_normal: int = Field(
+        default=2000 * 1024 * 1024,
+        description="Limite de tamaño en bytes para usuarios NO premium.",
+        json_schema_extra={"is_sensitive": False, "access": AccessLevel.DEBUG_EDITABLE},
+    )
+    tg_max_size_premium: int = Field(
+        default=4000 * 1024 * 1024,
+        description="Límite de tamaño en bytes para usuarios premium.",
+        json_schema_extra={"is_sensitive": False, "access": AccessLevel.DEBUG_EDITABLE},
+    )
+
+    max_filesize_bytes: int = Field(
+        default=80 * 1024 * 1024 * 1024,
+        description="Filtro de seguridad: No procesar archivos que superen este tamaño.",
+        json_schema_extra={"is_sensitive": False, "access": AccessLevel.EDITABLE},
+    )
+
+    exclude_files_default: CommaSeparatedList = ["*.log", "*.json", "*.json.xz"]
+
+    model_config = SettingsConfigDict(
+        env_file=".env", env_file_encoding="utf-8", extra="ignore"
+    )
+
+    log_path: Optional[Path] = Field(
+        default=None,
+        description="Ruta del archivo de log. Si está vacío, se usa la ruta por defecto en la carpeta de trabajo.",
+    )
+
+    def all_exclusion_patterns(self) -> List[str]:
+        return self.exclude_files + self.exclude_files_default
+
+    @classmethod
+    def get_info(cls, field_name: str) -> Optional[InfoField]:
+        """Extrae la informacion de un campo de Settings.
+
+        Si un campo no tiene access, se considerárá DEBUG_READONLY.
+        """
+        field: FieldInfo | None = cls.model_fields.get(field_name.lower())
+
+        assert (
+            field is not None
+        ), f"El campo '{field_name}' no existe en la configuración."
+
+        description = field.description or "Sin descripción"
+
+        if field.is_required():
+            default_value = "Required"
+        elif field.default_factory is not None:
+            default_value = field.default_factory()  # type: ignore
+        else:
+            default_value = field.default
+
+        if not isinstance(field.json_schema_extra, dict):
+            return None
+
+        level = cast(
+            AccessLevel,
+            field.json_schema_extra.get("access", AccessLevel.DEBUG_READONLY),
+        )
+        is_sensitive = cast(bool, field.json_schema_extra.get("is_sensitive", False))
+        type_annotation = get_type_annotation(field)
+
+        return InfoField(
+            level=level,
+            field_name=field_name,
+            description=description,
+            default_value=default_value,
+            is_sensitive=is_sensitive,
+            type_annotation=type_annotation,
+        )
+
+    @classmethod
+    def validate_single_setting(cls, key: str, value: Any) -> Any:
+        """
+        Resuelve, convierte y valida el valor asociado a una clave de configuración.
+
+        Actúa como puente entre entradas en texto plano (por ejemplo, desde una CLI)
+        y el sistema de tipos de Pydantic, aplicando coerción automática al tipo
+        definido (p. ej., "500" → 500, o una cadena separada por comas → lista).
+
+        Args:
+            key (str): Nombre de la configuración (case-insensitive).
+            value (Any): Valor crudo a procesar.
+
+        Returns:
+            Any: Valor convertido al tipo definido en el modelo Settings.
+
+        Raises:
+            ValueError: Si la clave no existe o el valor no puede convertirse
+                al tipo requerido.
+        """
+        field_name = key.lower()
+        if field_name not in cls.model_fields:
+            raise ValueError(f"La configuración '{key}' no existe en el sistema.")
+
+        field = cls.model_fields[field_name]
+        adapter = TypeAdapter(Annotated[field.annotation, field])
+        try:
+            # validate_python intentará convertir `value` al tipo correcto (int, bool, etc.)
+            return adapter.validate_python(value)
+        except ValidationError as e:
+            raise ValueError(
+                f"La configuración '{key}' debe ser de tipo '{field.annotation}'."
+            ) from e
+
+    @staticmethod
+    def validate_key_access(is_debug: bool, field_name: str):
+        """Valida si el nivel de acceso permite la edición en el contexto actual."""
+        field_name_lower = field_name.lower()
+        info = Settings.get_info(field_name_lower)
+
+        if not info:
+            raise ValueError(
+                f"La configuracion '{field_name_lower.upper()}' no existe."
+            )
+
+        if info.level == AccessLevel.DEBUG_READONLY:
+            raise ValueError(
+                f"La configuracion '{info.field_name.upper()}' es de identidad (Solo Lectura)."
+            )
+
+        if info.level == AccessLevel.DEBUG_EDITABLE and not is_debug:
+            raise ValueError(
+                f"La configuracion '{info.field_name.upper()}' solo es modificable en modo --debug."
+            )
+        return info
+
+    @staticmethod
+    def get_default_settings() -> "Settings":
+        return Settings(profile_name=VALUE_NOT_SET)
 
 
 class Profile(BaseModel):
@@ -292,3 +466,106 @@ class SettingsManager:
             return True
 
         return False
+
+
+class ConfigService:
+    def __init__(self, manager: SettingsManager, is_debug: bool = False):
+        self.manager = manager
+        self.is_debug = is_debug
+
+    def prepare_updates(self, args: List[str]) -> Dict[str, Any]:
+        """
+        Transforma una lista plana [k, v, k, v] en un dict validado.
+        Lanza ValueError si los pares están incompletos o fallan validación.
+        """
+
+        # TODO: Hacer más explicito que el valor del par puede ser Any, aunque normalmente se espera que sea un string.
+        if not args or len(args) % 2 != 0:
+            raise ValueError(
+                "Debes proporcionar pares de CLAVE y VALOR. Ej: 'set chat_id 12345'"
+            )
+
+        def remove_quotation(value: Any):
+            if isinstance(value, str):
+                return value.strip("'").strip('"')
+            if isinstance(value, list):
+                return [remove_quotation(v) for v in value]
+            return value
+
+        raw_data = {
+            args[i].lower(): remove_quotation(args[i + 1])
+            for i in range(0, len(args), 2)
+        }
+        updates = {}
+
+        for key, raw_value in raw_data.items():
+            # Validar permisos de acceso (Editable, Debug, etc)
+            Settings.validate_key_access(self.is_debug, key)
+            # Validar y convertir tipos (str -> int, etc)
+            clean_value = Settings.validate_single_setting(key, raw_value)
+            updates[key] = clean_value
+
+        return updates
+
+    def apply_update(
+        self,
+        settings_name: str,
+        key: str,
+        value: Any,
+        action: Literal["set", "add", "remove"],
+    ) -> Tuple[bool, Any]:
+        """
+        Aplica un cambio individual, resolviendo la lógica de listas si es necesario.
+        Devuelve (si_cambio, valor_final).
+        """
+        key = key.lower().strip()
+
+        if action == "set":
+            changed = self.manager.set_setting(settings_name, key, value)
+            return changed, value
+
+        # Modificar listas (add/remove)
+        if not isinstance(value, list):
+            value = [value]
+
+        try:
+            current_settings = self.manager.get_settings(settings_name)
+            current_list = getattr(current_settings, key)
+        except Exception:
+            # Si el archivo está roto, tomamos el default
+            info = Settings.get_info(key)
+            current_list = (
+                info.default_value.copy()
+                if info and isinstance(info.default_value, list)
+                else []
+            )
+
+        if not isinstance(current_list, list):
+            raise ValueError(
+                f"El campo '{key}' no es una lista, no se puede usar '{action}'."
+            )
+
+        original_count = len(current_list)
+
+        if action == "add":
+            for item in value:
+                if item not in current_list:
+                    current_list.append(item)
+        elif action == "remove":
+            current_list = [item for item in current_list if item not in value]
+
+        # Guardar solo si hubo cambios reales
+        changed = len(current_list) != original_count
+        if changed:
+            self.manager.set_setting(settings_name, key, current_list)
+
+        return changed, current_list
+
+    def restore_default(self, settings_name: str, key: str) -> Any:
+        """Restaura una configuración a su valor por defecto."""
+        info = Settings.validate_key_access(self.is_debug, key)
+
+        self.manager.unset_setting(settings_name, key)
+
+        self.manager.set_setting(settings_name, key, info.default_value)
+        return info.default_value

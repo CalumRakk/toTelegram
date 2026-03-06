@@ -1,4 +1,5 @@
 import hashlib
+import json
 import keyword
 import logging
 import os
@@ -7,15 +8,27 @@ import sys
 from contextlib import nullcontext
 from pathlib import Path
 from time import sleep
-from typing import TYPE_CHECKING, Any, Iterable, List, Union, cast
-
-from totelegram.cli.ui.console import console
-from totelegram.common.consts import APP_NAME, SELF_CHAT_ALIASES, VALUE_NOT_SET
-
-if TYPE_CHECKING:
-    from totelegram.manager.setting import Settings
+from typing import (
+    TYPE_CHECKING,
+    Annotated,
+    Any,
+    Iterable,
+    List,
+    Union,
+    cast,
+    get_origin,
+)
 
 import filetype
+from pydantic import BeforeValidator
+from pydantic.fields import FieldInfo
+
+from totelegram.cli.console import console
+from totelegram.schemas import APP_NAME, SELF_CHAT_ALIASES, VALUE_NOT_SET
+
+if TYPE_CHECKING:
+    from totelegram.identity import Settings
+
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +44,32 @@ else:
         it = iter(iterable)
         while batch := list(itertools.islice(it, n)):
             yield batch
+
+
+def get_type_annotation(field: FieldInfo) -> str:
+    type_annotation = field.annotation
+    if get_origin(type_annotation) is None:
+        type_name = type_annotation.__name__  # type: ignore
+    else:
+        type_name = str(type_annotation).replace("typing.", "")
+    return type_name
+
+
+def parse_comma_list(value):
+    """Convierte 'a, b, c' o '["a", "b"]' en una lista real."""
+    # TODO: esta pensado para valores que esta en el archivo de configuracion. Para valores del cli no deberia ser tan permisivo.
+    if isinstance(value, list):
+        return value
+
+    value = value.strip()
+    if value.startswith("[") and value.endswith("]"):
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError:
+            raise ValueError("Formato JSON invalido para la lista.")
+
+    # Split por comas y limpieza de espacios
+    return [item.strip() for item in value.split(",") if item.strip()]
 
 
 def is_excluded(path: Path, patterns: List[str]) -> bool:
@@ -249,3 +288,14 @@ def validate_item(value: str) -> str:
     if "," in value or value.strip().startswith("["):
         raise ValueError("Formato no soportado.")
     return value.strip("'").strip('"')
+
+
+CommaSeparatedList = Annotated[
+    List[str],
+    BeforeValidator(parse_comma_list),
+]
+
+ChatID = Annotated[
+    Union[int, str],
+    BeforeValidator(normalize_chat_id),
+]
