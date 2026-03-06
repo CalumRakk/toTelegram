@@ -2,7 +2,6 @@ import enum
 import re
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime
 from enum import Enum, IntEnum
 from pathlib import Path
 from typing import (
@@ -102,42 +101,6 @@ class InfoField(BaseModel):
     default_value: Any
     is_sensitive: bool
     type_annotation: str
-
-
-class SourceMetadata(BaseModel):
-    filename: str
-    size: int
-    md5sum: str
-    mime_type: str
-    mtime: float
-
-
-class RemotePart(BaseModel):
-    sequence: int
-    message_id: int
-    chat_id: int
-    link: str
-    part_filename: str
-    part_size: int
-    part_md5sum: str
-
-
-class UploadManifest(BaseModel):
-    version: str = MANIFEST_VERSION
-    app_version: str
-    created_at: datetime
-
-    # Bloque de Identidad del Job
-    strategy: Strategy
-    chunk_size: int  # El 'tg_max_size' del contrato original (ADR-002)
-
-    # Bloque de Identidad del Chat/Usuario
-    target_chat_id: int
-    owner_id: int
-    owner_name: str
-
-    source: SourceMetadata
-    parts: List[RemotePart]
 
 
 class StrategyConfig(BaseModel):

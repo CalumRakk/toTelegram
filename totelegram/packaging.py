@@ -1,24 +1,76 @@
-import json
 import logging
 import lzma
+from datetime import datetime
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 import peewee
 import tartape
+from pydantic import BaseModel
 
-from totelegram.models import Job, Payload, RemotePayload, TapeMember
+from totelegram.models import Job, Payload, RemotePayload, TapeMember, TapeMemberGPS
 from totelegram.schemas import (
     MANIFEST_VERSION,
-    RemotePart,
-    SourceMetadata,
     SourceType,
-    UploadManifest,
+    Strategy,
+    TapeCatalog,
 )
-from totelegram.telegram.client import parse_message_json_data
 from totelegram.utils import batched
 
 logger = logging.getLogger(__name__)
+
+
+class FileFragment(BaseModel):
+    """GPS exacto de un archivo dentro de un volumen (Payload)."""
+
+    vol_idx: int  # sequence_index del Payload
+    offset_in_vol: int  # Offset de inicio dentro del archivo .tar del volumen
+    bytes_in_vol: int  # Cantidad de bytes de este archivo en este volumen
+
+
+class TapeMemberSnapshot(BaseModel):
+    """Representación de un archivo dentro de una carpeta archivada."""
+
+    relative_path: str
+    size: int
+    md5sum: str
+    fragments: List[FileFragment]
+
+
+class SourceMetadata(BaseModel):
+    filename: str
+    size: int
+    md5sum: str
+    mime_type: str
+    mtime: float
+    type: SourceType
+    tape_catalog: Optional[TapeCatalog] = None
+    inventory: Optional[List[TapeMemberSnapshot]] = None
+
+
+class RemotePart(BaseModel):
+    sequence: int
+    message_id: int
+    chat_id: int
+    link: str
+    part_filename: str
+    part_size: int
+    part_md5sum: str
+    start_offset: int  # Offset global en el Source (virtualización)
+    end_offset: int  # Offset global en el Source (virtualización)
+
+
+class UploadManifest(BaseModel):
+    version: str = MANIFEST_VERSION
+    app_version: str
+    created_at: datetime
+    strategy: Strategy
+    chunk_size: int
+    target_chat_id: int
+    owner_id: int
+    owner_name: str
+    source: SourceMetadata
+    parts: List[RemotePart]
 
 
 def chunk_ranges(file_size: int, chunk_size: int) -> List[Tuple[int, int]]:
@@ -132,81 +184,98 @@ class Chunker:
 class SnapshotService:
     @staticmethod
     def generate_snapshot(job: Job) -> UploadManifest:
-        """
-        Genera el manifiesto (snapshot).
-        Si el path ya existe pero pertenece a otro MD5, genera un nombre nuevo (ej: archivo (1).json.xz).
-        """
         source = job.source
         original_file_path = Path(source.path_str)
 
-        first_remote = (
-            RemotePayload.select().join(Payload).where(Payload.job == job).first()
+        # Obtenemos los registros remotos
+        remotes_db = (
+            RemotePayload.select(RemotePayload, Payload)
+            .join(Payload)
+            .where(Payload.job == job)
+            .order_by(Payload.sequence_index)
         )
 
-        if not first_remote:
+        if not remotes_db.exists():
             raise ValueError(
-                f"No se puede generar snapshot: El Job {job.id} no tiene registros remotos en la DB."
+                f"No hay registros remotos para el Job {job.id}. Imposible crear snapshot."
             )
 
-        owner_id = first_remote.owner.id
-        owner_name = first_remote.owner.first_name
+        # Mapa de Mensajes en Telegram
+        parts = [
+            RemotePart(
+                sequence=r.payload.sequence_index,
+                message_id=r.message_id,
+                chat_id=r.chat_id,
+                link=r.message.link or "",
+                part_filename=r.payload.filename,
+                part_size=r.payload.size,
+                part_md5sum=r.payload.md5sum or "",
+                start_offset=r.payload.start_offset,
+                end_offset=r.payload.end_offset,
+            )
+            for r in remotes_db
+        ]
 
-        # Resolver el path del snapshot evitando colisiones
-        output_path = SnapshotService._resolve_snapshot_path(
-            original_file_path, source.md5sum
-        )
-
-        logger.info(
-            f"Generando manifiesto {MANIFEST_VERSION} para Job {job.id} -> {output_path.name}"
-        )
-
-        # Mapear Partes Remotas
-        parts: list[RemotePart] = []
-        payloads = job.payloads.order_by(Payload.sequence_index)
-
-        for payload in payloads:
-            remote_part_db = RemotePayload.get_or_none(RemotePayload.payload == payload)
-
-            if not remote_part_db:
-                logger.warning(
-                    f"Payload {payload.sequence_index} no tiene registro remoto. Snapshot incompleto."
-                )
-                continue
-
-            # Reconstruir mensaje para obtener el link
-            message = parse_message_json_data(remote_part_db.json_metadata)
-
-            parts.append(
-                RemotePart(
-                    sequence=payload.sequence_index,
-                    message_id=remote_part_db.message_id,
-                    chat_id=remote_part_db.chat_id,
-                    link=message.link or "",
-                    part_filename=Path(payload.temp_path).name,
-                    part_size=payload.size,
-                    part_md5sum=payload.md5sum,
-                )
+        # Construimos el inventario con el GPS de los archivos
+        inventory: Optional[List[TapeMemberSnapshot]] = None
+        if source.type == SourceType.FOLDER:
+            inventory = []
+            # TapeMember -> TapeMemberGPS -> Payload
+            members = (
+                TapeMember.select()
+                .where(TapeMember.source == source)
+                .prefetch(TapeMemberGPS, Payload)
             )
 
-        # Crear Manifiesto
+            for m in members:
+                fragments = [
+                    FileFragment(
+                        vol_idx=gps.payload.sequence_index,
+                        offset_in_vol=gps.offset_in_volume,
+                        bytes_in_vol=gps.bytes_in_volume,
+                    )
+                    for gps in m.fragments
+                ]
+
+                inventory.append(
+                    TapeMemberSnapshot(
+                        relative_path=m.relative_path,
+                        size=m.size,
+                        md5sum=m.md5sum,
+                        fragments=fragments,
+                    )
+                )
+
+        # Metadatos del Origen (Archivo o Carpeta)
+        owner = remotes_db[0].owner
+        source_meta = SourceMetadata(
+            filename=original_file_path.name,
+            size=source.size,
+            md5sum=source.md5sum,
+            mime_type=source.mimetype,
+            mtime=source.mtime,
+            type=source.type,
+            tape_catalog=source.tape_catalog,
+            inventory=inventory,
+        )
+
+        # Crear Manifiesto Final
         manifest = UploadManifest(
             app_version=job.config.app_version,
             strategy=job.strategy,
             chunk_size=job.config.tg_max_size,
             created_at=job.created_at,
             target_chat_id=job.chat.id,
-            owner_id=owner_id,
-            owner_name=owner_name,
-            source=SourceMetadata(
-                filename=original_file_path.name,
-                size=source.size,
-                md5sum=source.md5sum,
-                mime_type=source.mimetype,
-                mtime=source.mtime,
-            ),
+            owner_id=owner.id,
+            owner_name=owner.first_name,
+            source=source_meta,
             parts=parts,
         )
-        # Guardado atómico con compresión LZMA
+
+        # Guardado Atómico Comprimido
+        output_path = SnapshotService._resolve_snapshot_path(
+            original_file_path, source.md5sum
+        )
         with lzma.open(output_path, "wt", encoding="utf-8") as f:
             f.write(manifest.model_dump_json(indent=2))
 
@@ -214,42 +283,29 @@ class SnapshotService:
 
     @staticmethod
     def _resolve_snapshot_path(file_path: Path, current_md5: str) -> Path:
-        """
-        Busca un nombre de archivo disponible.
-        Si el archivo .json.xz ya existe:
-        - Si es del mismo MD5: Se sobrescribe (es una actualización).
-        - Si es de otro MD5: Se busca nombre (1), (2), etc.
-        """
-        # El nombre base será: nombre_archivo.ext.json.xz (mantenemos la ext original en el nombre para claridad)
+        """Resuelve el nombre del archivo evitando colisiones (ADR-003)."""
         base_target = file_path.with_name(f"{file_path.name}.json.xz")
 
+        # Si no existe, es la ruta ideal
         if not base_target.exists():
             return base_target
 
         try:
             with lzma.open(base_target, "rt", encoding="utf-8") as f:
+                import json
+
                 existing_data = json.load(f)
-                existing_md5 = existing_data.get("source", {}).get("md5sum")
-                if existing_md5 == current_md5:
+                if existing_data.get("source", {}).get("md5sum") == current_md5:
                     return base_target
         except Exception:
-            # Si el archivo está corrupto o no se puede leer, asumimos que debemos numerar
             pass
 
+        # Si es un recurso distinto, numerar: archivo (1).ext.json.xz
         counter = 1
         while True:
-            new_name = f"{file_path.stem} ({counter}){file_path.suffix}.json.xz"
-            new_target = file_path.with_name(new_name)
+            new_target = file_path.with_name(
+                f"{file_path.stem} ({counter}){file_path.suffix}.json.xz"
+            )
             if not new_target.exists():
                 return new_target
-
-            # Verificamos el MD5 de los numerados por si acaso
-            try:
-                with lzma.open(new_target, "rt", encoding="utf-8") as f:
-                    existing_data = json.load(f)
-                    if existing_data.get("source", {}).get("md5sum") == current_md5:
-                        return new_target
-            except Exception:
-                pass
-
             counter += 1
