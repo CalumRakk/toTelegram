@@ -22,7 +22,7 @@ from totelegram.models import (
     Payload,
     RemotePayload,
 )
-from totelegram.stream import VirtualFileStream, open_upload_source
+from totelegram.stream import ThrottledFile, VirtualFileStream
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +68,7 @@ class UploadService:
             message, part_md5 = self._upload_payload(
                 job.source.type, md5sum, path, payload
             )
-            RemotePayload.register_upload(payload, message, self.owner)
+
             with self.u_ctx.db.atomic():
                 payload.md5sum = part_md5
                 payload.save(only=[Payload.md5sum])
@@ -114,6 +114,7 @@ class UploadService:
     ):
         if source_type == SourceType.FOLDER:
             tape = tartape.open(path)
+            tape._open_catalog()
             player = TapePlayer(tape._catalog, path)  # type: ignore
             stream = TarVolume(
                 player=player,
@@ -128,8 +129,8 @@ class UploadService:
                 end_offset=payload.end_offset,
                 filename=payload.filename,
             )
-
-        with open_upload_source(stream, self.limit_rate_kbps) as doc_stream:  # type: ignore
+        limit_bytes = self.u_ctx.settings.upload_limit_rate_kbps * 1024
+        with ThrottledFile(stream, limit_bytes) as doc_stream:  # type: ignore
             filename, caption = self.resolve_naming_payload(md5sum, payload)
 
             tg_message = cast(

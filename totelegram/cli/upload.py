@@ -7,6 +7,7 @@ from totelegram.cli.config import _get_config_tools, handle_config_errors
 from totelegram.cli.console import UI, console
 from totelegram.cli.views import DisplayUpload
 from totelegram.discovery import DiscoveryService
+from totelegram.identity import Settings
 from totelegram.models import (
     Job,
     Source,
@@ -21,7 +22,6 @@ from totelegram.schemas import (
     Commands,
     ScanReport,
 )
-from totelegram.settings import Settings
 from totelegram.types import UploadContext
 from totelegram.uploader import UploadService
 from totelegram.utils import is_excluded

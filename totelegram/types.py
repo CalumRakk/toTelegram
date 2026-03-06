@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, List, NamedTuple
+from typing import TYPE_CHECKING, List
 
 import peewee
 
@@ -8,18 +8,18 @@ if TYPE_CHECKING:
     from pyrogram.types import Chat, Message, User
 
     from totelegram.discovery import DiscoveryService
+    from totelegram.identity import Settings
     from totelegram.models import (
         RemotePayload,
         TelegramUser,
     )
     from totelegram.packaging import Chunker
     from totelegram.schemas import AvailabilityState
-    from totelegram.settings import Settings
     from totelegram.uploader import UploadService
 
 
 @dataclass
-class UploadContext(NamedTuple):
+class UploadContext:
     tg_chat: "Chat"
     owner: "TelegramUser"
     client: "Client"

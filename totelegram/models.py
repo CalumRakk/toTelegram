@@ -14,7 +14,7 @@ from totelegram.schemas import JobStatus, SourceType, Strategy
 from totelegram.telegram.client import parse_message_json_data
 
 if TYPE_CHECKING:
-    from totelegram.settings import Settings
+    from totelegram.identity import Settings
     from pyrogram.types import Chat as TgChat
     from pyrogram.types import Message
 
