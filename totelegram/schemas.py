@@ -26,8 +26,6 @@ if TYPE_CHECKING:
     from totelegram.models import RemotePayload
 
 
-MANIFEST_VERSION = "4.0"
-
 APP_NAME = "toTelegram"
 CLI_BIN = "totelegram"
 VALUE_NOT_SET = "NOT-SET"

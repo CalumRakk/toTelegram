@@ -8,9 +8,9 @@ import peewee
 import tartape
 from pydantic import BaseModel
 
+from totelegram import __version__
 from totelegram.models import Job, Payload, RemotePayload, TapeMember, TapeMemberGPS
 from totelegram.schemas import (
-    MANIFEST_VERSION,
     SourceType,
     Strategy,
     TapeCatalog,
@@ -18,6 +18,8 @@ from totelegram.schemas import (
 from totelegram.utils import batched
 
 logger = logging.getLogger(__name__)
+
+MANIFEST_VERSION = "5.0"
 
 
 class FileFragment(BaseModel):
@@ -61,12 +63,12 @@ class RemotePart(BaseModel):
 
 
 class UploadManifest(BaseModel):
-    version: str = MANIFEST_VERSION
-    app_version: str
+    manifest_version: str = MANIFEST_VERSION
+    app_version: str = __version__
     created_at: datetime
     strategy: Strategy
     chunk_size: int
-    target_chat_id: int
+    chat_id: int
     owner_id: int
     owner_name: str
     source: SourceMetadata
@@ -261,11 +263,10 @@ class SnapshotService:
 
         # Crear Manifiesto Final
         manifest = UploadManifest(
-            app_version=job.config.app_version,
             strategy=job.strategy,
             chunk_size=job.config.tg_max_size,
             created_at=job.created_at,
-            target_chat_id=job.chat.id,
+            chat_id=job.chat.id,
             owner_id=owner.id,
             owner_name=owner.first_name,
             source=source_meta,

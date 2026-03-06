@@ -8,7 +8,13 @@ from totelegram.cli.config import _get_config_tools
 from totelegram.cli.console import UI
 from totelegram.cli.upload import get_or_create_job, prepare_upload_context
 from totelegram.packaging import SnapshotService
-from totelegram.schemas import VALUE_NOT_SET, AvailabilityState, CLIState, Commands
+from totelegram.schemas import (
+    VALUE_NOT_SET,
+    AvailabilityState,
+    CLIState,
+    Commands,
+    JobStatus,
+)
 from totelegram.uploader import UploadService
 
 if TYPE_CHECKING:
@@ -21,9 +27,7 @@ app = typer.Typer(help="Comandos para archivado de carpetas (Modo Cinta).")
 @app.command("folder")
 def archive_folder(
     ctx: typer.Context,
-    folder_path: Path = typer.Argument(
-        ..., exists=True, file_okay=False, dir_okay=True, help="Carpeta a archivar."
-    ),
+    folderpath: Path = typer.Argument(..., exists=True, help="Carpeta a archivar."),
     force: bool = typer.Option(
         False,
         "--force",
@@ -49,19 +53,20 @@ def archive_folder(
         raise typer.Exit(1)
 
     console.print(
-        f"\n[bold cyan]Iniciando Operación de Archivado:[/bold cyan] {folder_path.name}\n"
+        f"\n[bold cyan]Iniciando Operación de Archivado:[/bold cyan] {folderpath.name}\n"
     )
 
     with state.scope() as (client, db):
         u_ctx = prepare_upload_context(client, db, settings)
         uploader = UploadService(u_ctx)
 
-        job, _ = get_or_create_job(path=folder_path, u_ctx=u_ctx)
+        job, _ = get_or_create_job(path=folderpath, u_ctx=u_ctx)
         report = u_ctx.discovery.investigate(job)
         if report.state == AvailabilityState.FULFILLED:
-            job.set_uploaded()
+            if job.status != JobStatus.UPLOADED:
+                job.set_uploaded()
         elif report.state == AvailabilityState.NEEDS_UPLOAD:
-            uploader.execute_physical_upload(job, folder_path)
+            uploader.execute_physical_upload(job, folderpath)
         elif report.state == AvailabilityState.CAN_FORWARD:
             uploader.execute_smart_forward(job, report)
         else:

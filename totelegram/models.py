@@ -263,7 +263,7 @@ class Job(BaseModel):
         return Path(self.source.path_str)
 
     def set_uploaded(self):
-        self.status = JobStatus.UPLOADED
+        self.status = JobStatus.UPLOADED.value
         self.save(only=[Job.status, Job.updated_at])
 
     @staticmethod

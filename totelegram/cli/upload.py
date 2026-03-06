@@ -71,14 +71,14 @@ def get_or_create_job(path: Path, u_ctx: UploadContext) -> Tuple[Job, bool]:
 
 
 def _scan_and_filter(
-    target: Path | List[Path], patterns: list[str], max_filesize_bytes: int
+    path: Path | List[Path], patterns: list[str], max_filesize_bytes: int
 ) -> ScanReport:
     """
     Escanea el objetivo y aplica reglas de exclusión.
     Retorna un ScanReport con los archivos válidos y las omisiones categorizadas.
     """
-    if not isinstance(target, list) and not isinstance(target, Path):
-        raise ValueError(f"Invalid target type: {type(target)}")
+    if not isinstance(path, list) and not isinstance(path, Path):
+        raise ValueError(f"Invalid path type: {type(path)}")
 
     report = ScanReport()
 
@@ -110,15 +110,15 @@ def _scan_and_filter(
         # Si pasa todo, es un archivo válido
         report.found.append(p)
 
-    if isinstance(target, list):
-        candidates = target
-    elif isinstance(target, Path):
-        if target.is_file():
-            candidates = [target]
+    if isinstance(path, list):
+        candidates = path
+    elif isinstance(path, Path):
+        if path.is_file():
+            candidates = [path]
         else:
-            candidates = list(target.rglob("*"))
+            candidates = list(path.rglob("*"))
     else:
-        raise ValueError(f"Invalid target type: {type(target)}")
+        raise ValueError(f"Invalid path type: {type(path)}")
 
     for p in candidates:
         if p.is_file():
@@ -158,7 +158,7 @@ def prepare_upload_context(client: "Client", db, settings: Settings) -> UploadCo
 @handle_config_errors
 def upload_file(
     ctx: typer.Context,
-    target: Path = typer.Argument(
+    path: Path = typer.Argument(
         ..., exists=True, help="Archivo o directorio a procesar."
     ),
     force: bool = typer.Option(
@@ -187,12 +187,12 @@ def upload_file(
 
     # --- Scaneo y Informe ---
     exclusion_patterns = settings.all_exclusion_patterns()
-    with console.status(f"[dim]Escaneando {target}...[/dim]"):
+    with console.status(f"[dim]Escaneando {path}...[/dim]"):
         scan_report = _scan_and_filter(
-            target, exclusion_patterns, settings.max_filesize_bytes
+            path, exclusion_patterns, settings.max_filesize_bytes
         )
 
-    if target.is_dir():
+    if path.is_dir():
         # Si es una carpeta, mostramos lo que encontro.
         DisplayUpload.announces_total_files_found(scan_report)
 
@@ -205,7 +205,7 @@ def upload_file(
 
     # Debe ir despues del reporte de exclusion.
     if not scan_report.found:
-        if target.is_dir():
+        if path.is_dir():
             UI.warn("No se encontraron archivos válidos para procesar.")
         raise typer.Exit(0)
 

@@ -270,10 +270,10 @@ def search_config(
         me = cast("User", client.get_me())
         UI.info(f"Telegram Session: [bold]{me.username or me.first_name}[/]")
 
-        target_chat_id = None
+        chat_id = None
 
         if is_direct_identifier(query):
-            target_chat_id = normalize_chat_id(query)
+            chat_id = normalize_chat_id(query)
         else:
             is_exact = not contains
             search_desc = (
@@ -286,7 +286,7 @@ def search_config(
                 result = chat_searcher.search_by_name(query, depth, is_exact)
 
             if result.is_resolved and result.winner:
-                target_chat_id = result.winner.id
+                chat_id = result.winner.id
 
             elif result.is_ambiguous:
                 conflicts = len(result.conflicts)
@@ -323,7 +323,7 @@ def search_config(
 
         # Verificación de permisos
         with UI.loading("Verificando permisos..."):
-            report = chat_access.verify_access(target_chat_id)
+            report = chat_access.verify_access(chat_id)
 
         if not (report.is_ready and report.chat):
             UI.warn("No tienes permisos de escritura en el chat.")

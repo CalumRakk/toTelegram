@@ -137,7 +137,7 @@ class UploadService:
                 "Message",
                 self.client.send_document(
                     chat_id=self.tg_chat.id,
-                    document=doc_stream,
+                    document=doc_stream,  # type: ignore
                     file_name=filename,
                     caption=caption,
                     progress=UploadProgress(),
