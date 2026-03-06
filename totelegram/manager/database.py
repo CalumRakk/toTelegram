@@ -15,7 +15,7 @@ class DatabaseSession:
         self.db_path = Path(db_path) if db_path != ":memory:" else db_path
         self.db = None
 
-    def __enter__(self):
+    def __enter__(self) -> peewee.SqliteDatabase:
         if db_proxy.obj is not None:
             current_db_path = getattr(db_proxy.obj, "database", None)
 

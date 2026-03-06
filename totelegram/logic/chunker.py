@@ -1,134 +1,38 @@
 import logging
-from pathlib import Path
-from typing import List, Tuple, Union
+from typing import List, Tuple
 
 import tartape
 
-from totelegram.common.enums import SourceType, Strategy
-from totelegram.common.utils import create_md5sum_by_hashlib
+from totelegram.common.enums import SourceType
 from totelegram.manager.models import Job, Payload
 
 logger = logging.getLogger(__name__)
 
 
-class FileChunker:
+def chunk_ranges(file_size: int, chunk_size: int) -> List[Tuple[int, int]]:
+    """
+    Genera una lista de tuplas (inicio, fin) para la división del archivo.
+    El rango 'fin' es exclusivo (no incluido en la lectura).
+
+    Referencia:
+        https://chatgpt.com/share/68a6ec82-8874-8012-9c27-af04127e28b0
+
+    Args:
+        file_size: Tamaño total del archivo.
+        chunk_size: Tamaño del bloque deseado.
+
+    Returns:
+        List[Tuple[int, int]]: Lista de coordenadas [(0, 100), (100, 200), ...].
+    """
+    return [
+        (start, min(start + chunk_size, file_size))
+        for start in range(0, file_size, chunk_size)
+    ]
+
+
+class Chunker:
     @classmethod
-    def split_file(
-        cls, file_path: Union[str, Path], chunk_size: int, output_folder: Path
-    ) -> List[Path]:
-        """
-        Divide un archivo físico en múltiples fragmentos (chunks) guardados en disco.
-
-        Args:
-            file_path: Ruta al archivo original.
-            chunk_size: Tamaño máximo de cada fragmento en bytes.
-            output_folder: Directorio donde se guardarán los fragmentos resultantes.
-
-        Returns:
-            List[Path]: Lista con las rutas de los archivos fragmentados creados.
-
-        Raises:
-            FileNotFoundError: Si el archivo origen no existe.
-            ValueError: Si el archivo es más pequeño que el chunk_size (no requiere división).
-        """
-        file_path = Path(file_path)
-        output_folder.mkdir(exist_ok=True, parents=True)
-
-        if not file_path.exists():
-            raise FileNotFoundError(f"El archivo {file_path} no existe.")
-
-        file_size = file_path.stat().st_size
-        if file_size <= chunk_size:
-            raise ValueError(
-                "El archivo es más pequeño que el tamaño del chunk, no requiere división."
-            )
-
-        # Calculamos los rangos y procedemos al corte físico
-        ranges = cls._chunk_ranges(file_size, chunk_size)
-        chunks = cls._split_file(file_path, ranges, output_folder)
-
-        return chunks
-
-    @classmethod
-    def _chunk_ranges(cls, file_size: int, chunk_size: int) -> List[Tuple[int, int]]:
-        """
-        Genera una lista de tuplas (inicio, fin) para la división del archivo.
-        El rango 'fin' es exclusivo (no incluido en la lectura).
-
-        Referencia:
-            https://chatgpt.com/share/68a6ec82-8874-8012-9c27-af04127e28b0
-
-        Args:
-            file_size: Tamaño total del archivo.
-            chunk_size: Tamaño del bloque deseado.
-
-        Returns:
-            List[Tuple[int, int]]: Lista de coordenadas [(0, 100), (100, 200), ...].
-        """
-        return [
-            (start, min(start + chunk_size, file_size))
-            for start in range(0, file_size, chunk_size)
-        ]
-
-    @classmethod
-    def _split_file(
-        cls,
-        file_path: Path,
-        ranges: List[Tuple[int, int]],
-        folder: Path,
-        block_size: int = 1024 * 1024,
-    ) -> List[Path]:
-        """
-        Lee el archivo origen y escribe las partes físicas en disco.
-        Utiliza lectura por bloques (buffer) para optimizar el uso de memoria RAM,
-        evitando cargar chunks gigantes (ej. 2GB) completamente en memoria.
-
-        Referencia:
-            https://chatgpt.com/share/68a6ec3b-988c-8012-b334-f0f2a3524f8c
-
-        Args:
-            file_path: Ruta del archivo origen.
-            ranges: Lista de tuplas con inicio y fin de bytes.
-            folder: Carpeta destino.
-            block_size: Tamaño del buffer de lectura (default 1MB).
-
-        Returns:
-            List[Path]: Lista de rutas de los archivos generados.
-        """
-        chunks = []
-        total_parts = len(ranges)
-
-        with open(file_path, "rb") as f:
-            for idx, (start, end) in enumerate(ranges, start=1):
-                f.seek(start)
-                remaining = end - start
-
-                # Naming convention: video.mp4_1-5, video.mp4_2-5, etc.
-                chunk_filename = f"{file_path.name}_{idx}-{total_parts}"
-                chunk_path = folder / chunk_filename
-
-                with open(chunk_path, "wb") as out:
-                    while remaining > 0:
-                        # Leemos lo que sea menor: el buffer estándar o lo que falta del chunk
-                        read_size = min(block_size, remaining)
-                        data = f.read(read_size)
-
-                        if not data:
-                            break
-
-                        out.write(data)
-                        remaining -= len(data)
-
-                chunks.append(chunk_path)
-
-        return chunks
-
-
-class ChunkingService:
-    def __init__(self, work_dir: Path):
-        self.work_dir = work_dir
-
-    def process_job(self, job: Job) -> List[Payload]:
+    def get_or_create(cls, job: Job) -> List[Payload]:
         """Decide la segmentación basándose en el tipo de recurso."""
 
         if job.payloads.count() > 0:
@@ -136,12 +40,14 @@ class ChunkingService:
             return list(job.payloads.order_by(Payload.sequence_index))
 
         if job.source.type == SourceType.FOLDER:
-            return self._plan_virtual_volumes(job)
+            return cls._process_folder_job(job)
         else:
-            return self._process_physical_file(job)
+            return cls._process_file_job(job)
 
-    def _process_physical_file(self, job: Job) -> List[Payload]:
+    @classmethod
+    def _process_file_job(cls, job: Job) -> List[Payload]:
         """
+        # TODO: ACTUALIZAR.
         Procesa un Job y devuelve una lista de Payloads listos para ser subidos.
 
         - Si Strategy.SINGLE: Crea un Payload único apuntando al archivo original.
@@ -154,67 +60,60 @@ class ChunkingService:
         Returns:
             List[Payload]: Lista de payloads listos para ser subidos.
         """
+        limit = job.config.tg_max_size
+        ranges = chunk_ranges(file_size=job.source.size, chunk_size=limit)
+        payloads = []
+        count_parts = len(ranges)
+        # FIX: consulta N+1
+        filename = job.path.name
+        for idx, (start, end) in enumerate(ranges):
+            part_num = idx + 1
+            if count_parts > 1:
+                filename = f"{filename}_{part_num}-{count_parts}"
 
-        if job.payloads.count() > 0:
-            raise Exception("Ya existen payloads para este job.")
-
-        if job.strategy == Strategy.SINGLE:
-            logger.info(f"Job {job.id}: Estrategia SINGLE. Creando payload único.")
-            return Payload.create_payloads(job, [job.path])
-
-        elif job.strategy == Strategy.CHUNKED:
-            logger.info(f"Job {job.id}: Estrategia CHUNKED. Iniciando división...")
-
-            chunks_folder = self.work_dir / "chunks" / job.source.md5sum
-            chunks_paths = FileChunker.split_file(
-                file_path=job.path,
-                chunk_size=job.config.tg_max_size,
-                output_folder=chunks_folder,
+            payloads.append(
+                Payload(
+                    job=job,
+                    sequence_index=idx,
+                    md5sum=None,
+                    size=end - start,
+                    start_offset=start,
+                    end_offset=end,
+                    filename=filename,
+                )
             )
-            return Payload.create_payloads(job, chunks_paths)
+        return payloads
 
-        raise Exception("Estrategia de Job desconocida.")
+    @classmethod
+    def _process_folder_job(cls, job: Job):
+        logger.info(f"Planificando volúmenes con TarTape para: {job.source.path_str}")
 
-    def split_file_for_missing_payload(self, job: Job, payload: Payload):
-        """Re-genera los fragmentos del archivo original."""
-        chunks_folder = self.work_dir / "chunks"
-
-        FileChunker.split_file(
-            file_path=job.path,
-            chunk_size=job.config.tg_max_size,
-            output_folder=chunks_folder,
-        )
-
-        if not payload.path.exists():
-            raise Exception("No se pudo reconstruir la pieza faltante.")
-
-        new_md5 = create_md5sum_by_hashlib(payload.path)
-        if new_md5 != payload.md5sum:
-            raise Exception(
-                "Error de integridad: La pieza re-generada no coincide con el registro original."
-            )
-
-    def _plan_virtual_volumes(self, job: Job) -> List[Payload]:
         if not job.source.tape_catalog:
             raise ValueError("El Job necesita un inventario.")
 
         tape = tartape.open(job.source.path_str)
         limit = job.config.tg_max_size
 
-        logger.info(f"Planificando volúmenes con TarTape para: {job.source.path_str}")
-
         payloads = []
         for vol_idx, (volume_stream, _) in enumerate(tape.iter_volumes(size=limit)):
-
-            virtual_path = f"virtual://{job.id}/vol_{vol_idx}"
-
-            payload = Payload.create(
+            payload = Payload(
                 job=job,
                 sequence_index=vol_idx,
-                temp_path=virtual_path,
-                md5sum=f"PENDING:{tape.fingerprint}:{vol_idx}",
-                size=volume_stream.size,
             )
             payloads.append(payload)
 
         return payloads
+
+    # def _commit_payload_success(cls, payload: Payload, tg_message: "Message", md5: str):
+    #     """Guarda el MD5 y vincula el mensaje de Telegram con el Payload."""
+    #     from totelegram.manager.database import db_proxy
+
+    #     with db_proxy.atomic():
+    #         # Guardamos el MD5 calculado durante la subida
+    #         payload.md5sum = md5
+    #         payload.save(only=[Payload.md5sum])
+
+    #         # Creamos el acceso efectivo (RemotePayload)
+    #         RemotePayload.register_upload(
+    #             payload=payload, tg_message=tg_message, owner=cls.current_user
+    #         )

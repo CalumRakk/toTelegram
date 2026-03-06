@@ -66,7 +66,7 @@ ChatID = Annotated[
 class Settings(BaseSettings):
     # TODO: agrega un default que impida subir archivo muy pequeños.
 
-    MAX_FILENAME_LENGTH: ClassVar[int] = 55
+    max_filename_length: ClassVar[int] = 55
     chat_id: ChatID = Field(
         default=VALUE_NOT_SET,
         description="ID del chat destino. NOT_SET indica configuración pendiente.",

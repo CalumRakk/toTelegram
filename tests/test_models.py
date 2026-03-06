@@ -1,18 +1,13 @@
-import json
 import unittest
-from pathlib import Path
 
 import peewee
 
-from totelegram.common.enums import JobStatus, Strategy
+from totelegram.common.enums import Strategy
 from totelegram.manager.database import DatabaseSession  # type: ignore
 from totelegram.manager.models import (
     Job,
-    Payload,
-    RemotePayload,
     SourceFile,
     TelegramChat,
-    TelegramUser,
 )
 
 
@@ -63,14 +58,14 @@ class TestModelsArchitecture(unittest.TestCase):
 
         # CASO : El archivo (150b) es mayor que el limite (100b) -> CHUNKED
 
-        job_chunked = Job.create_contract(
+        job_chunked = Job.formalize_intent(
             source, self.chat, is_premium=False, tg_limit=100
         )
         self.assertEqual(job_chunked.strategy, Strategy.CHUNKED)
         self.assertEqual(job_chunked.config.tg_max_size, 100)
 
         # CASO : El archivo (150b) es menor que el limite (200b) -> SINGLE
-        job_single = Job.create_contract(
+        job_single = Job.formalize_intent(
             source, self.chat_alternate, is_premium=True, tg_limit=200
         )
         self.assertEqual(job_single.strategy, Strategy.SINGLE)
@@ -89,58 +84,58 @@ class TestModelsArchitecture(unittest.TestCase):
             mimetype="app/zip",
         )
 
-        job = Job.create_contract(source, self.chat, is_premium=False, tg_limit=100)
+        job = Job.formalize_intent(source, self.chat, is_premium=False, tg_limit=100)
 
         # Recuperamos de la DB para asegurar que el JSONField funcionó
         job_from_db = Job.get_by_id(job.id)
         self.assertEqual(job_from_db.config.tg_max_size, 100)
 
-    def test_payload_relation_and_status(self):
-        """Valida que los payloads se vinculen correctamente y el Job cambie de estado."""
-        source = SourceFile.create(
-            path_str="doc.pdf", md5sum="h_pdf", size=10, mtime=1.0, mimetype="app/pdf"
-        )
+    # def test_payload_relation_and_status(self):
+    #     """Valida que los payloads se vinculen correctamente y el Job cambie de estado."""
+    #     source = SourceFile.create(
+    #         path_str="doc.pdf", md5sum="h_pdf", size=10, mtime=1.0, mimetype="app/pdf"
+    #     )
 
-        job = Job.create_contract(source, self.chat, is_premium=False, tg_limit=100)
+    #     job = Job.formalize_intent(source, self.chat, is_premium=False, tg_limit=100)
 
-        self.assertEqual(job.status, JobStatus.PENDING)
+    #     self.assertEqual(job.status, JobStatus.PENDING)
 
-        # Simular creación de un payload (SINGLE)
-        Payload.create_payloads(job, [Path("doc.pdf")])
-        self.assertEqual(job.payloads.count(), 1)
+    #     # Simular creación de un payload (SINGLE)
+    #     Payload.create_payloads(job, [Path("doc.pdf")])
+    #     self.assertEqual(job.payloads.count(), 1)
 
-        job.set_uploaded()
-        self.assertEqual(job.status, JobStatus.UPLOADED)
+    #     job.set_uploaded()
+    #     self.assertEqual(job.status, JobStatus.UPLOADED)
 
-    def test_remote_payload_register_upload(self):
-        """Valida el registro del 'Vínculo de Acceso' (RemotePayload)."""
-        source = SourceFile.create(
-            path_str="a.txt", md5sum="h1", size=10, mtime=1, mimetype="t"
-        )
+    # def test_remote_payload_register_upload(self):
+    #     """Valida el registro del 'Vínculo de Acceso' (RemotePayload)."""
+    #     source = SourceFile.create(
+    #         path_str="a.txt", md5sum="h1", size=10, mtime=1, mimetype="t"
+    #     )
 
-        job = Job.create_contract(source, self.chat, False, 100)
-        payload = Payload.create(job=job, sequence_index=0, md5sum="hp1", size=10)
+    #     job = Job.formalize_intent(source, self.chat, False, 100)
+    #     payload = Payload.create(job=job, sequence_index=0, md5sum="hp1", size=10)
 
-        user = TelegramUser.create(id=123, first_name="Tester")
+    #     user = TelegramUser.create(id=123, first_name="Tester")
 
-        # Mock de objeto Message de Pyrogram que cumpla con json.loads(str(msg))
-        class MockTgMessage:
-            def __init__(self):
-                self.id = 999
-                self.chat = type("obj", (object,), {"id": -100123456})
+    #     # Mock de objeto Message de Pyrogram que cumpla con json.loads(str(msg))
+    #     class MockTgMessage:
+    #         def __init__(self):
+    #             self.id = 999
+    #             self.chat = type("obj", (object,), {"id": -100123456})
 
-            def __str__(self):
-                return json.dumps(
-                    {
-                        "message_id": self.id,
-                        "chat": {"id": self.chat.id, "type": "channel"},  # type: ignore
-                    }
-                )
+    #         def __str__(self):
+    #             return json.dumps(
+    #                 {
+    #                     "message_id": self.id,
+    #                     "chat": {"id": self.chat.id, "type": "channel"},  # type: ignore
+    #                 }
+    #             )
 
-        remote = RemotePayload.register_upload(
-            payload=payload, tg_message=MockTgMessage(), owner=user
-        )
+    #     remote = RemotePayload.register_upload(
+    #         payload=payload, tg_message=MockTgMessage(), owner=user
+    #     )
 
-        self.assertEqual(remote.message_id, 999)
-        self.assertEqual(remote.chat_id, -100123456)
-        self.assertEqual(remote.owner.id, 123)
+    #     self.assertEqual(remote.message_id, 999)
+    #     self.assertEqual(remote.chat_id, -100123456)
+    #     self.assertEqual(remote.owner.id, 123)

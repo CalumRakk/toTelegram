@@ -1,24 +1,85 @@
+import time
 from pathlib import Path
-from typing import TYPE_CHECKING, List, cast
+from typing import TYPE_CHECKING, List, Tuple, cast
 
+import tartape
 import typer
 
 from totelegram.cli.commands.config import _get_config_tools, handle_config_errors
 from totelegram.cli.ui.console import UI, console
 from totelegram.cli.ui.views import DisplayUpload
 from totelegram.common.consts import VALUE_NOT_SET, Commands
-from totelegram.common.enums import Strategy
+from totelegram.common.enums import AvailabilityState
 from totelegram.common.schemas import CLIState, ScanReport
 from totelegram.common.utils import is_excluded
-from totelegram.logic.chunker import ChunkingService
+from totelegram.logic.chunker import Chunker
 from totelegram.logic.discovery import DiscoveryService
 from totelegram.logic.snapshot import SnapshotService
 from totelegram.logic.uploader import UploadService
-from totelegram.manager.models import Job, SourceFile, TelegramChat
+from totelegram.manager.models import (
+    Job,
+    Payload,
+    RemotePayload,
+    SourceFile,
+    TelegramChat,
+    TelegramUser,
+)
+from totelegram.manager.setting import Settings
 
 if TYPE_CHECKING:
     from pyrogram import Client  # type: ignore
     from pyrogram.types import Chat, User
+
+
+def get_or_create_job(
+    path: Path, tg_chat: "Chat", is_premium: bool, settings: Settings
+) -> Tuple[Job, bool, SourceFile]:
+    chat_db, _ = TelegramChat.get_or_create_from_chat(tg_chat)
+
+    if path.is_dir():
+        exclusion_patterns = settings.all_exclusion_patterns()
+        if not tartape.exists(path):
+            with UI.loading("Generando cinta..."):
+                tape = tartape.create(
+                    path,
+                    exclude=exclusion_patterns,
+                    calculate_hashes=True,
+                )
+                try:
+                    source = SourceFile.from_tape(path, tape)
+                except Exception as e:
+                    tape.destroy()
+                    raise
+        else:
+            tape = tartape.open(path)
+            source = SourceFile.get(SourceFile.md5sum == tape.fingerprint)
+            if not tape.verify():
+                UI.error("¡Cinta Comprometida! La carpeta ha sido modificada.")
+                UI.info(f"Ruta: [dim]{path}[/dim]")
+                UI.warn(
+                    "Para garantizar la integridad, no se puede reanudar una cinta alterada."
+                )
+                UI.tip(
+                    "Si deseas archivar la nueva versión, debes eliminar el rastro anterior:",
+                    commands=f"totelegram profile delete-source (proximamente) o limpiar la DB.",
+                )
+                raise typer.Exit(1)
+    else:
+        with console.status(f"[dim]Procesando {path}...[/dim]"):
+            source = SourceFile.get_or_create_from_path(path)
+
+    job = Job.get_for_source_in_chat(source, chat_db)
+    if not job:
+        tg_limit = (
+            settings.tg_max_size_premium if is_premium else settings.tg_max_size_normal
+        )
+        job = Job.formalize_intent(source, chat_db, is_premium, tg_limit)
+        UI.info(
+            f"Nuevo contrato de disponibilidad creado (Límite: {tg_limit / (1024*1024):.0f}MB)"
+        )
+        return job, True, source
+
+    return job, False, source
 
 
 def _scan_and_filter(
@@ -108,6 +169,7 @@ def upload_file(
         UI.tip("puedes configurarlo usando uno de estos comandos:", commands)
         raise typer.Exit(1)
 
+    # --- Scaneo y Informe ---
     exclusion_patterns = settings.all_exclusion_patterns()
     with console.status(f"[dim]Escaneando {target}...[/dim]"):
         scan_report = _scan_and_filter(
@@ -131,53 +193,64 @@ def upload_file(
             UI.warn("No se encontraron archivos válidos para procesar.")
         raise typer.Exit(0)
 
+    # --- Subida de lo encontrado ---
     UI.info(f"[dim]Procesando {len(scan_report.found)} archivos[/dim]")
-
-    with state.scope() as client:
+    with state.scope() as (client, db):
+        upload_limit_rate_kbps = settings.upload_limit_rate_kbps
+        max_filename_length = settings.max_filename_length
+        discovery = DiscoveryService(client, db)
+        uploader = UploadService(client, upload_limit_rate_kbps, max_filename_length)
 
         with UI.loading("Sincronizando con Telegram..."):
             tg_chat = cast("Chat", client.get_chat(settings.chat_id))
             me = cast("User", client.get_me())
+            owner = TelegramUser.get_or_create_from_tg(me)
 
         UI.success(f"Conectado como [bold]{me.first_name or me.username}[/]")
-        UI.info(
-            f"Destino: [bold cyan]{tg_chat.title=}[/] [dim](ID: {tg_chat.id})[/dim]"
-        )
-        chunker = ChunkingService(work_dir=state.manager.worktable)
-        discovery = DiscoveryService(client)
-        uploader = UploadService(
-            client=client,
-            chunk_service=chunker,
-            upload_limit_rate_kbps=settings.upload_limit_rate_kbps,
-            max_filename_length=settings.MAX_FILENAME_LENGTH,
-            discovery=discovery,
-        )
+        UI.info(f"Destino: [bold cyan]{tg_chat.title}[/] [dim](ID: {tg_chat.id})[/]")
+
         for path in scan_report.found:
-            with console.status(f"[dim]Procesando {path}...[/dim]"):
-                source = SourceFile.get_or_create_from_path(path)
+            job, _, source = get_or_create_job(path, tg_chat, me.is_premium, settings)
 
-            chat_db, _ = TelegramChat.get_or_create_from_chat(tg_chat)
-            job = Job.get_for_source_in_chat(source, chat_db)
-            if not job:
-                tg_limit = (
-                    settings.tg_max_size_premium
-                    if me.is_premium
-                    else settings.tg_max_size_premium
+            report = discovery.investigate(job)
+            if report.state == AvailabilityState.FULFILLED:
+                UI.success(
+                    "¡Operación completada! Todos los volúmenes ya están en el destino."
                 )
-                job = Job.create_contract(source, chat_db, me.is_premium, tg_limit)
-                UI.info(f"Estrategia fijada: [bold]{job.strategy.value}[/]")
-                if job.strategy == Strategy.SINGLE:
-                    UI.info(f"[bold]Archivo único:[/bold] [blue]{path.name}[/blue]")
-                else:
-                    parts_count = discovery._get_expected_count(job)
-                    UI.info(
-                        f"[bold]Fragmentando en {parts_count} partes:[/bold] [blue]{path.name}[/blue]"
+                job.set_uploaded()
+                continue
+
+            elif report.state == AvailabilityState.NEEDS_UPLOAD:
+                payloads = Chunker.get_or_create(job)
+                Payload.bulk_create(payloads)
+                for payload in payloads:
+                    if payload.has_remote:
+                        continue
+
+                    message = uploader.upload_payload(
+                        tg_chat.id, path, payload, source.md5sum
                     )
+                    RemotePayload.register_upload(payload, message, owner)
 
-            discovery_report = discovery.investigate(job)
-            if force:
-                uploader._execute_physical_upload(job)
+            elif report.state == AvailabilityState.CAN_FORWARD:
+                job = report.remotes[0].job  # type: ignore
+                payloads = Chunker.get_or_create(job)
+                Payload.bulk_create(payloads)
+                for payload in payloads:
+                    if payload.has_remote:
+                        continue
+                    remote = next(
+                        i
+                        for i in report.remotes
+                        if i.payload.sequence_index == payload.sequence_index
+                    )
+                    message = uploader.smart_forward_strategy(
+                        tg_chat.id, remote, payload, source.md5sum
+                    )
+                    RemotePayload.register_upload(payload, message, owner)
+                    time.sleep(1)
             else:
-                uploader.run(job, discovery_report)
+                raise ValueError(f"Invalid state: {report.state}")
 
+            job.set_uploaded()
             SnapshotService.generate_snapshot(job)

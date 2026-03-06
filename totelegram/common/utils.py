@@ -7,7 +7,7 @@ import sys
 from contextlib import nullcontext
 from pathlib import Path
 from time import sleep
-from typing import TYPE_CHECKING, Any, List, Union, cast
+from typing import TYPE_CHECKING, Any, Iterable, List, Union, cast
 
 from totelegram.cli.ui.console import console
 from totelegram.common.consts import APP_NAME, SELF_CHAT_ALIASES, VALUE_NOT_SET
@@ -24,7 +24,7 @@ if sys.version_info >= (3, 12):
     from itertools import batched
 else:
 
-    def batched(iterable: list[Any], n):
+    def batched(iterable: List[Any], n) -> Iterable[Any]:
         """Fallback para Python < 3.12"""
         import itertools
 

@@ -12,6 +12,7 @@ from tartape.schemas import EntryState, ManifestEntry
 
 from totelegram import __version__
 from totelegram.common.enums import JobStatus, SourceType, Strategy
+from totelegram.telegram.client import parse_message_json_data
 
 if TYPE_CHECKING:
     from totelegram.manager.setting import Settings
@@ -237,8 +238,6 @@ class SourceFile(BaseModel):
 
 
 class Job(BaseModel):
-    """Representa la intención de disponibilizar un SourceFile en un Chat específico."""
-
     id: int
     payloads: peewee.ModelSelect  # type: ignore
 
@@ -248,8 +247,6 @@ class Job(BaseModel):
     strategy = cast(Strategy, EnumField(Strategy))
     config = cast(StrategyConfig, PydanticJSONField(StrategyConfig))
     status = cast(JobStatus, EnumField(JobStatus))
-
-    volume_index = peewee.IntegerField(null=True)
 
     class Meta:  # type: ignore
         # Esto implementa la visión: "Si ya lo subí aquí, no lo subas de nuevo".
@@ -264,7 +261,7 @@ class Job(BaseModel):
         self.save(only=[Job.status, Job.updated_at])
 
     @staticmethod
-    def create_contract(
+    def formalize_intent(
         source: "SourceFile",
         chat: "TelegramChat",
         is_premium: bool,
@@ -273,16 +270,11 @@ class Job(BaseModel):
         """
         Crea un Job basado en la estrategía y la configuración de la cuenta.
         """
-        # Evaluamos la estrategia
-        strategy = Strategy.evaluate(source.size, tg_limit)
 
-        # Empaquetamos la configuración que regirá este Job para siempre (ADR-002)
+        strategy = Strategy.evaluate(source.size, tg_limit)
         config = StrategyConfig(
             tg_max_size=tg_limit, user_is_premium=is_premium, app_version=__version__
         )
-
-        logger.info(f"JOB CONTRACT: {source.md5sum} -> {strategy} (Limit: {tg_limit})")
-
         return Job.create(
             source=source,
             chat=chat,
@@ -298,55 +290,38 @@ class Job(BaseModel):
         """Devuelve el Job que existe para el source en el chat especificado."""
         return Job.get_or_none((Job.source == source) & (Job.chat == chat))
 
+    def adopt_job(self, job: "Job") -> "Job":
+        self.strategy = job.strategy
+        self.status = job.status
+        self.config = job.config
+        self.save(only=[Job.strategy, Job.status, Job.config, Job.updated_at])
+        return self
+
 
 class Payload(BaseModel):
     """Representa una parte física (trozo) que compone un Job."""
 
     id: int
-
-    # En realidad es un ModelSelect, pero se tipa asi para pylance
     payloads: Generator["Payload", None, None]
 
     job = cast(Job, peewee.ForeignKeyField(Job, backref="payloads"))
+    md5sum = cast(Optional[str], peewee.CharField(null=True))
+
+    filename = cast(str, peewee.CharField())  # metadato para evitar consulta extra.
     sequence_index = cast(int, peewee.IntegerField())
-    temp_path = cast(str, peewee.CharField(null=True))
-    md5sum = cast(str, peewee.CharField())  # MD5 del trozo específico
+    start_offset = cast(int, peewee.IntegerField())
+    end_offset = cast(int, peewee.IntegerField())
     size = cast(int, peewee.IntegerField())
 
     @property
-    def path(self) -> Path:
-        return Path(self.temp_path)
-
-    @staticmethod
-    def create_payloads(job: Job, paths: list[Path]) -> list["Payload"]:
-        """Crea registros base para las partes. El MD5 es obligatorio."""
-        saved_payloads = []
-        with db_proxy.atomic():
-            for idx, path in enumerate(paths):
-                # Si es single, nos ahorramos tener que generar nuevamente el md5
-                if job.strategy == Strategy.SINGLE:
-                    md5_p, size_p = job.source.md5sum, job.source.size
-                else:
-                    md5_p, size_p = create_md5sum_by_hashlib(path), path.stat().st_size
-
-                payload = Payload.create(
-                    job=job,
-                    sequence_index=idx,
-                    temp_path=str(path),
-                    md5sum=md5_p,
-                    size=size_p,
-                )
-                saved_payloads.append(payload)
-        return saved_payloads
-
-    @property
-    def remote_exists(self) -> bool:
+    def has_remote(self) -> bool:
         return RemotePayload.select().where(RemotePayload.payload == self).exists()
 
 
 class RemotePayload(BaseModel):
     """Representa el Acceso Efectivo: El vínculo entre el Payload y el mensaje en Telegram."""
 
+    id: int
     payload_id: int
     chat_id: int
 
@@ -358,6 +333,27 @@ class RemotePayload(BaseModel):
     )
     # Backup completo del objeto Message de Pyrogram
     json_metadata = cast(dict, JSONField())
+    last_verified_at = cast(Optional[datetime], peewee.DateTimeField(null=True))
+
+    def mark_verified(self, message: "Message"):
+        """Actualiza el timestamp de validación."""
+        self.last_verified_at = datetime.now()
+        self.json_metadata = json.loads(str(message))
+        self.save(
+            only=[
+                RemotePayload.last_verified_at,
+                RemotePayload.json_metadata,
+                RemotePayload.updated_at,
+            ]
+        )
+
+    @property
+    def is_fresh(self) -> bool:
+        """Determina si la validación aún es confiable (15 minutos)."""
+        if not self.last_verified_at:
+            return False
+        delta = datetime.now() - self.last_verified_at
+        return delta.total_seconds() < 900  # 15 minutos
 
     @staticmethod
     def register_upload(
@@ -371,6 +367,10 @@ class RemotePayload(BaseModel):
             owner=owner,
             json_metadata=json.loads(str(tg_message)),
         )
+
+    @property
+    def message(self) -> "Message":
+        return parse_message_json_data(self.json_metadata)
 
 
 class TapeMember(BaseModel):

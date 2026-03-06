@@ -4,8 +4,12 @@ from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List, Optional, cast
 
+from totelegram.manager.database import DatabaseSession
+from totelegram.telegram.client import TelegramSession
+
 if TYPE_CHECKING:
     from pyrogram.types import Chat
+    from totelegram.manager.models import RemotePayload
 
 from pydantic import BaseModel, Field
 
@@ -89,14 +93,11 @@ class CLIState(BaseModel):
     @contextmanager
     def scope(self):
         """Unifica el ciclo de vida de la DB y la Sesión."""
-        from totelegram.manager.database import DatabaseSession
-        from totelegram.telegram.client import TelegramSession
-
         profile_name = cast(str, self.manager.resolve_profile_name(self.profile_name))
 
         with DatabaseSession(self.manager.database_path) as db:
             with TelegramSession.from_profile(profile_name, self.manager) as client:
-                yield client
+                yield client, db
 
 
 class AccessStatus(str, Enum):

@@ -1,6 +1,6 @@
 import unittest
 
-from totelegram.logic.chunker import FileChunker
+from totelegram.logic.chunker import chunk_ranges
 
 
 class TestChunkingMath(unittest.TestCase):
@@ -8,7 +8,7 @@ class TestChunkingMath(unittest.TestCase):
         """Caso: 10MB archivo, 5MB chunk -> 2 partes exactas"""
         file_size = 10 * 1024 * 1024
         chunk_size = 5 * 1024 * 1024
-        ranges = FileChunker._chunk_ranges(file_size, chunk_size)
+        ranges = chunk_ranges(file_size, chunk_size)
 
         self.assertEqual(len(ranges), 2)
         self.assertEqual(ranges[0], (0, 5242880))
@@ -16,6 +16,6 @@ class TestChunkingMath(unittest.TestCase):
 
     def test_chunk_ranges_remainder(self):
         """Caso: 10 bytes archivo, 3 bytes chunk -> 4 partes (3, 3, 3, 1)"""
-        ranges = FileChunker._chunk_ranges(10, 3)
+        ranges = chunk_ranges(10, 3)
         expected = [(0, 3), (3, 6), (6, 9), (9, 10)]
         self.assertEqual(ranges, expected)
