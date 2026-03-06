@@ -6,7 +6,7 @@ from totelegram.common.enums import Strategy
 from totelegram.manager.database import DatabaseSession  # type: ignore
 from totelegram.manager.models import (
     Job,
-    SourceFile,
+    Source,
     TelegramChat,
 )
 
@@ -26,8 +26,8 @@ class TestModelsArchitecture(unittest.TestCase):
         self.db_manager.close()
 
     def test_source_file_uniqueness_by_md5(self):
-        """Prueba la unicidad de SourceFile por MD5."""
-        SourceFile.create(
+        """Prueba la unicidad de Source por MD5."""
+        Source.create(
             path_str="video.mp4",
             md5sum="abc123",
             size=500,
@@ -35,7 +35,7 @@ class TestModelsArchitecture(unittest.TestCase):
             mimetype="video/mp4",
         )
         with self.assertRaises(peewee.IntegrityError):
-            SourceFile.create(
+            Source.create(
                 path_str="otra_ruta/video.mp4",
                 md5sum="abc123",
                 size=500,
@@ -48,7 +48,7 @@ class TestModelsArchitecture(unittest.TestCase):
         Prueba la lógica de ADR-002:
         El Job determina la estrategia al nacer basado en el límite de bytes.
         """
-        source = SourceFile.create(
+        source = Source.create(
             path_str="data.bin",
             md5sum="hash1",
             size=150,
@@ -76,7 +76,7 @@ class TestModelsArchitecture(unittest.TestCase):
         Verifica que una vez creado el Job, su config queda persistida en JSON
         y no cambia aunque cambien los parámetros externos (ADR-002).
         """
-        source = SourceFile.create(
+        source = Source.create(
             path_str="test.zip",
             md5sum="hash_imm",
             size=150,
@@ -92,7 +92,7 @@ class TestModelsArchitecture(unittest.TestCase):
 
     # def test_payload_relation_and_status(self):
     #     """Valida que los payloads se vinculen correctamente y el Job cambie de estado."""
-    #     source = SourceFile.create(
+    #     source = Source.create(
     #         path_str="doc.pdf", md5sum="h_pdf", size=10, mtime=1.0, mimetype="app/pdf"
     #     )
 
@@ -109,7 +109,7 @@ class TestModelsArchitecture(unittest.TestCase):
 
     # def test_remote_payload_register_upload(self):
     #     """Valida el registro del 'Vínculo de Acceso' (RemotePayload)."""
-    #     source = SourceFile.create(
+    #     source = Source.create(
     #         path_str="a.txt", md5sum="h1", size=10, mtime=1, mimetype="t"
     #     )
 

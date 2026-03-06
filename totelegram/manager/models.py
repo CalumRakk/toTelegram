@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING, Generator, List, Optional, Tuple, cast
 import peewee
 import tartape
 from playhouse.sqlite_ext import JSONField
-from tartape import Tape
 from tartape.schemas import EntryState, ManifestEntry
 
 from totelegram import __version__
@@ -118,7 +117,7 @@ class TelegramUser(BaseModel):
         return user
 
 
-class SourceFile(BaseModel):
+class Source(BaseModel):
     """Representa la identidad única de un recurso (Archivo o Carpeta)."""
 
     path_str = cast(str, peewee.CharField())
@@ -165,26 +164,26 @@ class SourceFile(BaseModel):
         if changed:
             self.save(
                 only=[
-                    SourceFile.path_str,
-                    SourceFile.size,
-                    SourceFile.mtime,
-                    SourceFile.updated_at,
+                    Source.path_str,
+                    Source.size,
+                    Source.mtime,
+                    Source.updated_at,
                 ]
             )
         return changed
 
     @staticmethod
-    def get_or_create_from_path(path: Path) -> "SourceFile":
+    def get_or_create_from_filepath(path: Path) -> "Source":
         stat = path.stat()
         current_size = stat.st_size
         current_mtime = stat.st_mtime
         path_str = str(path)
 
         # Intento rápido por ruta y metadatos
-        cached = SourceFile.get_or_none(
-            (SourceFile.path_str == path_str)
-            & (SourceFile.size == current_size)
-            & (SourceFile.mtime == current_mtime)
+        cached = Source.get_or_none(
+            (Source.path_str == path_str)
+            & (Source.size == current_size)
+            & (Source.mtime == current_mtime)
         )
         if cached:
             return cached
@@ -192,14 +191,12 @@ class SourceFile(BaseModel):
         # Si falló el rápido, calculamos MD5
         md5sum = create_md5sum_by_hashlib(path)
 
-        source = cast(
-            Optional[SourceFile], SourceFile.get_or_none(SourceFile.md5sum == md5sum)
-        )
+        source = cast(Optional[Source], Source.get_or_none(Source.md5sum == md5sum))
         if source:
             source.update_if_needed(path)
             return source
 
-        return SourceFile.create(
+        return Source.create(
             md5sum=md5sum,
             path_str=path_str,
             size=current_size,
@@ -208,8 +205,18 @@ class SourceFile(BaseModel):
         )
 
     @staticmethod
-    def from_tape(folder_path, tape: Tape):
+    def get_or_create_from_folderpath(path, exclusion_patterns: List[str]):
+        if tartape.exists(path):
+            tape = tartape.open(path)
+            source = Source.get(Source.md5sum == tape.fingerprint)
+            tape.verify(raise_exception=True)
+            return source
 
+        tape = tartape.create(
+            path,
+            exclude=exclusion_patterns,
+            calculate_hashes=True,
+        )
         exclude_patterns = (
             json.dumps(tape.exclude_patterns)
             if isinstance(tape.exclude_patterns, list)
@@ -225,8 +232,8 @@ class SourceFile(BaseModel):
             exclude_patterns=exclude_patterns,
         )
 
-        source = SourceFile.create(
-            path_str=str(folder_path),
+        source = Source.create(
+            path_str=str(path),
             md5sum=catalog.fingerprint,
             size=catalog.total_size,
             mtime=tape.created_at,
@@ -241,7 +248,7 @@ class Job(BaseModel):
     id: int
     payloads: peewee.ModelSelect  # type: ignore
 
-    source = cast(SourceFile, peewee.ForeignKeyField(SourceFile, backref="jobs"))
+    source = cast(Source, peewee.ForeignKeyField(Source, backref="jobs"))
     chat = peewee.ForeignKeyField(TelegramChat, backref="jobs")
 
     strategy = cast(Strategy, EnumField(Strategy))
@@ -262,7 +269,7 @@ class Job(BaseModel):
 
     @staticmethod
     def formalize_intent(
-        source: "SourceFile",
+        source: "Source",
         chat: "TelegramChat",
         is_premium: bool,
         tg_limit: int,
@@ -285,7 +292,7 @@ class Job(BaseModel):
 
     @staticmethod
     def get_for_source_in_chat(
-        source: "SourceFile", chat: "TelegramChat"
+        source: "Source", chat: "TelegramChat"
     ) -> Optional["Job"]:
         """Devuelve el Job que existe para el source en el chat especificado."""
         return Job.get_or_none((Job.source == source) & (Job.chat == chat))
@@ -351,7 +358,6 @@ class RemotePayload(BaseModel):
     def sequence_index(self) -> int:
         return self.payload.sequence_index
 
-
     @property
     def is_fresh(self) -> bool:
         """Determina si la validación aún es confiable (15 minutos)."""
@@ -385,7 +391,7 @@ class TapeMember(BaseModel):
     """
 
     id: int
-    source = cast("SourceFile", peewee.ForeignKeyField(SourceFile, backref="members"))
+    source = cast("Source", peewee.ForeignKeyField(Source, backref="members"))
     relative_path = cast(str, peewee.CharField())
     size = cast(int, peewee.BigIntegerField())
     md5sum = cast(str, peewee.CharField())
@@ -398,7 +404,7 @@ class TapeMember(BaseModel):
 
     @classmethod
     def register_manifest_entries(
-        cls, source: "SourceFile", payload: "Payload", entries: list[ManifestEntry]
+        cls, source: "Source", payload: "Payload", entries: list[ManifestEntry]
     ):
         """
         Registra los archivos de un volumen (TapeMembers) y su GPS en el volumen.

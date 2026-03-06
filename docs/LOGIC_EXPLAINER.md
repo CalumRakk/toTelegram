@@ -29,7 +29,7 @@ Imagina que este archivo pesa 4GB y requiere **3 fragmentos (chunks)**.
 *   **Diagnóstico:** `SYSTEM_NEW`.
 *   **Estado de Duplicidad:** **Nulo.** No hay registros previos.
 *   **Resolución:** Subida física de los 3 chunks.
-*   **Resultado:** Se crea el `SourceFile`, el `Job` y 3 `RemotePayloads` vinculados al chat "Backup".
+*   **Resultado:** Se crea el `Source`, el `Job` y 3 `RemotePayloads` vinculados al chat "Backup".
 
 #### CASO 2: El Intento Repetido (Duplicidad Local)
 *   **Situación:** Al día siguiente, el usuario olvida que ya lo subió e intenta volver a subir "Video_Boda.mp4" al mismo chat "Backup".

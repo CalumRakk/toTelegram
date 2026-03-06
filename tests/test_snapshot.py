@@ -11,7 +11,7 @@
 #     Job,
 #     Payload,
 #     RemotePayload,
-#     SourceFile,
+#     Source,
 #     TelegramChat,
 #     TelegramUser,
 # )
@@ -37,7 +37,7 @@
 #         file_path = self.base_path / "video.mp4"
 #         file_path.write_bytes(b"contenido ficticio")
 
-#         source = SourceFile.create(
+#         source = Source.create(
 #             path_str=str(file_path),
 #             md5sum="original_md5",
 #             size=1000,

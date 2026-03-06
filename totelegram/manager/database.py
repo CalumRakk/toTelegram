@@ -45,7 +45,7 @@ class DatabaseSession:
             Job,
             Payload,
             RemotePayload,
-            SourceFile,
+            Source,
             TapeMember,
             TapeMemberGPS,
             TelegramChat,
@@ -54,7 +54,7 @@ class DatabaseSession:
 
         db_proxy.create_tables(
             [
-                SourceFile,
+                Source,
                 Job,
                 Payload,
                 RemotePayload,

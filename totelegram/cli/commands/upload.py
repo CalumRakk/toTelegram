@@ -1,7 +1,6 @@
 from pathlib import Path
 from typing import TYPE_CHECKING, List, Tuple, cast
 
-import tartape
 import typer
 
 from totelegram.cli.commands.config import _get_config_tools, handle_config_errors
@@ -17,7 +16,7 @@ from totelegram.logic.snapshot import SnapshotService
 from totelegram.logic.uploader import UploadService
 from totelegram.manager.models import (
     Job,
-    SourceFile,
+    Source,
     TelegramChat,
     TelegramUser,
 )
@@ -32,36 +31,24 @@ def get_or_create_job(path: Path, u_ctx: UploadContext) -> Tuple[Job, bool]:
     chat_db, _ = TelegramChat.get_or_create_from_chat(u_ctx.tg_chat)
 
     if path.is_dir():
-        exclusion_patterns = u_ctx.settings.all_exclusion_patterns()
-        if not tartape.exists(path):
-            with UI.loading("Generando cinta..."):
-                tape = tartape.create(
-                    path,
-                    exclude=exclusion_patterns,
-                    calculate_hashes=True,
-                )
-                try:
-                    source = SourceFile.from_tape(path, tape)
-                except Exception as e:
-                    tape.destroy()
-                    raise
-        else:
-            tape = tartape.open(path)
-            source = SourceFile.get(SourceFile.md5sum == tape.fingerprint)
-            if not tape.verify():
-                UI.error("¡Cinta Comprometida! La carpeta ha sido modificada.")
-                UI.info(f"Ruta: [dim]{path}[/dim]")
-                UI.warn(
-                    "Para garantizar la integridad, no se puede reanudar una cinta alterada."
-                )
-                UI.tip(
-                    "Si deseas archivar la nueva versión, debes eliminar el rastro anterior:",
-                    commands=f"totelegram profile delete-source (proximamente) o limpiar la DB.",
-                )
-                raise typer.Exit(1)
+        try:
+            exclusion_patterns = u_ctx.settings.all_exclusion_patterns()
+            with UI.loading("Obteniendo cinta..."):
+                source = Source.get_or_create_from_folderpath(path, exclusion_patterns)
+        except Exception as e:
+            UI.error("¡Cinta Comprometida! La carpeta ha sido modificada.")
+            UI.info(f"Ruta: [dim]{path}[/dim]")
+            UI.warn(
+                "Para garantizar la integridad, no se puede reanudar una cinta alterada."
+            )
+            UI.tip(
+                "Si deseas archivar la nueva versión, debes eliminar el rastro anterior:",
+                commands=f"totelegram profile delete-source (proximamente) o limpiar la DB.",
+            )
+            raise typer.Exit(1)
     else:
         with console.status(f"[dim]Procesando {path}...[/dim]"):
-            source = SourceFile.get_or_create_from_path(path)
+            source = Source.get_or_create_from_filepath(path)
 
     job = Job.get_for_source_in_chat(source, chat_db)
     if not job:

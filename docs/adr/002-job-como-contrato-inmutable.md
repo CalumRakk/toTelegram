@@ -9,7 +9,7 @@ En versiones anteriores, la creación del `Job` (la intención de subir un archi
 ## Decisión
 Hemos decidido tratar al **`Job` como un contrato inmutable de disponibilidad** una vez creado.
 
-1.  **Identidad Única:** Un Job se define estrictamente por el binomio `(SourceFile, TelegramChat)`.
+1.  **Identidad Única:** Un Job se define estrictamente por el binomio `(Source, TelegramChat)`.
 2.  **Inmutabilidad de Estrategia:** Una vez que un Job se registra como `CHUNKED` o `SINGLE`, esa decisión persiste para siempre, independientemente de si el usuario cambia sus settings o su estatus Premium. Esto garantiza que el "mapa" (Snapshot) generado al final sea coherente con las piezas subidas.
 3.  **Resiliencia de Chunks:** Si un Job está `PENDING` y los archivos físicos en disco desaparecen, el sistema debe ser capaz de re-generarlos siguiendo exactamente los parámetros (`tg_max_size`) guardados en el contrato del Job.
 

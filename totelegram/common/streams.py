@@ -40,6 +40,10 @@ class ThrottledFile(io.BufferedIOBase):
         self.name = path.name
         self.mode = "rb"
 
+    @property
+    def md5sum(self):
+        return self._file.md5sum  # type: ignore _file es VirtualFileStream o TarVolume
+
     def read(self, size: int = -1) -> bytes:  # type: ignore
         # Si size es -1 o None, leer todo (comportamiento estándar)
         if size is None or size < 0:

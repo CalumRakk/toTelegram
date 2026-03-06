@@ -5,7 +5,8 @@ import peewee
 import tartape
 
 from totelegram.common.enums import SourceType
-from totelegram.manager.models import Job, Payload
+from totelegram.common.utils import batched
+from totelegram.manager.models import Job, Payload, TapeMember
 
 logger = logging.getLogger(__name__)
 
@@ -48,74 +49,71 @@ class Chunker:
 
     @classmethod
     def _process_file_job(cls, job: Job) -> List[Payload]:
-        """
-        # TODO: ACTUALIZAR.
-        Procesa un Job y devuelve una lista de Payloads listos para ser subidos.
-
-        - Si Strategy.SINGLE: Crea un Payload único apuntando al archivo original.
-        - Si Strategy.CHUNKED: Utiliza FileChunker para dividir el archivo físico y
-          crea múltiples Payloads, uno por cada fragmento.
-
-        Args:
-            job: El trabajo (Job) a procesar.
-
-        Returns:
-            List[Payload]: Lista de payloads listos para ser subidos.
-        """
         limit = job.config.tg_max_size
         ranges = chunk_ranges(file_size=job.source.size, chunk_size=limit)
-        payloads = []
-        count_parts = len(ranges)
+
         # FIX: consulta N+1
-        filename = job.path.name
+        base_filename = job.path.name
+        count_parts = len(ranges)
+        payloads_data = []
         for idx, (start, end) in enumerate(ranges):
             part_num = idx + 1
+            filename = base_filename
             if count_parts > 1:
-                filename = f"{filename}_{part_num}-{count_parts}"
+                filename = f"{base_filename}_{part_num}-{count_parts}"
 
-            payloads.append(
-                Payload(
-                    job=job,
-                    sequence_index=idx,
-                    md5sum=None,
-                    size=end - start,
-                    start_offset=start,
-                    end_offset=end,
-                    filename=filename,
-                )
+            payloads_data.append(
+                {
+                    "job": job,
+                    "sequence_index": idx,
+                    "start_offset": start,
+                    "end_offset": end,
+                    "size": end - start,
+                    "filename": filename,
+                    "md5sum": None,  # Se calculará durante la subida real
+                }
             )
-        return payloads
+
+        for batch in batched(payloads_data, 100):
+            Payload.insert_many(batch).execute()
+
+        return list(job.payloads.order_by(Payload.sequence_index))
 
     @classmethod
-    def _process_folder_job(cls, job: Job):
-        logger.info(f"Planificando volúmenes con TarTape para: {job.source.path_str}")
+    def _process_folder_job(cls, job: Job) -> List[Payload]:
+        from tartape.chunker import TarChunker
 
-        if not job.source.tape_catalog:
-            raise ValueError("El Job necesita un inventario.")
+        tape = tartape.open(job.source.path)
+        tape._open_catalog()
+        tar_chunker = TarChunker(
+            tape=tape._catalog, chunk_size=job.config.tg_max_size  # type: ignore
+        )
+        plan = tar_chunker.generate_plan()
 
-        tape = tartape.open(job.source.path_str)
-        limit = job.config.tg_max_size
-
+        base_filename = job.path.name
+        count_parts = len(plan)
         payloads = []
-        for vol_idx, (volume_stream, _) in enumerate(tape.iter_volumes(size=limit)):
-            payload = Payload(
+        for idx, manifest in enumerate(plan):
+            part_num = idx + 1
+            filename = base_filename
+            if count_parts > 1:
+                filename = f"{base_filename}_{part_num}-{count_parts}"
+
+            payload = Payload.create(
                 job=job,
-                sequence_index=vol_idx,
+                sequence_index=manifest.volume_index,
+                start_offset=manifest.start_offset,
+                end_offset=manifest.end_offset,
+                size=manifest.chunk_size,
+                filename=filename,
             )
+
+            TapeMember.register_manifest_entries(
+                source=job.source,
+                payload=payload,
+                entries=manifest.entries,
+            )
+
             payloads.append(payload)
 
         return payloads
-
-    # def _commit_payload_success(cls, payload: Payload, tg_message: "Message", md5: str):
-    #     """Guarda el MD5 y vincula el mensaje de Telegram con el Payload."""
-    #     from totelegram.manager.database import db_proxy
-
-    #     with db_proxy.atomic():
-    #         # Guardamos el MD5 calculado durante la subida
-    #         payload.md5sum = md5
-    #         payload.save(only=[Payload.md5sum])
-
-    #         # Creamos el acceso efectivo (RemotePayload)
-    #         RemotePayload.register_upload(
-    #             payload=payload, tg_message=tg_message, owner=cls.current_user
-    #         )

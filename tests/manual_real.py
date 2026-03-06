@@ -18,7 +18,7 @@ from totelegram.common.enums import AvailabilityState
 from totelegram.logic.discovery import DiscoveryService
 from totelegram.logic.uploader import UploadService
 from totelegram.manager.database import DatabaseSession
-from totelegram.manager.models import Job, RemotePayload, SourceFile, TelegramChat
+from totelegram.manager.models import Job, RemotePayload, Source, TelegramChat
 from totelegram.telegram.client import TelegramSession
 
 
@@ -82,7 +82,7 @@ class TestManualRealLogic(unittest.TestCase):
 
         # --- CASO SYSTEM_NEW: el archivo es nuevo ----
         target = self._create_dummy_file("video_boda.mp4", 1)
-        source = SourceFile.get_or_create_from_path(target)
+        source = Source.get_or_create_from_filepath(target)
 
         tg_limit = 4 * (1024**2) if me.is_premium else 2 * (1024**2)
         job = Job.create_contract(source, chat_db, me.is_premium, tg_limit)
