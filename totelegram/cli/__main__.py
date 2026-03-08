@@ -13,7 +13,7 @@ logging.getLogger("dotenv").setLevel(logging.CRITICAL)
 
 
 from totelegram.cli import archive, config, profile, upload
-from totelegram.cli.console import UI, console
+from totelegram.cli.ui import UI, console
 from totelegram.identity import SettingsManager
 from totelegram.logging_config import setup_logging
 
@@ -94,7 +94,7 @@ def run_script():
 
         app()
     except Exception as e:
-        from totelegram.cli.console import UI
+        from totelegram.cli.ui import UI
 
         UI.error(str(e))
         sys.exit(1)

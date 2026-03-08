@@ -5,8 +5,7 @@ from typing import TYPE_CHECKING, List, Literal, Tuple, cast
 
 import typer
 
-from totelegram.cli.console import UI
-from totelegram.cli.views import DisplayConfig, DisplayGeneric, DisplayProfile
+from totelegram.cli.ui import UI, DisplayConfig, DisplayGeneric, DisplayProfile
 from totelegram.identity import ConfigService
 from totelegram.schemas import VALUE_NOT_SET, CLIState, Commands
 from totelegram.telegram.access import ChatAccessService

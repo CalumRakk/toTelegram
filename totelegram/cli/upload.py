@@ -4,8 +4,7 @@ from typing import TYPE_CHECKING, List, Tuple, cast
 import typer
 
 from totelegram.cli.config import _get_config_tools, handle_config_errors
-from totelegram.cli.console import UI, console
-from totelegram.cli.views import DisplayUpload
+from totelegram.cli.ui import UI, DisplayUpload, console
 from totelegram.discovery import DiscoveryService
 from totelegram.identity import Settings
 from totelegram.models import Job, Source, TelegramChat, TelegramUser
@@ -147,12 +146,6 @@ def upload_file(
     ctx: typer.Context,
     path: Path = typer.Argument(
         ..., exists=True, help="Archivo o directorio a procesar."
-    ),
-    force: bool = typer.Option(
-        False,
-        "--force",
-        "-f",
-        help="Ignora la red y fuerza la subida física de los bytes.",
     ),
 ):
     """

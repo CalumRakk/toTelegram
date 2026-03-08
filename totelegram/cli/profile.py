@@ -9,8 +9,7 @@ from totelegram.telegram.search import ChatSearchService
 if TYPE_CHECKING:
     from pyrogram import Client  # type: ignore
 
-from totelegram.cli.console import UI, console
-from totelegram.cli.views import DisplayGeneric, DisplayProfile
+from totelegram.cli.ui import UI, DisplayGeneric, DisplayProfile, console
 from totelegram.schemas import AccessStatus, CLIState
 from totelegram.telegram.access import ChatAccessService
 from totelegram.telegram.auth import AuthLogic

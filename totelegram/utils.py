@@ -25,7 +25,6 @@ import filetype
 from pydantic import BeforeValidator
 from pydantic.fields import FieldInfo
 
-from totelegram.cli.console import console
 from totelegram.schemas import APP_NAME, SELF_CHAT_ALIASES, VALUE_NOT_SET
 
 if TYPE_CHECKING:
@@ -164,6 +163,8 @@ def create_md5sum_by_hashlib(path: Path):
     Calcula el MD5 de un archivo. Si el archivo es grande (>100MB),
     muestra un mensaje de estado en la consola.
     """
+    from totelegram.cli.ui import console
+
     hash_md5 = hashlib.md5()
     file_size = path.stat().st_size
 

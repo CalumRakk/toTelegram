@@ -2,11 +2,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import typer
-from rich.console import Console
 
 from totelegram.cli.config import _get_config_tools
-from totelegram.cli.console import UI
-from totelegram.cli.upload import get_or_create_job, prepare_upload_context
+from totelegram.cli.ui import UI
+from totelegram.cli.upload import (
+    get_or_create_job,
+    prepare_upload_context,
+)
 from totelegram.packaging import SnapshotService
 from totelegram.schemas import (
     VALUE_NOT_SET,
@@ -20,21 +22,29 @@ from totelegram.uploader import UploadService
 if TYPE_CHECKING:
     from pyrogram.types import Chat, User
 
-console = Console()
-app = typer.Typer(help="Comandos para archivado de carpetas (Modo Cinta).")
+
+class ArchiveFilter:
+    def __init__(self, settings, ui_report):
+        self.settings = settings
+        self.ui_report = ui_report
+
+    def __call__(self, path: Path) -> bool:
+        """Esta es la función que tartape llamará"""
+        if path.suffix == ".xz":
+            self.ui_report.log_skip(path, "Es un snapshot")
+            return True
+
+        if path.stat().st_size > self.settings.max_filesize_bytes:
+            self.ui_report.log_skip(path, "Demasiado grande")
+            return True
+
+        return False
 
 
-@app.command("folder")
 def archive_folder(
     ctx: typer.Context,
     folderpath: Path = typer.Argument(
         ..., exists=True, dir_okay=True, help="Carpeta a archivar."
-    ),
-    force: bool = typer.Option(
-        False,
-        "--force",
-        "-f",
-        help="Ignora la red y fuerza la subida física de los bytes.",
     ),
 ):
     """
@@ -54,8 +64,9 @@ def archive_folder(
         UI.tip("puedes configurarlo usando uno de estos comandos:", commands)
         raise typer.Exit(1)
 
-    console.print(
-        f"\n[bold cyan]Iniciando Operación de Archivado:[/bold cyan] {folderpath.name}\n"
+    UI.info(
+        f"[bold cyan]Iniciando Operación de Archivado:[/bold cyan] {folderpath.name}",
+        spacing="block",
     )
 
     with state.scope() as (client, db):

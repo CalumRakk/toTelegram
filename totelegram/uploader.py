@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Tuple, cast
 
 import tartape
 
-from totelegram.cli.console import UI
+from totelegram.cli.ui import UI
 from totelegram.models import Job, Payload, RemotePayload
 from totelegram.packaging import Chunker
 from totelegram.schemas import SourceType
@@ -110,10 +110,17 @@ class UploadService:
     ):
 
         if source_type == SourceType.FOLDER:
-            tape= tartape.Tape(path)
-            volumen= tape.get_volume(payload.filename, payload.sequence_index,payload.start_offset, payload.end_offset)
+            tape = tartape.Tape(path)
+            volumen = tape.get_volume(
+                payload.filename,
+                payload.sequence_index,
+                payload.start_offset,
+                payload.end_offset,
+            )
         else:
-            volumen = FileVolume(path, payload.start_offset, payload.end_offset, payload.filename)
+            volumen = FileVolume(
+                path, payload.start_offset, payload.end_offset, payload.filename
+            )
 
         limit_bytes = self.u_ctx.settings.upload_limit_rate_kbps * 1024
         with volumen:
@@ -128,7 +135,7 @@ class UploadService:
                         file_name=filename,
                         caption=caption,
                         progress=UploadProgress(),
-                        force_document=True
+                        force_document=True,
                     ),
                 )
 
