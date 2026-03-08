@@ -128,6 +128,7 @@ class UploadService:
                         file_name=filename,
                         caption=caption,
                         progress=UploadProgress(),
+                        force_document=True
                     ),
                 )
 

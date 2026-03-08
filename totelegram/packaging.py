@@ -22,7 +22,7 @@ class FileFragment(BaseModel):
 
     vol_idx: int  # sequence_index del Payload
     offset_in_vol: int  # Offset de inicio dentro del archivo .tar del volumen
-    bytes_in_vol: int  # Cantidad de bytes (o donde termina) este archivo en este volumen
+    bytes_in_volume: int  # Cantidad de bytes (o donde termina) este archivo en este volumen
 
 
 class TapeMemberSnapshot(BaseModel):
@@ -185,7 +185,7 @@ class SnapshotService:
         remotes_db = (
             RemotePayload.select(RemotePayload, Payload)
             .join(Payload)
-            .where(Payload.job == job)
+            .where((Payload.job == job ) & (RemotePayload.is_orphaned == False))
             .order_by(Payload.sequence_index)
         )
 
@@ -222,7 +222,7 @@ class SnapshotService:
                     FileFragment(
                         vol_idx=gps.payload.sequence_index,
                         offset_in_vol=gps.offset_in_volume,
-                        bytes_in_vol= gps.bytes_in_vol,
+                        bytes_in_volume= gps.bytes_in_volume,
                     )
                     for gps in m.fragments
                 ]

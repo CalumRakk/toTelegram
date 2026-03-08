@@ -56,7 +56,7 @@ class DiscoveryService:
             remotes = list(
                 RemotePayload.select(RemotePayload, Payload)
                 .join(Payload)
-                .where(Payload.job == hist_job)
+                .where((Payload.job == hist_job) & (RemotePayload.is_orphaned == False))
                 .order_by(Payload.sequence_index)
             )
 
@@ -74,7 +74,7 @@ class DiscoveryService:
         local_remotes = list(
             RemotePayload.select()
             .join(Payload)
-            .where(Payload.job == job)
+            .where((Payload.job == job) & (RemotePayload.is_orphaned == False))
             .order_by(Payload.sequence_index)
         )
 
@@ -98,6 +98,8 @@ class DiscoveryService:
 
         chat_id = to_verify[0].chat_id
         msg_ids = [r.message_id for r in to_verify]
+        is_integral = True
+
         try:
             with self.db.atomic():
                 for batch_ids in batched(msg_ids, 200):
@@ -106,25 +108,27 @@ class DiscoveryService:
                         messages: List["Message"]
                         messages = [messages]
 
-                    for msg in messages:
-                        # Si un solo mensaje del set falló, el espejo no es íntegro
-                        if (
-                            msg is None
-                            or getattr(msg, "empty", True)
-                            or not msg.document
-                        ):
-                            return False
 
-                        remote = next(r for r in to_verify if r.message_id == msg.id)
+                    for msg in messages:
+                        remote = next((r for r in to_verify if r.message_id == msg.id), None)
+                        if not remote:
+                            continue
+
+                        # Si un solo mensaje del set falló, el espejo no es íntegro
+                        if (msg is None or getattr(msg, "empty", True) or not msg.document):
+                            remote.mark_orphaned()
+                            is_integral = False
+                            continue
 
                         # Verificación extra: ¿El tamaño coincide? (Anti-edición)
                         if msg.document.file_size != remote.payload.size:
-                            return False
-
-                        remote.mark_verified(msg)
+                            remote.mark_orphaned()
+                            is_integral = False
+                        else:
+                            remote.mark_verified(msg)
 
                     time.sleep(0.5)
-                return True
+                return is_integral
 
         except Exception as e:
             logger.debug(f"Error en validación JIT: {e}")

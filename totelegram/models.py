@@ -321,7 +321,10 @@ class Payload(BaseModel):
 
     @property
     def has_remote(self) -> bool:
-        return RemotePayload.select().where(RemotePayload.payload == self).exists()
+        return RemotePayload.select().where(
+            (RemotePayload.payload == self) &
+            (RemotePayload.is_orphaned == False)
+        ).exists()
 
 
 class RemotePayload(BaseModel):
@@ -331,7 +334,7 @@ class RemotePayload(BaseModel):
     payload_id: int
     chat_id: int
 
-    payload = peewee.ForeignKeyField(Payload, unique=True, backref="remote")
+    payload = peewee.ForeignKeyField(Payload, backref="remotes")
     message_id = cast(int, peewee.IntegerField())
     chat = peewee.ForeignKeyField(TelegramChat, backref="remote_contents")
     owner = cast(
@@ -340,18 +343,27 @@ class RemotePayload(BaseModel):
     # Backup completo del objeto Message de Pyrogram
     json_metadata = cast(dict, JSONField())
     last_verified_at = cast(Optional[datetime], peewee.DateTimeField(null=True))
+    is_orphaned = cast(bool, peewee.BooleanField(default=False))
+
+    def mark_orphaned(self):
+        """Marca el registro como huérfano (no disponible en Telegram)."""
+        self.is_orphaned = True
+        self.save(only=[RemotePayload.is_orphaned, RemotePayload.updated_at])
 
     def mark_verified(self, message: "Message"):
-        """Actualiza el timestamp de validación."""
+        """Actualiza el timestamp y asegura que no sea huérfano."""
+        if message is None or getattr(message, "empty", True):
+            return self.mark_orphaned()
+
         self.last_verified_at = datetime.now()
+        self.is_orphaned = False # Por si acaso se recuperó o se marcó erróneamente
         self.json_metadata = json.loads(str(message))
-        self.save(
-            only=[
-                RemotePayload.last_verified_at,
-                RemotePayload.json_metadata,
-                RemotePayload.updated_at,
-            ]
-        )
+        self.save(only=[
+            RemotePayload.last_verified_at,
+            RemotePayload.is_orphaned,
+            RemotePayload.json_metadata,
+            RemotePayload.updated_at
+        ])
 
     @property
     def sequence_index(self) -> int:
@@ -360,6 +372,9 @@ class RemotePayload(BaseModel):
     @property
     def is_fresh(self) -> bool:
         """Determina si la validación aún es confiable (15 minutos)."""
+        if self.is_orphaned is False:
+            return False
+
         if not self.last_verified_at:
             return False
         delta = datetime.now() - self.last_verified_at
@@ -445,7 +460,7 @@ class TapeMember(BaseModel):
                     "payload": payload,
                     "state": e.state.value,
                     "offset_in_volume": e.local_window.start,
-                    "bytes_in_vol": e.local_window.end,
+                    "bytes_in_volume": e.local_window.end,
                 }
                 for e in batch
                 if not e.info.is_dir
@@ -460,4 +475,4 @@ class TapeMemberGPS(BaseModel):
 
     state = cast(EntryState, EnumField(EntryState))
     offset_in_volume = cast(int, peewee.BigIntegerField())
-    bytes_in_vol = cast(int, peewee.BigIntegerField())
+    bytes_in_volume = cast(int, peewee.BigIntegerField())

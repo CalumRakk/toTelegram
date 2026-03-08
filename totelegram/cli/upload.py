@@ -8,18 +8,14 @@ from totelegram.cli.console import UI, console
 from totelegram.cli.views import DisplayUpload
 from totelegram.discovery import DiscoveryService
 from totelegram.identity import Settings
-from totelegram.models import (
-    Job,
-    Source,
-    TelegramChat,
-    TelegramUser,
-)
+from totelegram.models import Job, Source, TelegramChat, TelegramUser
 from totelegram.packaging import SnapshotService
 from totelegram.schemas import (
     VALUE_NOT_SET,
     AvailabilityState,
     CLIState,
     Commands,
+    JobStatus,
     ScanReport,
 )
 from totelegram.types import UploadContext
@@ -163,7 +159,7 @@ def upload_file(
     Sube archivos o archivos de un directorio a Telegram.
     """
     state: CLIState = ctx.obj
-    profile_name, service = _get_config_tools(ctx)
+    profile_name, _ = _get_config_tools(ctx)
 
     settings = state.manager.get_settings(profile_name)
 
@@ -212,7 +208,9 @@ def upload_file(
 
             report = u_ctx.discovery.investigate(job)
             if report.state == AvailabilityState.FULFILLED:
-                job.set_uploaded()
+                UI.info(f"{path.name=} ya está disponible en Telegram.")
+                if job.status != JobStatus.UPLOADED:
+                    job.set_uploaded()
             elif report.state == AvailabilityState.NEEDS_UPLOAD:
                 uploader.execute_physical_upload(job, path)
             elif report.state == AvailabilityState.CAN_FORWARD:
