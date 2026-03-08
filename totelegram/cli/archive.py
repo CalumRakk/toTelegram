@@ -27,7 +27,9 @@ app = typer.Typer(help="Comandos para archivado de carpetas (Modo Cinta).")
 @app.command("folder")
 def archive_folder(
     ctx: typer.Context,
-    folderpath: Path = typer.Argument(..., exists=True, help="Carpeta a archivar."),
+    folderpath: Path = typer.Argument(
+        ..., exists=True, dir_okay=True, help="Carpeta a archivar."
+    ),
     force: bool = typer.Option(
         False,
         "--force",

@@ -206,7 +206,7 @@ class Source(BaseModel):
     @staticmethod
     def get_or_create_from_folderpath(path, exclusion_patterns: List[str]):
         if tartape.exists(path):
-            tape = tartape.open(path)
+            tape = tartape.Tape(path)
             source = Source.get(Source.md5sum == tape.fingerprint)
             tape.verify(raise_exception=True)
             return source
@@ -388,6 +388,7 @@ class TapeMember(BaseModel):
     Representa un archivo individual dentro de una carpeta archivada.
     Es el registro lógico para búsquedas.
     """
+    fragments: List["TapeMemberGPS"] # Tipado Fake
 
     id: int
     source = cast("Source", peewee.ForeignKeyField(Source, backref="members"))
@@ -415,18 +416,18 @@ class TapeMember(BaseModel):
             member_data = [
                 {
                     "source": source,
-                    "relative_path": e.arc_path,
-                    "size": e.size,
-                    "md5sum": e.md5sum,
+                    "relative_path": e.info.arc_path,
+                    "size": e.info.size,
+                    "md5sum": e.info.md5sum,
                 }
                 for e in batch
-                if not e.is_dir
+                if not e.info.is_dir
             ]
             cls.insert_many(member_data).on_conflict_ignore().execute()
 
         path_to_id = {}
         for batch in batched(entries, BATCH_SIZE):
-            paths = [e.arc_path for e in batch]
+            paths = [e.info.arc_path for e in batch]
 
             # `<<` (operador IN de Peewee)
             query = cls.select(cls.id, cls.relative_path).where(
@@ -440,14 +441,14 @@ class TapeMember(BaseModel):
         for batch in batched(entries, BATCH_SIZE):
             gps_data = [
                 {
-                    "member": path_to_id[e.arc_path],
+                    "member": path_to_id[e.info.arc_path],
                     "payload": payload,
                     "state": e.state.value,
-                    "offset_in_volume": e.offset_in_volume,
-                    "bytes_in_volume": e.bytes_in_volume,
+                    "offset_in_volume": e.local_window.start,
+                    "bytes_in_vol": e.local_window.end,
                 }
                 for e in batch
-                if not e.is_dir
+                if not e.info.is_dir
             ]
             TapeMemberGPS.insert_many(gps_data).execute()
 
@@ -459,4 +460,4 @@ class TapeMemberGPS(BaseModel):
 
     state = cast(EntryState, EnumField(EntryState))
     offset_in_volume = cast(int, peewee.BigIntegerField())
-    bytes_in_volume = cast(int, peewee.BigIntegerField())
+    bytes_in_vol = cast(int, peewee.BigIntegerField())

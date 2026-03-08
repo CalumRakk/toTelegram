@@ -1,109 +1,32 @@
 import hashlib
 import io
-import logging
-import time
 from pathlib import Path
-from typing import Optional
 
-logger = logging.getLogger(__name__)
-
-
-class ThrottledFile(io.BufferedIOBase):
-    """
-    Wrapper para limitar la velocidad de lectura.
-    Hereda de io.BufferedIOBase para pasar todas las validaciones de tipo (isinstance).
-    """
-
-    def __init__(self, raw_stream: io.BufferedIOBase, speed_limit_bytes_per_s: int):
-        self._stream = raw_stream
-        self._speed_limit = speed_limit_bytes_per_s
-        self._start_time = time.monotonic()
-        self._bytes_read = 0
-
-        self.name = getattr(raw_stream, "name", "unknown")
-        self.mode = "rb"
-
-    @property
-    def md5sum(self):
-        return self._file.md5sum  # type: ignore _file es VirtualFileStream o TarVolume
-
-    def read(self, size: int = -1) -> bytes:  # type: ignore
-        # Si size es -1 o None, leer todo (comportamiento estándar)
-        chunk = self._stream.read(size)
-        if not chunk:
-            return b""
-
-        self._bytes_read += len(chunk)
-
-        if self._speed_limit > 0:
-            elapsed = time.monotonic() - self._start_time
-
-            # Evitar división por cero
-            if elapsed > 0:
-                expected_time = self._bytes_read / self._speed_limit
-                sleep_time = expected_time - elapsed
-                if sleep_time > 0:
-                    time.sleep(sleep_time)
-
-        return chunk
-
-    def seek(self, offset: int, whence: int = 0) -> int:
-        return self._stream.seek(offset, whence)
-
-    def tell(self) -> int:
-        return self._stream.tell()
-
-    def close(self) -> None:
-        return self._stream.close()
-
-    def readable(self) -> bool:
-        return True
-
-    def seekable(self) -> bool:
-        return True
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self.close()
+from tartape.stream import TapeVolume
 
 
-class VirtualFileStream(io.BufferedIOBase):
-    """
-    Un stream virtual que expone un rango (start, end) de un archivo real
-    como si fuera un archivo independiente, calculando el MD5 al vuelo.
-    """
-
-    def __init__(
-        self,
-        path: Path,
-        start_offset: int,
-        end_offset: int,
-        filename: Optional[str] = None,
-    ):
-        if start_offset < 0 or end_offset < start_offset:
-            raise ValueError(
-                "Offsets invalidos: start_offset < 0 o end_offset < start_offset"
-            )
-
+class FileVolume(TapeVolume):
+    def __init__(self, path: Path, start_offset: int, end_offset: int, name: str):
+        super().__init__(name, end_offset - start_offset)
         self.path = path
         self.start_offset = start_offset
         self.end_offset = end_offset
-        self.size = end_offset - start_offset
-
-        self._file = open(path, "rb")
-        self._file.seek(start_offset)
-
+        self._file = None
         self._position = 0
         self._md5 = hashlib.md5()
-        self._closed = False
+        self._closed = True
 
-        self.name = filename or path.name
+    @property
+    def is_completed(self) -> bool:
+        return self._position == self.size
+
+    def _ensure_not_closed(self):
+        if self._closed:
+            raise ValueError("I/O operation on closed file volume.")
 
     def read(self, size: int = -1) -> bytes:  # type: ignore
         if self._closed:
-            raise ValueError("Operación de I/O sobre stream cerrado.")
+            raise ValueError("File already closed")
 
         remaining = self.size - self._position
         if remaining <= 0:
@@ -111,6 +34,8 @@ class VirtualFileStream(io.BufferedIOBase):
 
         # Determinar cuánto leer (size=-1 significa todo)
         bytes_to_read = remaining if (size < 0) else min(size, remaining)
+        if not self._file:
+            raise RuntimeError("File not opened")
 
         chunk = self._file.read(bytes_to_read)
         if not chunk:
@@ -122,7 +47,6 @@ class VirtualFileStream(io.BufferedIOBase):
         return chunk
 
     def seek(self, offset: int, whence: int = io.SEEK_SET) -> int:
-        """Permite a Pyrogram mover el puntero si es necesario."""
         if whence == io.SEEK_SET:
             new_pos = offset
         elif whence == io.SEEK_CUR:
@@ -130,12 +54,14 @@ class VirtualFileStream(io.BufferedIOBase):
         elif whence == io.SEEK_END:
             new_pos = self.size + offset
         else:
-            raise ValueError("whence invalido")
+            raise ValueError("whence invalid")
 
         if new_pos < 0 or new_pos > self.size:
-            raise ValueError("Seek fuera de los limites del rango.")
+            raise ValueError("Seek out of bounds")
 
         self._position = new_pos
+        if not self._file:
+            raise RuntimeError("File not opened")
         self._file.seek(self.start_offset + new_pos)
         return self._position
 
@@ -152,17 +78,24 @@ class VirtualFileStream(io.BufferedIOBase):
     def md5sum(self) -> str:
         if self._position < self.size:
             raise RuntimeError(
-                f"MD5 no disponible: lectura incompleta ({self._position}/{self.size})."
+                f"MD5 not available: Incomplete read ({self._position}/{self.size})."
             )
         return self._md5.hexdigest()
 
     def close(self):
-        if not self._closed:
-            self._file.close()
-            self._closed = True
+        self.__exit__(None, None, None)
+
+    def open(self):
+        self.__enter__()
 
     def __enter__(self):
+        if self._closed:
+            self._file = open(self.path, "rb")
+            self._file.seek(self.start_offset)
+            self._closed = False
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        self.close()
+        if not self._closed and self._file:
+            self._file.close()
+            self._closed = True

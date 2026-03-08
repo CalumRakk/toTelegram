@@ -2,19 +2,14 @@ import logging
 import lzma
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, cast
 
 import peewee
-import tartape
 from pydantic import BaseModel
 
 from totelegram import __version__
 from totelegram.models import Job, Payload, RemotePayload, TapeMember, TapeMemberGPS
-from totelegram.schemas import (
-    SourceType,
-    Strategy,
-    TapeCatalog,
-)
+from totelegram.schemas import SourceType, Strategy, TapeCatalog
 from totelegram.utils import batched
 
 logger = logging.getLogger(__name__)
@@ -27,7 +22,7 @@ class FileFragment(BaseModel):
 
     vol_idx: int  # sequence_index del Payload
     offset_in_vol: int  # Offset de inicio dentro del archivo .tar del volumen
-    bytes_in_vol: int  # Cantidad de bytes de este archivo en este volumen
+    bytes_in_vol: int  # Cantidad de bytes (o donde termina) este archivo en este volumen
 
 
 class TapeMemberSnapshot(BaseModel):
@@ -147,17 +142,14 @@ class Chunker:
     def _process_folder_job(cls, job: Job) -> List[Payload]:
         from tartape.chunker import TarChunker
 
-        tape = tartape.open(job.source.path)
-        tape._open_catalog()
-        tar_chunker = TarChunker(
-            tape=tape._catalog, chunk_size=job.config.tg_max_size  # type: ignore
-        )
-        plan = tar_chunker.generate_plan()
+        # tape = tartape.discover(job.source.path)
+        tar_chunker = TarChunker(chunk_size=job.config.tg_max_size)
+        vols = list(tar_chunker.iter_volumes(job.source.path))
 
         base_filename = job.path.name
-        count_parts = len(plan)
+        count_parts = len(vols)
         payloads = []
-        for idx, manifest in enumerate(plan):
+        for idx, (vol, manifest) in enumerate(vols):
             part_num = idx + 1
             filename = base_filename
             if count_parts > 1:
@@ -223,18 +215,14 @@ class SnapshotService:
         if source.type == SourceType.FOLDER:
             inventory = []
             # TapeMember -> TapeMemberGPS -> Payload
-            members = (
-                TapeMember.select()
-                .where(TapeMember.source == source)
-                .prefetch(TapeMemberGPS, Payload)
-            )
+            members = cast(List[TapeMember], TapeMember.select().where(TapeMember.source == source).prefetch(TapeMemberGPS, Payload))
 
             for m in members:
                 fragments = [
                     FileFragment(
                         vol_idx=gps.payload.sequence_index,
                         offset_in_vol=gps.offset_in_volume,
-                        bytes_in_vol=gps.bytes_in_volume,
+                        bytes_in_vol= gps.bytes_in_vol,
                     )
                     for gps in m.fragments
                 ]

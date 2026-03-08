@@ -4,25 +4,21 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Tuple, cast
 
 import tartape
-from tartape.player import TapePlayer
-from tartape.volume import TarVolume
 
 from totelegram.cli.console import UI
+from totelegram.models import Job, Payload, RemotePayload
 from totelegram.packaging import Chunker
 from totelegram.schemas import SourceType
+from totelegram.stream import FileVolume
 from totelegram.types import AvailabilityReport
+from totelegram.utils import ThrottledFile
 
 if TYPE_CHECKING:
     from pyrogram import Client  # type: ignore
-    from pyrogram.types import User, Message
+    from pyrogram.types import Message, User
+
     from totelegram.cli.upload import UploadContext
 
-from totelegram.models import (
-    Job,
-    Payload,
-    RemotePayload,
-)
-from totelegram.stream import ThrottledFile, VirtualFileStream
 
 logger = logging.getLogger(__name__)
 
@@ -112,39 +108,30 @@ class UploadService:
     def _upload_payload(
         self, source_type: SourceType, md5sum: str, path: Path, payload: Payload
     ):
+
         if source_type == SourceType.FOLDER:
-            tape = tartape.open(path)
-            tape._open_catalog()
-            player = TapePlayer(tape._catalog, path)  # type: ignore
-            stream = TarVolume(
-                player=player,
-                start_offset=payload.start_offset,
-                end_offset=payload.end_offset,
-                name=payload.filename,
-            )
+            tape= tartape.Tape(path)
+            volumen= tape.get_volume(payload.filename, payload.sequence_index,payload.start_offset, payload.end_offset)
         else:
-            stream = VirtualFileStream(
-                path,
-                start_offset=payload.start_offset,
-                end_offset=payload.end_offset,
-                filename=payload.filename,
-            )
+            volumen = FileVolume(path, payload.start_offset, payload.end_offset, payload.filename)
+
         limit_bytes = self.u_ctx.settings.upload_limit_rate_kbps * 1024
-        with ThrottledFile(stream, limit_bytes) as doc_stream:  # type: ignore
-            filename, caption = self.resolve_naming_payload(md5sum, payload)
+        with volumen:
+            with ThrottledFile(volumen, limit_bytes) as doc_stream:
+                filename, caption = self.resolve_naming_payload(md5sum, payload)
 
-            tg_message = cast(
-                "Message",
-                self.client.send_document(
-                    chat_id=self.tg_chat.id,
-                    document=doc_stream,  # type: ignore
-                    file_name=filename,
-                    caption=caption,
-                    progress=UploadProgress(),
-                ),
-            )
+                tg_message = cast(
+                    "Message",
+                    self.client.send_document(
+                        chat_id=self.tg_chat.id,
+                        document=doc_stream,  # type: ignore
+                        file_name=filename,
+                        caption=caption,
+                        progress=UploadProgress(),
+                    ),
+                )
 
-            return tg_message, stream.md5sum
+                return tg_message, volumen.md5sum
 
     def _smart_forward_strategy(
         self,

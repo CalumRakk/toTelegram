@@ -8,11 +8,7 @@ from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 from pydantic.fields import FieldInfo
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from totelegram.schemas import (
-    VALUE_NOT_SET,
-    AccessLevel,
-    InfoField,
-)
+from totelegram.schemas import VALUE_NOT_SET, AccessLevel, InfoField
 from totelegram.utils import ChatID, CommaSeparatedList, get_type_annotation
 
 logger = logging.getLogger(__name__)
@@ -146,7 +142,7 @@ class Settings(BaseSettings):
         """
         field_name = key.lower()
         if field_name not in cls.model_fields:
-            raise ValueError(f"La configuración '{key}' no existe en el sistema.")
+            raise ValueError(f"El campo '{key}' no existe en la configuracion.")
 
         field = cls.model_fields[field_name]
         adapter = TypeAdapter(Annotated[field.annotation, field])

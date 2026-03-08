@@ -40,16 +40,7 @@ def get_or_create_job(path: Path, u_ctx: UploadContext) -> Tuple[Job, bool]:
             with UI.loading("Obteniendo cinta..."):
                 source = Source.get_or_create_from_folderpath(path, exclusion_patterns)
         except Exception as e:
-            UI.error("¡Cinta Comprometida! La carpeta ha sido modificada.")
-            UI.info(f"Ruta: [dim]{path}[/dim]")
-            UI.warn(
-                "Para garantizar la integridad, no se puede reanudar una cinta alterada."
-            )
-            UI.tip(
-                "Si deseas archivar la nueva versión, debes eliminar el rastro anterior:",
-                commands=f"totelegram profile delete-source (proximamente) o limpiar la DB.",
-            )
-            raise typer.Exit(1)
+            raise e
     else:
         with console.status(f"[dim]Procesando {path}...[/dim]"):
             source = Source.get_or_create_from_filepath(path)
