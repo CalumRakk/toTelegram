@@ -6,13 +6,14 @@ from typing import Optional
 
 import typer
 
+from totelegram.cli.commands import backup, config, profile
 from totelegram.schemas import CLIState
 from totelegram.utils import APP_NAME, get_user_config_dir
 
 logging.getLogger("dotenv").setLevel(logging.CRITICAL)
 
 
-from totelegram.cli import archive, config, profile, upload
+from totelegram.cli.commands import send
 from totelegram.cli.ui import UI, console
 from totelegram.identity import SettingsManager
 from totelegram.logging_config import setup_logging
@@ -28,8 +29,8 @@ app = typer.Typer(
 
 app.add_typer(config.app, name="config")
 app.add_typer(profile.app, name="profile")
-app.command(name="upload")(upload.upload_file)
-app.command(name="archive")(archive.archive_folder)
+app.command(name="send")(send.send_files)
+app.command(name="backup")(backup.backup_folders)
 
 
 def version_callback(value: bool):

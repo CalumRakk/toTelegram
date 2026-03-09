@@ -3,12 +3,12 @@ from typing import TYPE_CHECKING
 
 import typer
 
-from totelegram.cli.config import _get_config_tools
-from totelegram.cli.ui import UI
-from totelegram.cli.upload import (
+from totelegram.cli.commands.config import _get_config_tools
+from totelegram.cli.commands.send import (
     get_or_create_job,
     prepare_upload_context,
 )
+from totelegram.cli.ui import UI
 from totelegram.packaging import SnapshotService
 from totelegram.schemas import (
     VALUE_NOT_SET,
@@ -41,7 +41,7 @@ class ArchiveFilter:
         return False
 
 
-def archive_folder(
+def backup_folders(
     ctx: typer.Context,
     folderpath: Path = typer.Argument(
         ..., exists=True, dir_okay=True, help="Carpeta a archivar."

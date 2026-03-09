@@ -3,7 +3,11 @@ from typing import TYPE_CHECKING, List, Tuple, cast
 
 import typer
 
-from totelegram.cli.config import _get_config_tools, handle_config_errors
+from totelegram.cli.commands.config import (
+    _get_config_tools,
+    handle_config_errors,
+)
+from totelegram.cli.logic import InventoryEngine
 from totelegram.cli.ui import UI, DisplayUpload, console
 from totelegram.discovery import DiscoveryService
 from totelegram.identity import Settings
@@ -19,7 +23,7 @@ from totelegram.schemas import (
 )
 from totelegram.types import UploadContext
 from totelegram.uploader import UploadService
-from totelegram.utils import is_excluded
+from totelegram.utils import has_snapshot, is_excluded
 
 if TYPE_CHECKING:
     from pyrogram import Client  # type: ignore
@@ -67,11 +71,6 @@ def _scan_and_filter(
         raise ValueError(f"Invalid path type: {type(path)}")
 
     report = ScanReport()
-
-    def has_snapshot(file_path: Path) -> bool:
-        filename_plus_ext = file_path.with_name(f"{file_path.name}.json.xz")
-        stem_plus_ext = file_path.with_name(f"{file_path.stem}.json.xz")
-        return filename_plus_ext.exists() or stem_plus_ext.exists()
 
     def process_candidate(p: Path):
         # report.total_scanned += 1
@@ -142,18 +141,20 @@ def prepare_upload_context(client: "Client", db, settings: Settings) -> UploadCo
 
 
 @handle_config_errors
-def upload_file(
+def send_files(
     ctx: typer.Context,
-    path: Path = typer.Argument(
-        ..., exists=True, help="Archivo o directorio a procesar."
+    paths: List[Path] = typer.Argument(
+        ...,
+        exists=True,
+        help="Lista de archivos o carpetas a enviar de forma individual.",
     ),
 ):
     """
-    Sube archivos o archivos de un directorio a Telegram.
+    Envía archivos a Telegram. Si recibe una carpeta, envía su contenido (recursivo)
+    como archivos individuales.
     """
     state: CLIState = ctx.obj
     profile_name, _ = _get_config_tools(ctx)
-
     settings = state.manager.get_settings(profile_name)
 
     if settings.chat_id == VALUE_NOT_SET:
@@ -166,31 +167,20 @@ def upload_file(
         raise typer.Exit(1)
 
     # --- Scaneo y Informe ---
-    exclusion_patterns = settings.all_exclusion_patterns()
-    with console.status(f"[dim]Escaneando {path}...[/dim]"):
-        scan_report = _scan_and_filter(
-            path, exclusion_patterns, settings.max_filesize_bytes
-        )
+    inventory = InventoryEngine(settings)
+    with console.status(f"[dim]Escaneando...[/dim]"):
+        scan_report = inventory.scan_granular(paths)
 
-    if path.is_dir():
-        # Si es una carpeta, mostramos lo que encontro.
-        DisplayUpload.announces_total_files_found(scan_report)
-
-    # Reporta la exclusion de un archivo o miles.
     verbose = False if scan_report.total_files > 7 else True
-    DisplayUpload.show_skip_report(
-        scan_report,
-        verbose,
-    )
+    DisplayUpload.show_skip_report(scan_report, "archivo", verbose)
 
-    # Debe ir despues del reporte de exclusion.
     if not scan_report.found:
-        if path.is_dir():
-            UI.warn("No se encontraron archivos válidos para procesar.")
+        UI.info("No hay archivos para enviar.")
         raise typer.Exit(0)
 
     # --- Subida de lo encontrado ---
     UI.info(f"[dim]Procesando {len(scan_report.found)} archivos[/dim]")
+    exit()
     with state.scope() as (client, db):
 
         u_ctx = prepare_upload_context(client, db, settings)

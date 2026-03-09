@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from pyrogram import Client  # type: ignore
     from pyrogram.types import Message, User
 
-    from totelegram.cli.upload import UploadContext
+    from totelegram.cli.commands.send import UploadContext
 
 
 logger = logging.getLogger(__name__)

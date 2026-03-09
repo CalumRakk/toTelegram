@@ -9,6 +9,7 @@ from typing import (
     Any,
     Dict,
     List,
+    Literal,
     Optional,
     cast,
 )
@@ -254,18 +255,28 @@ class IntentType(str, Enum):
 
 class ScanReport(BaseModel):
     found: list[Path] = Field(
-        default_factory=list, description="Archivos validos para subir."
+        default_factory=list, description="Archivos o carpetas validos para subir."
     )
+
     skipped_by_snapshot: list[Path] = Field(
-        default_factory=list, description="Archivos que son un snapshot."
+        default_factory=list, description="Archivos o carpetas que tienen un snapshot."
     )
     skipped_by_size: list[Path] = Field(
         default_factory=list, description="Archivos demasiado grandes."
     )
     skipped_by_exclusion: list[Path] = Field(
         default_factory=list,
-        description="Archivos excluidos por patron de exclusión.",
+        description="Archivos o carpetas excluidos por patron de exclusión.",
     )
+    skipped_by_error: list[Path] = Field(
+        default_factory=list,
+        description="Archivos o carpetas ilegibles, con errores de permiso o corruptos.",
+    )
+    skipped_by_empty: list[Path] = Field(
+        default_factory=list,
+        description="Carpetas que no contienen archivos válidos para procesar.",
+    )
+
     exclusion_patterns: list[str] = Field(default_factory=list)
 
     @property
@@ -274,6 +285,8 @@ class ScanReport(BaseModel):
             len(self.skipped_by_snapshot)
             + len(self.skipped_by_size)
             + len(self.skipped_by_exclusion)
+            + len(self.skipped_by_error)
+            + len(self.skipped_by_empty)
         )
 
     @property
@@ -285,3 +298,18 @@ class ScanReport(BaseModel):
     def content_files(self) -> int:
         """Devuelve el total de archivos encontrados que no son snapshots."""
         return self.total_files - len(self.skipped_by_snapshot)
+
+    def log_skip(
+        self,
+        path: Path,
+        reason: Literal["snapshot", "size", "exclusion", "error", "empty"],
+    ):
+        """Helper centralizado para registrar omisiones."""
+        mapping = {
+            "snapshot": self.skipped_by_snapshot,
+            "size": self.skipped_by_size,
+            "exclusion": self.skipped_by_exclusion,
+            "error": self.skipped_by_error,
+            "empty": self.skipped_by_empty,
+        }
+        mapping[reason].append(path)

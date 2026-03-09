@@ -158,6 +158,12 @@ def is_excluded(path: Path, patterns: List[str]) -> bool:
     return False
 
 
+def has_snapshot(file_path: Path) -> bool:
+    filename_plus_ext = file_path.with_name(f"{file_path.name}.json.xz")
+    stem_plus_ext = file_path.with_name(f"{file_path.stem}.json.xz")
+    return filename_plus_ext.exists() or stem_plus_ext.exists()
+
+
 def create_md5sum_by_hashlib(path: Path):
     """
     Calcula el MD5 de un archivo. Si el archivo es grande (>100MB),

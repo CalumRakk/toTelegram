@@ -4,7 +4,7 @@ from tempfile import TemporaryDirectory
 
 from typer.testing import CliRunner
 
-from totelegram.cli.config import app
+from totelegram.cli.commands.config import app
 from totelegram.identity import SettingsManager
 from totelegram.schemas import CLIState
 
