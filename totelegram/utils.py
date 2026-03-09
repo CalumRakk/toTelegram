@@ -140,9 +140,6 @@ def is_excluded(path: Path, patterns: List[str]) -> bool:
     if not path.exists():
         logger.info(f"No existe: {path}, se omite")
         return True
-    elif path.is_dir():
-        logger.info(f"Es un directorio: {path}, se omite")
-        return True
 
     for pattern in patterns:
         # Para coincidencia directa (archivo o carpeta exacta)

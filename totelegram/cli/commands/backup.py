@@ -1,50 +1,26 @@
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import List
 
 import typer
 
 from totelegram.cli.commands.config import _get_config_tools
-from totelegram.cli.commands.send import (
-    get_or_create_job,
-    prepare_upload_context,
+from totelegram.cli.logic import (
+    InventoryEngine,
 )
-from totelegram.cli.ui import UI
-from totelegram.packaging import SnapshotService
+from totelegram.cli.ui import UI, DisplayUpload, console
 from totelegram.schemas import (
     VALUE_NOT_SET,
-    AvailabilityState,
     CLIState,
     Commands,
-    JobStatus,
 )
-from totelegram.uploader import UploadService
-
-if TYPE_CHECKING:
-    from pyrogram.types import Chat, User
-
-
-class ArchiveFilter:
-    def __init__(self, settings, ui_report):
-        self.settings = settings
-        self.ui_report = ui_report
-
-    def __call__(self, path: Path) -> bool:
-        """Esta es la función que tartape llamará"""
-        if path.suffix == ".xz":
-            self.ui_report.log_skip(path, "Es un snapshot")
-            return True
-
-        if path.stat().st_size > self.settings.max_filesize_bytes:
-            self.ui_report.log_skip(path, "Demasiado grande")
-            return True
-
-        return False
 
 
 def backup_folders(
     ctx: typer.Context,
-    folderpath: Path = typer.Argument(
-        ..., exists=True, dir_okay=True, help="Carpeta a archivar."
+    paths: List[Path] = typer.Argument(
+        ...,
+        exists=True,
+        help="Lista de carpetas a archivar",
     ),
 ):
     """
@@ -64,26 +40,46 @@ def backup_folders(
         UI.tip("puedes configurarlo usando uno de estos comandos:", commands)
         raise typer.Exit(1)
 
-    UI.info(
-        f"[bold cyan]Iniciando Operación de Archivado:[/bold cyan] {folderpath.name}",
-        spacing="block",
-    )
+    # --- Scaneo y Informe ---
+    with console.status(f"[dim]Escaneando...[/dim]"):
+        scan_report = InventoryEngine(settings).scan_backup_inventory(paths)
 
-    with state.scope() as (client, db):
-        u_ctx = prepare_upload_context(client, db, settings)
-        uploader = UploadService(u_ctx)
+    DisplayUpload.show_skip_report(scan_report, "carpeta")
 
-        job, _ = get_or_create_job(path=folderpath, u_ctx=u_ctx)
-        report = u_ctx.discovery.investigate(job)
-        if report.state == AvailabilityState.FULFILLED:
-            if job.status != JobStatus.UPLOADED:
-                job.set_uploaded()
-        elif report.state == AvailabilityState.NEEDS_UPLOAD:
-            uploader.execute_physical_upload(job, folderpath)
-        elif report.state == AvailabilityState.CAN_FORWARD:
-            uploader.execute_smart_forward(job, report)
-        else:
-            raise ValueError(f"Invalid state: {report.state}")
+    candidates = scan_report.found.copy()
+    count_candidates = len(scan_report.found)
+    if not candidates:
+        UI.info("No hay carpetas para enviar.")
+        raise typer.Exit(0)
 
-        SnapshotService.generate_snapshot(job)
-        UI.success("Proceso de archivado finalizado correctamente.")
+    # --- Subida de lo encontrado ---
+
+    # with state.scope() as (client, db):
+    for index, folder in enumerate(candidates, 1):
+        count = "" if count_candidates == 1 else f"({index}/{count_candidates}):"
+        UI.info(
+            f"[dim]{count} Archivando la carpeta: {folder.name}[/]",
+            spacing="top",
+        )
+        with console.status(f"[dim]Escaneando...[/dim]"):
+            scan_report = InventoryEngine(settings).scan_backup_internal(folder)
+
+        DisplayUpload.show_skip_report(scan_report, "archivo", force_verbose=False)
+
+        # u_ctx = prepare_upload_context(client, db, settings)
+        # uploader = UploadService(u_ctx)
+
+        # job, _ = get_or_create_job(path=folderpath, u_ctx=u_ctx)
+        # report = u_ctx.discovery.investigate(job)
+        # if report.state == AvailabilityState.FULFILLED:
+        #     if job.status != JobStatus.UPLOADED:
+        #         job.set_uploaded()
+        # elif report.state == AvailabilityState.NEEDS_UPLOAD:
+        #     uploader.execute_physical_upload(job, folderpath)
+        # elif report.state == AvailabilityState.CAN_FORWARD:
+        #     uploader.execute_smart_forward(job, report)
+        # else:
+        #     raise ValueError(f"Invalid state: {report.state}")
+
+        # SnapshotService.generate_snapshot(job)
+        # UI.success("Proceso de archivado finalizado correctamente.")

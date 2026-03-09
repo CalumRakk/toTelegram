@@ -78,6 +78,10 @@ class UI:
             console.print()
 
     @staticmethod
+    def print(message: str, *, spacing: Spacing = None, **kwargs):
+        UI._print(f"  {message}", spacing=spacing, **kwargs)
+
+    @staticmethod
     def info(message: str, *, spacing: Spacing = None, **kwargs):
         UI._print(f"[info]i[/] {message}", spacing=spacing, **kwargs)
 
@@ -161,7 +165,7 @@ class DisplayUpload:
     def show_skip_report(
         cls,
         scan_report: ScanReport,
-        item_type: str = "archivo",
+        item_type: Literal["archivo", "carpeta"] = "archivo",
         force_verbose: Optional[bool] = None,
     ) -> None:
         """
@@ -184,39 +188,38 @@ class DisplayUpload:
     @classmethod
     def _show_detailed(cls, report: ScanReport, item_type: str):
         """Muestra una lista línea por línea para pocos ítems."""
-        console.print()
 
         for p in report.skipped_by_error:
             UI.error(f"Omitido (Ilegible/Error): {escape(p.name)}")
 
         for p in report.skipped_by_snapshot:
-            UI.warn(f"Omitido (Ya tiene Snapshot): {escape(p.name)}")
+            UI.warn(f"[bright_black]Omitido (Ya tiene Snapshot):[/] {escape(p.name)}")
 
         for p in report.skipped_by_size:
-            UI.error(f"Omitido (Excede peso máximo): {escape(p.name)}")
+            UI.error(f"[bright_black]Omitido (Excede peso máximo):[/] {escape(p.name)}")
 
         for p in report.skipped_by_exclusion:
-            UI.info(f"[dim]Omitido (Patrón de exclusión): {escape(p.name)}[/]")
+            UI.info(f"[bright_black]Omitido (Patrón de exclusión):[/] {escape(p.name)}")
 
         for p in report.skipped_by_empty:
-            UI.info(f"[dim]Omitida (Carpeta vacía): {escape(p.name)}[/]")
+            UI.info(f"[bright_black]Omitida (Carpeta vacía):[/] {escape(p.name)}")
 
     @classmethod
     def _show_consolidated(cls, report: ScanReport, item_type: str):
         """Muestra bloques resumidos con ejemplos para muchos ítems."""
         plural = f"{item_type}s"
-        UI.info(
+        UI.print(
             f"Se excluyeron [bold]{report.total_skipped}[/] {plural} por:",
             spacing="top",
         )
 
         # Configuración de etiquetas según categoría
         configs = [
-            (report.skipped_by_error, "Errores de integridad/lectura", "red"),
-            (report.skipped_by_snapshot, "Ya tienen Snapshot", "yellow"),
-            (report.skipped_by_size, "Exceden peso máximo", "red"),
-            (report.skipped_by_exclusion, "Patrón de exclusión", "yellow"),
-            (report.skipped_by_empty, "Carpetas sin contenido", "magenta"),
+            (report.skipped_by_error, "Errores de integridad/lectura", "dark_red"),
+            (report.skipped_by_snapshot, "Ya tienen Snapshot", "dark_blue"),
+            (report.skipped_by_size, "Exceden peso máximo", "dark_red"),
+            (report.skipped_by_exclusion, "Patrón de exclusión", "dark_blue"),
+            (report.skipped_by_empty, "Carpetas sin contenido", "dark_blue"),
         ]
 
         for items, label, style in configs:
@@ -231,16 +234,18 @@ class DisplayUpload:
         """Helper para imprimir un bloque de resumen con 3 ejemplos."""
         count = len(files)
         pat_str = (
-            f" [dim]({', '.join(current_patterns)})[/dim]" if current_patterns else ""
+            f" [bright_black]({', '.join(current_patterns)})[/]"
+            if current_patterns
+            else ""
         )
 
         console.print(f"  [bold {style}]• {label}:[/] [bold white]{count}[/]{pat_str}")
 
         for f in files[:3]:
-            console.print(f"     [dim]- {escape(f.name)}[/dim]", highlight=False)
+            console.print(f"     [bright_black]- {escape(f.name)}[/]", highlight=False)
 
         if count > 3:
-            console.print(f"     [dim]... y {count - 3} más.[/dim]")
+            console.print(f"     [bright_black]... y {count - 3} más.[/]")
 
 
 class DisplayConfig:

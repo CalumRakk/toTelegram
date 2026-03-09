@@ -1,9 +1,79 @@
 from pathlib import Path
-from typing import List
+from typing import TYPE_CHECKING, List, Tuple, cast
 
+import typer
+
+from totelegram.cli.ui import UI, console
+from totelegram.discovery import DiscoveryService
 from totelegram.identity import Settings
-from totelegram.schemas import ScanReport
+from totelegram.models import Job, Source, TelegramChat, TelegramUser
+from totelegram.schemas import (
+    ScanReport,
+)
+from totelegram.types import UploadContext
 from totelegram.utils import has_snapshot, is_excluded
+
+if TYPE_CHECKING:
+    from pyrogram import Client  # type: ignore
+    from pyrogram.types import Chat, User
+
+
+def get_or_create_job(path: Path, u_ctx: UploadContext) -> Tuple[Job, bool]:
+    chat_db, _ = TelegramChat.get_or_create_from_chat(u_ctx.tg_chat)
+
+    if path.is_dir():
+        try:
+            exclusion_patterns = u_ctx.settings.all_exclusion_patterns()
+            with UI.loading("Obteniendo cinta..."):
+                source = Source.get_or_create_from_folderpath(path, exclusion_patterns)
+        except Exception as e:
+            raise e
+    else:
+        with console.status(f"[dim]Procesando {path}...[/dim]"):
+            source = Source.get_or_create_from_filepath(path)
+
+    job = Job.get_for_source_in_chat(source, chat_db)
+    if not job:
+        tg_limit = (
+            u_ctx.settings.tg_max_size_premium
+            if u_ctx.owner.is_premium
+            else u_ctx.settings.tg_max_size_normal
+        )
+        job = Job.formalize_intent(source, chat_db, u_ctx.owner.is_premium, tg_limit)
+        UI.info(
+            f"Nuevo contrato de disponibilidad creado (Límite: {tg_limit / (1024*1024):.0f}MB)"
+        )
+        return job, True
+
+    return job, False
+
+
+def prepare_upload_context(client: "Client", db, settings: Settings) -> UploadContext:
+    """
+    Centraliza la inicialización de servicios y validación de red.
+    Lanza typer.Exit si algo falla, limpiando el comando principal.
+    """
+    with UI.loading("Sincronizando con Telegram..."):
+        try:
+            tg_chat = cast("Chat", client.get_chat(settings.chat_id))
+            me = cast("User", client.get_me())
+            owner = TelegramUser.get_or_create_from_tg(me)
+        except Exception as e:
+            UI.error(f"Error de conexión: {e}")
+            raise typer.Exit(1)
+    discovery = DiscoveryService(client, db)
+
+    UI.success(f"Conectado como [bold]{me.first_name or me.username}[/]")
+    UI.info(f"Destino: [bold cyan]{tg_chat.title}[/] [dim](ID: {tg_chat.id})[/]")
+
+    return UploadContext(
+        client=client,
+        db=db,
+        discovery=discovery,
+        tg_chat=tg_chat,
+        owner=owner,
+        settings=settings,
+    )
 
 
 class InventoryEngine:
@@ -16,22 +86,24 @@ class InventoryEngine:
         self, path: Path, report: ScanReport, check_snapshot: bool
     ) -> bool:
         """
-        Lógica para ARCHIVOS.
         Comprueba: Patrones, Tamaño y (opcionalmente) Snapshot.
         """
-        if is_excluded(path, self.patterns):
-            report.log_skip(path, "exclusion")
+        if path.suffix == ".xz" and path.name.endswith(".json.xz"):
             return False
 
         if check_snapshot and has_snapshot(path):
             report.log_skip(path, "snapshot")
             return False
 
+        if is_excluded(path, self.patterns):
+            report.log_skip(path, "exclusion")
+            return False
+
         if path.stat().st_size > self.max_size:
             report.log_skip(path, "size")
             return False
 
-        return True  # Es un archivo válido
+        return True
 
     def _validate_container(self, path: Path, report: ScanReport) -> bool:
         """
@@ -47,10 +119,14 @@ class InventoryEngine:
             report.log_skip(path, "snapshot")
             return False
 
-        return True  # Es una carpeta válida para procesar
+        if next(path.iterdir(), None) is None:
+            report.log_skip(path, "empty")
+            return False
+
+        return True
 
     def scan_granular(self, paths: List[Path]) -> ScanReport:
-        """MODO EXPLOSIÓN: Filtra archivos, explota carpetas y filtra sus hijos."""
+        """Filtra archivos. Si recibe una carpeta la explora recursivamente."""
         report = ScanReport(exclusion_patterns=self.patterns)
         for p in paths:
             if p.is_file():
@@ -64,7 +140,7 @@ class InventoryEngine:
         return report
 
     def scan_backup_inventory(self, paths: List[Path]) -> ScanReport:
-        """MODO CONTENEDOR (Fase 1): Filtra solo las carpetas raíz."""
+        """Filtra carpetas para la cinta."""
         report = ScanReport()
         for p in paths:
             if p.is_dir():
@@ -73,11 +149,10 @@ class InventoryEngine:
         return report
 
     def scan_backup_internal(self, folder: Path) -> ScanReport:
-        """MODO INTERNO (Fase 2): Filtra el contenido de una carpeta para la cinta."""
+        """Filtra el contenido de una carpeta para la cinta."""
         report = ScanReport(exclusion_patterns=self.patterns)
         for p in folder.rglob("*"):
             if p.is_file():
-                # AQUÍ check_snapshot=False por lo que hablamos de la integridad.
                 if self._validate_file(p, report, check_snapshot=False):
                     report.found.append(p)
         return report

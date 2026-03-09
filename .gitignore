@@ -37,6 +37,7 @@ plan-comando.md
 .contextignore
 requirements.txt
 setup.py
+test_report.py
 
 upload_state.json
 manual/

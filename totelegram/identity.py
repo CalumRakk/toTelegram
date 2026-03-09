@@ -66,7 +66,7 @@ class Settings(BaseSettings):
         json_schema_extra={"is_sensitive": False, "access": AccessLevel.EDITABLE},
     )
 
-    exclude_files_default: CommaSeparatedList = ["*.log", "*.json", "*.json.xz"]
+    exclude_files_default: CommaSeparatedList = ["*.json", "*.json.xz"]
 
     model_config = SettingsConfigDict(
         env_file=".env", env_file_encoding="utf-8", extra="ignore"
