@@ -109,6 +109,6 @@ def backup_folders(
             SnapshotService.generate_snapshot(job)
             UI.success("Carpeta archivada.")
 
-        if scan_report:
+        if scan_report.skipped_by_integrity:
             console.print(Rule(style="bright_black"))
             DisplayUpload.show_integrity_advice(scan_report)

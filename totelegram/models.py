@@ -244,26 +244,6 @@ class Source(BaseModel):
             logger.info(f"Re-indexando cinta huérfana encontrada en: {tape.directory}")
             return cls.create_from_tape(tape, tape.exclude_patterns)
 
-    # @classmethod
-    # def get_or_create_from_folderpath(cls, path, exclusion_patterns: List[str]):
-    #     if tartape.exists(path):
-    #         tape = tartape.Tape(path)
-    #         try:
-    #             source = Source.get(Source.md5sum == tape.fingerprint)
-    #             tape.verify(raise_exception=True)
-    #             return source
-    #         except peewee.DoesNotExist:
-    #             logger.info(f"Re-indexando cinta huérfana encontrada en: {path}")
-
-    #             return cls._create_source_from_tape(tape, tape.exclude_patterns)
-
-    #     tape = tartape.create(
-    #         path,
-    #         exclude=exclusion_patterns,
-    #         calculate_hashes=True,
-    #     )
-    #     return cls._create_source_from_tape(tape, tape.exclude_patterns)
-
 
 class Job(BaseModel):
     id: int
@@ -326,7 +306,7 @@ class Job(BaseModel):
         return self
 
     def mark_deleted(self):
-        with self.Meta.database.obj.atomic():
+        with self._meta.database.obj.atomic():  # type: ignore
             query = RemotePayload.update(is_orphaned=True).where(
                 RemotePayload.payload << self.payloads
             )

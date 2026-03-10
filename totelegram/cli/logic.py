@@ -67,7 +67,7 @@ def get_or_create_job(
         return job
 
     if job and force:
-        UI.info(f"Invalidando registro previo para [bold]{path.name}[/]")
+        UI.info(f"Invalidando contrato previo para [bold]{path.name}[/]")
         delete_snapshot(path)
         job.mark_deleted()
         job = None
