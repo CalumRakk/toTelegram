@@ -8,13 +8,19 @@ from rich.rule import Rule
 from totelegram.cli.commands.config import _get_config_tools
 from totelegram.cli.logic import (
     InventoryEngine,
+    get_or_create_job,
+    prepare_upload_context,
 )
 from totelegram.cli.ui import UI, DisplayUpload, console
+from totelegram.packaging import SnapshotService
 from totelegram.schemas import (
     VALUE_NOT_SET,
+    AvailabilityState,
     CLIState,
     Commands,
+    JobStatus,
 )
+from totelegram.uploader import UploadService
 
 
 def backup_folders(
@@ -61,33 +67,40 @@ def backup_folders(
 
     console.print(Rule(style="bright_black"))
 
-    # with state.scope() as (client, db):
-    for index, folder in enumerate(candidates, 1):
-        DisplayUpload.show_backup_header(folder.name, index, len(candidates))
+    with state.scope() as (client, db):
+        u_ctx = prepare_upload_context(client, db, settings)
+        uploader = UploadService(u_ctx)
 
-        with UI.loading("Analizando contenido..."):
-            report_internal = InventoryEngine(settings).scan_backup_internal(folder)
-            time.sleep(0.3)
+        user = u_ctx.owner.first_name or u_ctx.owner.username
+        chat_n = u_ctx.tg_chat.title or u_ctx.tg_chat.username
+        UI.success(f"Conectado como [bold]{user}[/]")
+        UI.info(f"Destino: [bold cyan]{chat_n}[/] [dim](ID: {u_ctx.tg_chat.id})[/]")
+        UI.print("", indent=False)
 
-        DisplayUpload.show_internal_scan_result(report_internal)
+        for index, folder in enumerate(candidates, 1):
+            DisplayUpload.show_backup_header(folder.name, index, len(candidates))
 
-    if scan_report:
-        console.print(Rule(style="bright_black"))
-        DisplayUpload.show_integrity_advice(scan_report)
-    # u_ctx = prepare_upload_context(client, db, settings)
-    # uploader = UploadService(u_ctx)
+            with UI.loading("Analizando contenido..."):
+                report_internal = InventoryEngine(settings).scan_backup_internal(folder)
+                time.sleep(0.3)
 
-    # job, _ = get_or_create_job(path=folderpath, u_ctx=u_ctx)
-    # report = u_ctx.discovery.investigate(job)
-    # if report.state == AvailabilityState.FULFILLED:
-    #     if job.status != JobStatus.UPLOADED:
-    #         job.set_uploaded()
-    # elif report.state == AvailabilityState.NEEDS_UPLOAD:
-    #     uploader.execute_physical_upload(job, folderpath)
-    # elif report.state == AvailabilityState.CAN_FORWARD:
-    #     uploader.execute_smart_forward(job, report)
-    # else:
-    #     raise ValueError(f"Invalid state: {report.state}")
+            DisplayUpload.show_internal_scan_result(report_internal)
 
-    # SnapshotService.generate_snapshot(job)
-    # UI.success("Proceso de archivado finalizado correctamente.")
+            job, _ = get_or_create_job(path=folder, u_ctx=u_ctx)
+            report = u_ctx.discovery.investigate(job)
+            if report.state == AvailabilityState.FULFILLED:
+                if job.status != JobStatus.UPLOADED:
+                    job.set_uploaded()
+            elif report.state == AvailabilityState.NEEDS_UPLOAD:
+                uploader.execute_physical_upload(job, folder)
+            elif report.state == AvailabilityState.CAN_FORWARD:
+                uploader.execute_smart_forward(job, report)
+            else:
+                raise ValueError(f"Invalid state: {report.state}")
+
+            SnapshotService.generate_snapshot(job)
+            UI.success("Carpeta archivada.")
+
+        if scan_report:
+            console.print(Rule(style="bright_black"))
+            DisplayUpload.show_integrity_advice(scan_report)

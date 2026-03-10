@@ -203,23 +203,14 @@ class Source(BaseModel):
             mimetype=get_mimetype(path),
         )
 
-    @staticmethod
-    def get_or_create_from_folderpath(path, exclusion_patterns: List[str]):
-        if tartape.exists(path):
-            tape = tartape.Tape(path)
-            source = Source.get(Source.md5sum == tape.fingerprint)
-            tape.verify(raise_exception=True)
-            return source
-
-        tape = tartape.create(
-            path,
-            exclude=exclusion_patterns,
-            calculate_hashes=True,
-        )
+    @classmethod
+    def _create_source_from_tape(
+        cls, tape: tartape.Tape, exclusion_patterns: List[str] | str
+    ):
         exclude_patterns = (
-            json.dumps(tape.exclude_patterns)
-            if isinstance(tape.exclude_patterns, list)
-            else tape.exclude_patterns
+            json.dumps(exclusion_patterns)
+            if isinstance(exclusion_patterns, list)
+            else exclusion_patterns
         )
 
         catalog = TapeCatalog(
@@ -232,7 +223,7 @@ class Source(BaseModel):
         )
 
         source = Source.create(
-            path_str=str(path),
+            path_str=str(tape.directory),
             md5sum=catalog.fingerprint,
             size=catalog.total_size,
             mtime=tape.created_at,
@@ -241,6 +232,26 @@ class Source(BaseModel):
             type=SourceType.FOLDER,
         )
         return source
+
+    @classmethod
+    def get_or_create_from_folderpath(cls, path, exclusion_patterns: List[str]):
+        if tartape.exists(path):
+            tape = tartape.Tape(path)
+            try:
+                source = Source.get(Source.md5sum == tape.fingerprint)
+                tape.verify(raise_exception=True)
+                return source
+            except peewee.DoesNotExist:
+                logger.info(f"Re-indexando cinta huérfana encontrada en: {path}")
+
+                return cls._create_source_from_tape(tape, tape.exclude_patterns)
+
+        tape = tartape.create(
+            path,
+            exclude=exclusion_patterns,
+            calculate_hashes=True,
+        )
+        return cls._create_source_from_tape(tape, tape.exclude_patterns)
 
 
 class Job(BaseModel):
@@ -321,10 +332,13 @@ class Payload(BaseModel):
 
     @property
     def has_remote(self) -> bool:
-        return RemotePayload.select().where(
-            (RemotePayload.payload == self) &
-            (RemotePayload.is_orphaned == False)
-        ).exists()
+        return (
+            RemotePayload.select()
+            .where(
+                (RemotePayload.payload == self) & (RemotePayload.is_orphaned == False)
+            )
+            .exists()
+        )
 
 
 class RemotePayload(BaseModel):
@@ -356,14 +370,16 @@ class RemotePayload(BaseModel):
             return self.mark_orphaned()
 
         self.last_verified_at = datetime.now()
-        self.is_orphaned = False # Por si acaso se recuperó o se marcó erróneamente
+        self.is_orphaned = False  # Por si acaso se recuperó o se marcó erróneamente
         self.json_metadata = json.loads(str(message))
-        self.save(only=[
-            RemotePayload.last_verified_at,
-            RemotePayload.is_orphaned,
-            RemotePayload.json_metadata,
-            RemotePayload.updated_at
-        ])
+        self.save(
+            only=[
+                RemotePayload.last_verified_at,
+                RemotePayload.is_orphaned,
+                RemotePayload.json_metadata,
+                RemotePayload.updated_at,
+            ]
+        )
 
     @property
     def sequence_index(self) -> int:
@@ -403,7 +419,8 @@ class TapeMember(BaseModel):
     Representa un archivo individual dentro de una carpeta archivada.
     Es el registro lógico para búsquedas.
     """
-    fragments: List["TapeMemberGPS"] # Tipado Fake
+
+    fragments: List["TapeMemberGPS"]  # Tipado Fake
 
     id: int
     source = cast("Source", peewee.ForeignKeyField(Source, backref="members"))

@@ -64,9 +64,6 @@ def prepare_upload_context(client: "Client", db, settings: Settings) -> UploadCo
             raise typer.Exit(1)
     discovery = DiscoveryService(client, db)
 
-    UI.success(f"Conectado como [bold]{me.first_name or me.username}[/]")
-    UI.info(f"Destino: [bold cyan]{tg_chat.title}[/] [dim](ID: {tg_chat.id})[/]")
-
     return UploadContext(
         client=client,
         db=db,
