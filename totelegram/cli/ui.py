@@ -6,6 +6,7 @@ import typer
 from rich.console import Console
 from rich.markup import escape
 from rich.panel import Panel
+from rich.rule import Rule
 from rich.table import Table
 from rich.theme import Theme
 
@@ -164,6 +165,29 @@ class UI:
 
 
 class DisplayUpload:
+    @classmethod
+    def show_backup_header(cls, folder_name: str, index: int, total: int):
+        """Muestra el encabezado de procesamiento de una carpeta en el backup."""
+        if index > 1:
+            console.print(Rule(style="bright_black"))
+
+        prefix = f"[dim]{index}/{total}[/] " if total > 1 else ""
+        UI.print(
+            f"{prefix}Preparando archivo para: [bold cyan]{folder_name}[/]",
+            highlight=False,
+            indent=False,
+        )
+
+    @classmethod
+    def show_internal_scan_result(cls, report: ScanReport):
+        """Informa sobre el resultado del escaneo interno de la carpeta."""
+        if report.total_skipped > 0:
+            cls.show_skip_report(
+                report, item_type="archivo", force_verbose=False, skip_title=True
+            )
+        else:
+            UI.success("Contenido íntegro y listo.")
+
     @classmethod
     def show_skip_report(
         cls,

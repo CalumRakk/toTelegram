@@ -43,12 +43,12 @@ def backup_folders(
         raise typer.Exit(1)
 
     # --- Scaneo y Informe ---
-    with console.status(f"[dim]Escaneando...[/dim]"):
+    with console.status("[dim]Escaneando directorios...[/]"):
         scan_report = InventoryEngine(settings).scan_backup_inventory(paths)
 
     DisplayUpload.show_skip_report(scan_report, "carpeta", force_verbose=False)
 
-    candidates = scan_report.found.copy()
+    candidates = scan_report.found
     count_candidates = len(scan_report.found)
     if not candidates:
         UI.warn("No se encontraron carpetas válidas para procesar.")
@@ -59,29 +59,17 @@ def backup_folders(
 
     # --- Subida de lo encontrado ---
 
-    # with state.scope() as (client, db):
     console.print(Rule(style="bright_black"))
-    for index, folder in enumerate(candidates, 1):
-        if index > 1:
-            console.print(Rule(style="bright_black"))
 
-        prefix = f"[dim]{index}/{count_candidates}[/] " if count_candidates > 1 else ""
-        UI.print(
-            f"{prefix}Preparando archivo para: [bold cyan]{folder.name}[/]",
-            highlight=False,
-            indent=False,
-        )
+    # with state.scope() as (client, db):
+    for index, folder in enumerate(candidates, 1):
+        DisplayUpload.show_backup_header(folder.name, index, len(candidates))
 
         with UI.loading("Analizando contenido..."):
             report_internal = InventoryEngine(settings).scan_backup_internal(folder)
             time.sleep(0.3)
 
-        if report_internal.total_skipped > 0:
-            DisplayUpload.show_skip_report(
-                report_internal, "archivo", force_verbose=False, skip_title=True
-            )
-        else:
-            UI.print("[success]>[/] Contenido íntegro y listo.")
+        DisplayUpload.show_internal_scan_result(report_internal)
 
     if scan_report:
         console.print(Rule(style="bright_black"))
