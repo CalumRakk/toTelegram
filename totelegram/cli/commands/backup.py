@@ -30,12 +30,18 @@ def backup_folders(
         exists=True,
         help="Lista de carpetas a archivar",
     ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        "-f",
+        help="Fuerza ignorando el estado del archivo en el sistema",
+    ),
 ):
     """
     Convierte una carpeta en una Cinta de Datos (TAR) y la distribuye en volúmenes.
     """
     state: CLIState = ctx.obj
-    profile_name, service = _get_config_tools(ctx)
+    profile_name, _ = _get_config_tools(ctx)
 
     settings = state.manager.get_settings(profile_name)
 
@@ -48,14 +54,16 @@ def backup_folders(
         UI.tip("puedes configurarlo usando uno de estos comandos:", commands)
         raise typer.Exit(1)
 
+    if force:
+        UI.warn("Forzando la subida de carpetas sin comprobar el estado del archivo.")
+
     # --- Scaneo y Informe ---
     with console.status("[dim]Escaneando directorios...[/]"):
-        scan_report = InventoryEngine(settings).scan_backup_inventory(paths)
+        scan_report = InventoryEngine(settings, force).scan_backup_inventory(paths)
 
     DisplayUpload.show_skip_report(scan_report, "carpeta", force_verbose=False)
 
     candidates = scan_report.found
-    count_candidates = len(scan_report.found)
     if not candidates:
         UI.warn("No se encontraron carpetas válidas para procesar.")
         UI.print(
@@ -86,7 +94,7 @@ def backup_folders(
 
             DisplayUpload.show_internal_scan_result(report_internal)
 
-            job, _ = get_or_create_job(path=folder, u_ctx=u_ctx)
+            job = get_or_create_job(path=folder, u_ctx=u_ctx, force=force)
             report = u_ctx.discovery.investigate(job)
             if report.state == AvailabilityState.FULFILLED:
                 if job.status != JobStatus.UPLOADED:

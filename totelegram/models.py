@@ -1,5 +1,6 @@
 import json
 import logging
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Generator, List, Optional, Tuple, cast
@@ -204,9 +205,9 @@ class Source(BaseModel):
         )
 
     @classmethod
-    def _create_source_from_tape(
+    def create_from_tape(
         cls, tape: tartape.Tape, exclusion_patterns: List[str] | str
-    ):
+    ) -> "Source":
         exclude_patterns = (
             json.dumps(exclusion_patterns)
             if isinstance(exclusion_patterns, list)
@@ -234,24 +235,34 @@ class Source(BaseModel):
         return source
 
     @classmethod
-    def get_or_create_from_folderpath(cls, path, exclusion_patterns: List[str]):
-        if tartape.exists(path):
-            tape = tartape.Tape(path)
-            try:
-                source = Source.get(Source.md5sum == tape.fingerprint)
-                tape.verify(raise_exception=True)
-                return source
-            except peewee.DoesNotExist:
-                logger.info(f"Re-indexando cinta huérfana encontrada en: {path}")
+    def get_or_create_from_tape(cls, tape: tartape.Tape) -> "Source":
+        try:
+            source = Source.get(Source.md5sum == tape.fingerprint)
+            tape.verify(raise_exception=True)
+            return source
+        except peewee.DoesNotExist:
+            logger.info(f"Re-indexando cinta huérfana encontrada en: {tape.directory}")
+            return cls.create_from_tape(tape, tape.exclude_patterns)
 
-                return cls._create_source_from_tape(tape, tape.exclude_patterns)
+    # @classmethod
+    # def get_or_create_from_folderpath(cls, path, exclusion_patterns: List[str]):
+    #     if tartape.exists(path):
+    #         tape = tartape.Tape(path)
+    #         try:
+    #             source = Source.get(Source.md5sum == tape.fingerprint)
+    #             tape.verify(raise_exception=True)
+    #             return source
+    #         except peewee.DoesNotExist:
+    #             logger.info(f"Re-indexando cinta huérfana encontrada en: {path}")
 
-        tape = tartape.create(
-            path,
-            exclude=exclusion_patterns,
-            calculate_hashes=True,
-        )
-        return cls._create_source_from_tape(tape, tape.exclude_patterns)
+    #             return cls._create_source_from_tape(tape, tape.exclude_patterns)
+
+    #     tape = tartape.create(
+    #         path,
+    #         exclude=exclusion_patterns,
+    #         calculate_hashes=True,
+    #     )
+    #     return cls._create_source_from_tape(tape, tape.exclude_patterns)
 
 
 class Job(BaseModel):
@@ -265,9 +276,7 @@ class Job(BaseModel):
     config = cast(StrategyConfig, PydanticJSONField(StrategyConfig))
     status = cast(JobStatus, EnumField(JobStatus))
 
-    class Meta:  # type: ignore
-        # Esto implementa la visión: "Si ya lo subí aquí, no lo subas de nuevo".
-        indexes = ((("source", "chat_id"), True),)
+    deleted_at = cast(float, peewee.FloatField(default=0))
 
     @property
     def path(self) -> Path:
@@ -305,7 +314,9 @@ class Job(BaseModel):
         source: "Source", chat: "TelegramChat"
     ) -> Optional["Job"]:
         """Devuelve el Job que existe para el source en el chat especificado."""
-        return Job.get_or_none((Job.source == source) & (Job.chat == chat))
+        return Job.get_or_none(
+            (Job.source == source) & (Job.chat == chat) & (Job.deleted_at == 0)
+        )
 
     def adopt_job(self, job: "Job") -> "Job":
         self.strategy = job.strategy
@@ -313,6 +324,22 @@ class Job(BaseModel):
         self.config = job.config
         self.save(only=[Job.strategy, Job.status, Job.config, Job.updated_at])
         return self
+
+    def mark_deleted(self):
+        with self.Meta.database.obj.atomic():
+            query = RemotePayload.update(is_orphaned=True).where(
+                RemotePayload.payload << self.payloads
+            )
+            query.execute()
+
+            self.deleted_at = time.time()
+            self.status = JobStatus.DELETED
+            self.save(only=[Job.deleted_at, Job.status, Job.updated_at])
+
+        logger.debug(f"Job {self.id} invalidado y remotos orfanados.")
+
+
+Job.add_index(Job.source, Job.chat, Job.deleted_at, unique=True)
 
 
 class Payload(BaseModel):

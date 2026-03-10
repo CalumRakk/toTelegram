@@ -161,6 +161,19 @@ def has_snapshot(file_path: Path) -> bool:
     return filename_plus_ext.exists() or stem_plus_ext.exists()
 
 
+def delete_snapshot(file_path: Path):
+    """Elimina los posibles archivos de snapshot asociados a una ruta."""
+    # Intentamos ambas convenciones de nombre (archivo.ext.json.xz y archivo.json.xz)
+    targets = [
+        file_path.with_name(f"{file_path.name}.json.xz"),
+        file_path.with_name(f"{file_path.stem}.json.xz"),
+    ]
+    for target in targets:
+        if target.exists():
+            target.unlink()
+            logger.debug(f"Snapshot eliminado físicamente: {target.name}")
+
+
 def create_md5sum_by_hashlib(path: Path):
     """
     Calcula el MD5 de un archivo. Si el archivo es grande (>100MB),

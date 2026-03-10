@@ -173,7 +173,7 @@ class DisplayUpload:
 
         prefix = f"[dim]{index}/{total}[/] " if total > 1 else ""
         UI.print(
-            f"{prefix}Preparando backup para: [bold cyan]{folder_name}[/]",
+            f"{prefix}Archivando: [bold cyan]{folder_name}[/]",
             highlight=False,
             indent=False,
         )

@@ -1,6 +1,7 @@
 from pathlib import Path
-from typing import TYPE_CHECKING, List, Tuple, cast
+from typing import TYPE_CHECKING, List, cast
 
+import peewee
 import tartape
 import typer
 
@@ -12,41 +13,73 @@ from totelegram.schemas import (
     ScanReport,
 )
 from totelegram.types import UploadContext
-from totelegram.utils import has_snapshot, is_excluded
+from totelegram.utils import delete_snapshot, has_snapshot, is_excluded
 
 if TYPE_CHECKING:
     from pyrogram import Client  # type: ignore
     from pyrogram.types import Chat, User
 
 
-def get_or_create_job(path: Path, u_ctx: UploadContext) -> Tuple[Job, bool]:
+def get_or_create_tape(
+    path: Path,
+    u_ctx: UploadContext,
+    force: bool,
+) -> Source:
+    if tartape.exists(path) and not force:
+        try:
+            tape = tartape.Tape(path)
+            with UI.loading("Verificando integridad de cinta..."):
+                tape.verify(raise_exception=True)
+            return Source.get_or_create_from_tape(tape)
+
+        except (peewee.DoesNotExist, Exception):
+            # Si no está en DB o la cinta está corrupta,
+            # caemos en la creación/regeneración de abajo
+            pass
+
+    exclusion_patterns = u_ctx.settings.all_exclusion_patterns()
+    with UI.loading("Generando índice de cinta..."):
+        tape = tartape.create(
+            path,
+            exclude=exclusion_patterns,
+            calculate_hashes=True,
+            overwrite=force,
+        )
+        return Source.create_from_tape(tape, exclusion_patterns)
+
+
+def get_or_create_job(
+    path: Path,
+    u_ctx: UploadContext,
+    force: bool,
+) -> Job:
     chat_db, _ = TelegramChat.get_or_create_from_chat(u_ctx.tg_chat)
 
     if path.is_dir():
-        try:
-            exclusion_patterns = u_ctx.settings.all_exclusion_patterns()
-            with UI.loading("Obteniendo cinta..."):
-                source = Source.get_or_create_from_folderpath(path, exclusion_patterns)
-        except Exception as e:
-            raise e
+        source = get_or_create_tape(path, u_ctx, force)
     else:
         with console.status(f"[dim]Procesando {path}...[/dim]"):
             source = Source.get_or_create_from_filepath(path)
 
     job = Job.get_for_source_in_chat(source, chat_db)
-    if not job:
-        tg_limit = (
-            u_ctx.settings.tg_max_size_premium
-            if u_ctx.owner.is_premium
-            else u_ctx.settings.tg_max_size_normal
-        )
-        job = Job.formalize_intent(source, chat_db, u_ctx.owner.is_premium, tg_limit)
-        UI.info(
-            f"Nuevo contrato de disponibilidad creado (Límite: {tg_limit / (1024*1024):.0f}MB)"
-        )
-        return job, True
+    if job and not force:
+        UI.info(f"Ya existe un contrato de disponibilidad para [bold]{path.name}[/]")
+        return job
 
-    return job, False
+    if job and force:
+        UI.info(f"Invalidando registro previo para [bold]{path.name}[/]")
+        delete_snapshot(path)
+        job.mark_deleted()
+        job = None
+
+    tg_limit = (
+        u_ctx.settings.tg_max_size_premium
+        if u_ctx.owner.is_premium
+        else u_ctx.settings.tg_max_size_normal
+    )
+    job = Job.formalize_intent(source, chat_db, u_ctx.owner.is_premium, tg_limit)
+    UI.success("Nuevo contrato de subida generado.")
+    return job
 
 
 def prepare_upload_context(client: "Client", db, settings: Settings) -> UploadContext:
@@ -75,10 +108,11 @@ def prepare_upload_context(client: "Client", db, settings: Settings) -> UploadCo
 
 
 class InventoryEngine:
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Settings, force: bool = False):
         self.settings = settings
         self.patterns = settings.all_exclusion_patterns()
         self.max_size = settings.max_filesize_bytes
+        self.force = force
 
     def _validate_file(
         self, path: Path, report: ScanReport, check_snapshot: bool
@@ -90,8 +124,9 @@ class InventoryEngine:
             return False
 
         if check_snapshot and has_snapshot(path):
-            report.log_skip(path, "snapshot")
-            return False
+            if not self.force:
+                report.log_skip(path, "snapshot")
+                return False
 
         if is_excluded(path, self.patterns):
             report.log_skip(path, "exclusion")
@@ -114,17 +149,19 @@ class InventoryEngine:
 
         # Si la carpeta ya fue archivada como tal.
         if has_snapshot(path):
-            report.log_skip(path, "snapshot")
-            return False
+            if not self.force:
+                report.log_skip(path, "snapshot")
+                return False
 
         if next(path.iterdir(), None) is None:
             report.log_skip(path, "empty")
             return False
 
         tape = tartape.get_tape(path)
-        if tape is not None and not tape.verify(deep=True):
-            report.log_skip(path, "integrity")
-            return False
+        if tape is not None and not self.force:
+            if not tape.verify(deep=False):
+                report.log_skip(path, "integrity")
+                return False
 
         return True
 

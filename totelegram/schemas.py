@@ -68,9 +68,8 @@ class Strategy(str, enum.Enum):
 
 class JobStatus(str, enum.Enum):
     PENDING = "PENDING"
-    SPLITTED = "SPLITTED"
     UPLOADED = "UPLOADED"
-    ORPHANED = "ORPHANED"
+    DELETED = "DELETED"
 
 
 class AvailabilityState(str, enum.Enum):
