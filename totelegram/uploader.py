@@ -10,38 +10,44 @@ from totelegram.models import Job, Payload, RemotePayload
 from totelegram.packaging import Chunker
 from totelegram.schemas import SourceType
 from totelegram.stream import FileVolume
-from totelegram.types import AvailabilityReport
+from totelegram.types import AvailabilityReport, UploadContext
 from totelegram.utils import ThrottledFile
 
 if TYPE_CHECKING:
     from pyrogram import Client  # type: ignore
     from pyrogram.types import Message, User
 
-    from totelegram.cli.commands.send import UploadContext
-
 
 logger = logging.getLogger(__name__)
 
 
 class UploadProgress:
-    def __init__(self):
+    def __init__(self, filename: str):
+        self.filename = filename
         self.last_percentage = -1
 
     def __call__(self, current: int, total: int):
         percentage = int(current * 100 / total)
 
-        # reporta cada 1%
-        if percentage % 1 == 0 and self.last_percentage != percentage:
+        if percentage != self.last_percentage:
             self.last_percentage = percentage
 
-            UI.info(f"Subiendo {current} de {total} bytes {percentage}%", end="\r")
+            curr_mb = current / (1024 * 1024)
+            tot_mb = total / (1024 * 1024)
+
+            msg = f"  ↑ {self.filename} ({curr_mb:.1f}/{tot_mb:.1f} MB) {percentage}%"
+            print(f"\r{msg}\033[K", end="", flush=True)
+
+    def finish(self):
+        """Limpia la línea de progreso para dejar espacio al siguiente mensaje."""
+        print("\r\033[K", end="", flush=True)
 
 
 class UploadService:
     # TODO: Luego de consolidar la logica. Hay que sacar los UI de aqui.
     def __init__(
         self,
-        u_ctx: "UploadContext",
+        u_ctx: UploadContext,
     ):
         self.client = u_ctx.client
         self.limit_rate_kbps = u_ctx.settings.upload_limit_rate_kbps
@@ -126,7 +132,7 @@ class UploadService:
         with volumen:
             with ThrottledFile(volumen, limit_bytes) as doc_stream:
                 filename, caption = self.resolve_naming_payload(md5sum, payload)
-
+                progress_callback = UploadProgress(payload.filename)
                 tg_message = cast(
                     "Message",
                     self.client.send_document(
@@ -134,11 +140,11 @@ class UploadService:
                         document=doc_stream,  # type: ignore
                         file_name=filename,
                         caption=caption,
-                        progress=UploadProgress(),
+                        progress=progress_callback,
                         force_document=True,
                     ),
                 )
-
+                progress_callback.finish()
                 return tg_message, volumen.md5sum
 
     def _smart_forward_strategy(
