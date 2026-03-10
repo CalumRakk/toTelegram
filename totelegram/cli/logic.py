@@ -37,7 +37,7 @@ def get_or_create_tape(
             # caemos en la creación/regeneración de abajo
             pass
 
-    exclusion_patterns = u_ctx.settings.all_exclusion_patterns()
+    exclusion_patterns = u_ctx.settings.exclude_files
     with UI.loading("Generando índice de cinta..."):
         tape = tartape.create(
             path,
@@ -110,7 +110,7 @@ def prepare_upload_context(client: "Client", db, settings: Settings) -> UploadCo
 class InventoryEngine:
     def __init__(self, settings: Settings, force: bool = False):
         self.settings = settings
-        self.patterns = settings.all_exclusion_patterns()
+        self.patterns = settings.exclude_files
         self.max_size = settings.max_filesize_bytes
         self.force = force
 

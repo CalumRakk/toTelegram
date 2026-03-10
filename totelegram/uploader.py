@@ -97,19 +97,11 @@ class UploadService:
 
         job_adopted.set_uploaded()
 
-    def resolve_naming_payload(
-        self, source_md5sum: str, payload: "Payload"
-    ) -> Tuple[str, str]:
+    def resolve_naming_payload(self, payload: "Payload") -> Tuple[str, str]:
+        if len(payload.filename) < self.max_filename_len:
+            return payload.filename, ""
 
-        filename = payload.filename
-        caption = ""
-
-        if len(payload.filename) >= self.max_filename_len:
-            suffix = Path(filename).suffix
-            filename = f"{source_md5sum}{suffix}"
-            caption = payload.filename
-
-        return filename, caption
+        return payload.filename_short, payload.filename
 
     def _upload_payload(
         self, source_type: SourceType, md5sum: str, path: Path, payload: Payload
@@ -131,7 +123,7 @@ class UploadService:
         limit_bytes = self.u_ctx.settings.upload_limit_rate_kbps * 1024
         with volumen:
             with ThrottledFile(volumen, limit_bytes) as doc_stream:
-                filename, caption = self.resolve_naming_payload(md5sum, payload)
+                filename, caption = self.resolve_naming_payload(payload)
                 progress_callback = UploadProgress(payload.filename)
                 tg_message = cast(
                     "Message",
@@ -153,7 +145,7 @@ class UploadService:
         payload_adopted: Payload,
         remote_mirror: RemotePayload,
     ) -> "Message":
-        filename, caption = self.resolve_naming_payload(md5sum, payload_adopted)
+        filename, caption = self.resolve_naming_payload(payload_adopted)
         return cast(
             "Message",
             self.client.send_document(

@@ -66,7 +66,7 @@ class Settings(BaseSettings):
         json_schema_extra={"is_sensitive": False, "access": AccessLevel.EDITABLE},
     )
 
-    exclude_files_default: CommaSeparatedList = ["*.json", "*.json.xz"]
+    # exclude_files_default: CommaSeparatedList = ["*.json", "*.json.xz"]
 
     model_config = SettingsConfigDict(
         env_file=".env", env_file_encoding="utf-8", extra="ignore"
@@ -77,8 +77,8 @@ class Settings(BaseSettings):
         description="Ruta del archivo de log. Si está vacío, se usa la ruta por defecto en la carpeta de trabajo.",
     )
 
-    def all_exclusion_patterns(self) -> List[str]:
-        return self.exclude_files + self.exclude_files_default
+    # def all_exclusion_patterns(self) -> List[str]:
+    #     return self.exclude_files + self.exclude_files_default
 
     @classmethod
     def get_info(cls, field_name: str) -> Optional[InfoField]:

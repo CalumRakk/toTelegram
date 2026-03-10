@@ -331,7 +331,8 @@ class Payload(BaseModel):
     job = cast(Job, peewee.ForeignKeyField(Job, backref="payloads"))
     md5sum = cast(Optional[str], peewee.CharField(null=True))
 
-    filename = cast(str, peewee.CharField())  # metadato para evitar consulta extra.
+    filename = cast(str, peewee.CharField())  # Nombre "Humano" (foto...png.01-10)
+    filename_short = cast(str, peewee.CharField())  # Nombre "Técnico" (hash.png.01-10)
     sequence_index = cast(int, peewee.IntegerField())
     start_offset = cast(int, peewee.IntegerField())
     end_offset = cast(int, peewee.IntegerField())

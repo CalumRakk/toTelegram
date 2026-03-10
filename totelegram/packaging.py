@@ -8,7 +8,14 @@ import peewee
 from pydantic import BaseModel
 
 from totelegram import __version__
-from totelegram.models import Job, Payload, RemotePayload, TapeMember, TapeMemberGPS
+from totelegram.models import (
+    Job,
+    Payload,
+    RemotePayload,
+    Source,
+    TapeMember,
+    TapeMemberGPS,
+)
 from totelegram.schemas import SourceType, Strategy, TapeCatalog
 from totelegram.utils import batched
 
@@ -22,7 +29,9 @@ class FileFragment(BaseModel):
 
     vol_idx: int  # sequence_index del Payload
     offset_in_vol: int  # Offset de inicio dentro del archivo .tar del volumen
-    bytes_in_volume: int  # Cantidad de bytes (o donde termina) este archivo en este volumen
+    bytes_in_volume: (
+        int  # Cantidad de bytes (o donde termina) este archivo en este volumen
+    )
 
 
 class TapeMemberSnapshot(BaseModel):
@@ -91,6 +100,35 @@ def chunk_ranges(file_size: int, chunk_size: int) -> List[Tuple[int, int]]:
     ]
 
 
+def build_payload_names(source: Source, idx: int, total: int) -> Tuple[str, str]:
+    source_path = Path(source.path_str)
+
+    if source.type == SourceType.FOLDER:
+        original_ext = ".tar"
+        base_human_name = source_path.name
+        combat_hash = source.md5sum[:40]
+    else:
+        original_ext = source_path.suffix
+        base_human_name = source_path.name
+        if original_ext:
+            base_human_name = base_human_name[: -len(original_ext)]
+        combat_hash = source.md5sum
+
+    if total > 1:
+        padding = max(2, len(str(total)))
+        part_suffix = f".{str(idx + 1).zfill(padding)}-{str(total).zfill(padding)}"
+    else:
+        part_suffix = ""
+
+    # Human: "Mi Carpeta.tar.01-10" o "Video.mp4.01-10"
+    full_name = f"{base_human_name}{original_ext}{part_suffix}"
+
+    # Short: "sha40.tar.01-10" o "md532.mp4.01-10"
+    short_name = f"{combat_hash}{original_ext}{part_suffix}"
+
+    return full_name, short_name
+
+
 class Chunker:
     @classmethod
     def get_or_create(cls, db: peewee.SqliteDatabase, job: Job) -> List[Payload]:
@@ -111,15 +149,13 @@ class Chunker:
         limit = job.config.tg_max_size
         ranges = chunk_ranges(file_size=job.source.size, chunk_size=limit)
 
-        # FIX: consulta N+1
-        base_filename = job.path.name
-        count_parts = len(ranges)
         payloads_data = []
         for idx, (start, end) in enumerate(ranges):
-            part_num = idx + 1
-            filename = base_filename
-            if count_parts > 1:
-                filename = f"{base_filename}_{part_num}-{count_parts}"
+            filename, filename_short = build_payload_names(
+                source=job.source,  # FIX: consulta N+1
+                idx=idx,
+                total=len(ranges),
+            )
 
             payloads_data.append(
                 {
@@ -129,6 +165,7 @@ class Chunker:
                     "end_offset": end,
                     "size": end - start,
                     "filename": filename,
+                    "filename_short": filename_short,
                     "md5sum": None,  # Se calculará durante la subida real
                 }
             )
@@ -146,14 +183,12 @@ class Chunker:
         tar_chunker = TarChunker(chunk_size=job.config.tg_max_size)
         vols = list(tar_chunker.iter_volumes(job.source.path))
 
-        base_filename = job.path.name
         count_parts = len(vols)
         payloads = []
         for idx, (vol, manifest) in enumerate(vols):
-            part_num = idx + 1
-            filename = base_filename
-            if count_parts > 1:
-                filename = f"{base_filename}_{part_num}-{count_parts}"
+            filename, filename_short = build_payload_names(
+                source=job.source, idx=idx, total=count_parts
+            )
 
             payload = Payload.create(
                 job=job,
@@ -162,6 +197,7 @@ class Chunker:
                 end_offset=manifest.end_offset,
                 size=manifest.chunk_size,
                 filename=filename,
+                filename_short=filename_short,
             )
 
             TapeMember.register_manifest_entries(
@@ -185,7 +221,7 @@ class SnapshotService:
         remotes_db = (
             RemotePayload.select(RemotePayload, Payload)
             .join(Payload)
-            .where((Payload.job == job ) & (RemotePayload.is_orphaned == False))
+            .where((Payload.job == job) & (RemotePayload.is_orphaned == False))
             .order_by(Payload.sequence_index)
         )
 
@@ -215,14 +251,19 @@ class SnapshotService:
         if source.type == SourceType.FOLDER:
             inventory = []
             # TapeMember -> TapeMemberGPS -> Payload
-            members = cast(List[TapeMember], TapeMember.select().where(TapeMember.source == source).prefetch(TapeMemberGPS, Payload))
+            members = cast(
+                List[TapeMember],
+                TapeMember.select()
+                .where(TapeMember.source == source)
+                .prefetch(TapeMemberGPS, Payload),
+            )
 
             for m in members:
                 fragments = [
                     FileFragment(
                         vol_idx=gps.payload.sequence_index,
                         offset_in_vol=gps.offset_in_volume,
-                        bytes_in_volume= gps.bytes_in_volume,
+                        bytes_in_volume=gps.bytes_in_volume,
                     )
                     for gps in m.fragments
                 ]
