@@ -1,7 +1,9 @@
+import time
 from pathlib import Path
 from typing import List
 
 import typer
+from rich.rule import Rule
 
 from totelegram.cli.commands.config import _get_config_tools
 from totelegram.cli.logic import (
@@ -44,42 +46,60 @@ def backup_folders(
     with console.status(f"[dim]Escaneando...[/dim]"):
         scan_report = InventoryEngine(settings).scan_backup_inventory(paths)
 
-    DisplayUpload.show_skip_report(scan_report, "carpeta")
+    DisplayUpload.show_skip_report(scan_report, "carpeta", force_verbose=False)
 
     candidates = scan_report.found.copy()
     count_candidates = len(scan_report.found)
     if not candidates:
-        UI.info("No hay carpetas para enviar.")
+        UI.warn("No se encontraron carpetas válidas para procesar.")
+        UI.print(
+            "[dim]Asegúrate de que las rutas existan y no estén excluidas por tus patrones de configuración.[/]"
+        )
         raise typer.Exit(0)
 
     # --- Subida de lo encontrado ---
 
     # with state.scope() as (client, db):
+    console.print(Rule(style="bright_black"))
     for index, folder in enumerate(candidates, 1):
-        count = "" if count_candidates == 1 else f"({index}/{count_candidates}):"
-        UI.info(
-            f"[dim]{count} Archivando la carpeta: {folder.name}[/]",
-            spacing="top",
+        if index > 1:
+            console.print(Rule(style="bright_black"))
+
+        prefix = f"[dim]{index}/{count_candidates}[/] " if count_candidates > 1 else ""
+        UI.print(
+            f"{prefix}Preparando archivo para: [bold cyan]{folder.name}[/]",
+            highlight=False,
+            indent=False,
         )
-        with console.status(f"[dim]Escaneando...[/dim]"):
-            scan_report = InventoryEngine(settings).scan_backup_internal(folder)
 
-        DisplayUpload.show_skip_report(scan_report, "archivo", force_verbose=False)
+        with UI.loading("Analizando contenido..."):
+            report_internal = InventoryEngine(settings).scan_backup_internal(folder)
+            time.sleep(0.3)
 
-        # u_ctx = prepare_upload_context(client, db, settings)
-        # uploader = UploadService(u_ctx)
+        if report_internal.total_skipped > 0:
+            DisplayUpload.show_skip_report(
+                report_internal, "archivo", force_verbose=False, skip_title=True
+            )
+        else:
+            UI.print("[success]>[/] Contenido íntegro y listo.")
 
-        # job, _ = get_or_create_job(path=folderpath, u_ctx=u_ctx)
-        # report = u_ctx.discovery.investigate(job)
-        # if report.state == AvailabilityState.FULFILLED:
-        #     if job.status != JobStatus.UPLOADED:
-        #         job.set_uploaded()
-        # elif report.state == AvailabilityState.NEEDS_UPLOAD:
-        #     uploader.execute_physical_upload(job, folderpath)
-        # elif report.state == AvailabilityState.CAN_FORWARD:
-        #     uploader.execute_smart_forward(job, report)
-        # else:
-        #     raise ValueError(f"Invalid state: {report.state}")
+    if scan_report:
+        console.print(Rule(style="bright_black"))
+        DisplayUpload.show_integrity_advice(scan_report)
+    # u_ctx = prepare_upload_context(client, db, settings)
+    # uploader = UploadService(u_ctx)
 
-        # SnapshotService.generate_snapshot(job)
-        # UI.success("Proceso de archivado finalizado correctamente.")
+    # job, _ = get_or_create_job(path=folderpath, u_ctx=u_ctx)
+    # report = u_ctx.discovery.investigate(job)
+    # if report.state == AvailabilityState.FULFILLED:
+    #     if job.status != JobStatus.UPLOADED:
+    #         job.set_uploaded()
+    # elif report.state == AvailabilityState.NEEDS_UPLOAD:
+    #     uploader.execute_physical_upload(job, folderpath)
+    # elif report.state == AvailabilityState.CAN_FORWARD:
+    #     uploader.execute_smart_forward(job, report)
+    # else:
+    #     raise ValueError(f"Invalid state: {report.state}")
+
+    # SnapshotService.generate_snapshot(job)
+    # UI.success("Proceso de archivado finalizado correctamente.")

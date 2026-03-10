@@ -1,6 +1,7 @@
 from pathlib import Path
 from typing import TYPE_CHECKING, List, Tuple, cast
 
+import tartape
 import typer
 
 from totelegram.cli.ui import UI, console
@@ -107,7 +108,7 @@ class InventoryEngine:
 
     def _validate_container(self, path: Path, report: ScanReport) -> bool:
         """
-        Comprueba Patrones y Snapshot de la carpeta. No comprueba tamaño.
+        Comprueba Patrones, Snapshot y integridad de cinta de la carpeta. No comprueba tamaño.
         """
         # Si la carpeta está en la lista de exclusión (ej: node_modules), se salta entera.
         if is_excluded(path, self.patterns):
@@ -121,6 +122,11 @@ class InventoryEngine:
 
         if next(path.iterdir(), None) is None:
             report.log_skip(path, "empty")
+            return False
+
+        tape = tartape.get_tape(path)
+        if tape is not None and not tape.verify(deep=True):
+            report.log_skip(path, "integrity")
             return False
 
         return True

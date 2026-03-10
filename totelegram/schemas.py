@@ -276,6 +276,10 @@ class ScanReport(BaseModel):
         default_factory=list,
         description="Carpetas que no contienen archivos válidos para procesar.",
     )
+    skipped_by_integrity: list[Path] = Field(
+        default_factory=list,
+        description="Carpetas que tartape las marca con error de integridad.",
+    )
 
     exclusion_patterns: list[str] = Field(default_factory=list)
 
@@ -287,6 +291,7 @@ class ScanReport(BaseModel):
             + len(self.skipped_by_exclusion)
             + len(self.skipped_by_error)
             + len(self.skipped_by_empty)
+            + len(self.skipped_by_integrity)
         )
 
     @property
@@ -302,7 +307,7 @@ class ScanReport(BaseModel):
     def log_skip(
         self,
         path: Path,
-        reason: Literal["snapshot", "size", "exclusion", "error", "empty"],
+        reason: Literal["snapshot", "size", "exclusion", "error", "empty", "integrity"],
     ):
         """Helper centralizado para registrar omisiones."""
         mapping = {
@@ -311,5 +316,6 @@ class ScanReport(BaseModel):
             "exclusion": self.skipped_by_exclusion,
             "error": self.skipped_by_error,
             "empty": self.skipped_by_empty,
+            "integrity": self.skipped_by_integrity,
         }
         mapping[reason].append(path)

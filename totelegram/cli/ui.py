@@ -19,7 +19,7 @@ Spacing = Optional[Literal["top", "bottom", "block"]]
 custom_theme = Theme(
     {
         "info": "dim cyan",
-        "warning": "magenta",
+        "warning": "orange1",
         "error": "bold red",
         "success": "bold green",
         "progress": "italic blue",
@@ -58,7 +58,9 @@ def get_friendly_chat_name(chat_id: str, database_path: str) -> str:
 
 class UI:
     @staticmethod
-    def _print(message: str, *, spacing: Spacing = None, **kwargs):
+    def _print(
+        message: str, *, indent: bool = False, spacing: Spacing = None, **kwargs
+    ):
         """Imprime un mensaje con formato y opcionalmente agrega espacio antes o después.
 
         Args:
@@ -72,14 +74,15 @@ class UI:
         if spacing in ("top", "block"):
             console.print()
 
-        console.print(message, **kwargs)
+        prefix = "  " if indent else ""
+        console.print(f"{prefix}{message}", **kwargs)
 
         if spacing in ("bottom", "block"):
             console.print()
 
     @staticmethod
-    def print(message: str, *, spacing: Spacing = None, **kwargs):
-        UI._print(f"  {message}", spacing=spacing, **kwargs)
+    def print(message: str, *, indent: bool = True, spacing: Spacing = None, **kwargs):
+        UI._print(f"{message}", indent=indent, spacing=spacing, **kwargs)
 
     @staticmethod
     def info(message: str, *, spacing: Spacing = None, **kwargs):
@@ -167,6 +170,7 @@ class DisplayUpload:
         scan_report: ScanReport,
         item_type: Literal["archivo", "carpeta"] = "archivo",
         force_verbose: Optional[bool] = None,
+        skip_title: bool = False,
     ) -> None:
         """
         Informa al usuario sobre los ítems omitidos en el inventario.
@@ -183,7 +187,7 @@ class DisplayUpload:
         if is_verbose:
             cls._show_detailed(scan_report, item_type)
         else:
-            cls._show_consolidated(scan_report, item_type)
+            cls._show_consolidated(scan_report, item_type, skip_title)
 
     @classmethod
     def _show_detailed(cls, report: ScanReport, item_type: str):
@@ -191,6 +195,9 @@ class DisplayUpload:
 
         for p in report.skipped_by_error:
             UI.error(f"Omitido (Ilegible/Error): {escape(p.name)}")
+
+        for p in report.skipped_by_integrity:
+            UI.error(f"Omitido (Integridad): {escape(p.name)}")
 
         for p in report.skipped_by_snapshot:
             UI.warn(f"[bright_black]Omitido (Ya tiene Snapshot):[/] {escape(p.name)}")
@@ -205,13 +212,17 @@ class DisplayUpload:
             UI.info(f"[bright_black]Omitida (Carpeta vacía):[/] {escape(p.name)}")
 
     @classmethod
-    def _show_consolidated(cls, report: ScanReport, item_type: str):
+    def _show_consolidated(
+        cls, report: ScanReport, item_type: str, skip_title: bool = False
+    ):
         """Muestra bloques resumidos con ejemplos para muchos ítems."""
-        plural = f"{item_type}s"
-        UI.print(
-            f"Se excluyeron [bold]{report.total_skipped}[/] {plural} por:",
-            spacing="top",
-        )
+
+        if not skip_title:
+            plural = f"{item_type}s"
+            UI.print(
+                f"Se excluyeron [bold]{report.total_skipped}[/] {plural} por:",
+                spacing="top",
+            )
 
         # Configuración de etiquetas según categoría
         configs = [
@@ -220,6 +231,7 @@ class DisplayUpload:
             (report.skipped_by_size, "Exceden peso máximo", "dark_red"),
             (report.skipped_by_exclusion, "Patrón de exclusión", "dark_blue"),
             (report.skipped_by_empty, "Carpetas sin contenido", "dark_blue"),
+            (report.skipped_by_integrity, "Integridad", "dark_red"),
         ]
 
         for items, label, style in configs:
@@ -239,13 +251,38 @@ class DisplayUpload:
             else ""
         )
 
-        console.print(f"  [bold {style}]• {label}:[/] [bold white]{count}[/]{pat_str}")
+        console.print(f"  [bold {style}]• {label}:[/] [white]{count}[/]{pat_str}")
 
         for f in files[:3]:
             console.print(f"     [bright_black]- {escape(f.name)}[/]", highlight=False)
 
         if count > 3:
             console.print(f"     [bright_black]... y {count - 3} más.[/]")
+
+    @staticmethod
+    def show_integrity_advice(report: ScanReport):
+        if not report.skipped_by_integrity:
+            return
+
+        count = len(report.skipped_by_integrity)
+
+        if count == 1:
+            name = report.skipped_by_integrity[0].name
+            msg = f"La carpeta [bold]'{name}'[/] ha cambiado desde el último escaneo."
+        else:
+            msg = f"Se detectaron [bold]{count}[/] carpetas con cambios recientes en su contenido."
+
+        subject_text = "estas carpetas" if count > 1 else "esta carpeta"
+
+        UI.warn(msg)
+        UI.print(
+            f"[dim]El backup de {subject_text} no es confiable en este momento porque "
+            "su índice local está desincronizado con el disco.[/]"
+        )
+        UI.tip(
+            "Si quieres archivarlas de todas formas, deberás forzar una subida completa "
+            "(comando próximamente).",
+        )
 
 
 class DisplayConfig:
