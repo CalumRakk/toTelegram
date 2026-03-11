@@ -18,6 +18,7 @@ setup(
         "rich>=14.2.0",
         "typer>=0.21.1",
         "filelock>=3.20.3",
+        "tartape>=2.2.0",
     ],
     packages=find_packages(),
     entry_points={

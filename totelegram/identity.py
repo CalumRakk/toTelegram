@@ -4,12 +4,12 @@ from pathlib import Path
 from typing import Annotated, Any, ClassVar, Dict, List, Literal, Optional, Tuple, cast
 
 from dotenv import dotenv_values
-from pydantic import BaseModel, Field, TypeAdapter, ValidationError
+from pydantic import BaseModel, Field, TypeAdapter, ValidationError, field_validator
 from pydantic.fields import FieldInfo
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from totelegram.schemas import VALUE_NOT_SET, AccessLevel, InfoField
-from totelegram.utils import ChatID, CommaSeparatedList, get_type_annotation
+from totelegram.utils import ChatID, CommaSeparatedList, IntList, get_type_annotation
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +65,11 @@ class Settings(BaseSettings):
         description="Filtro de seguridad: No procesar archivos que superen este tamaño.",
         json_schema_extra={"is_sensitive": False, "access": AccessLevel.EDITABLE},
     )
+    upload_pause_range: IntList = Field(
+        default_factory=lambda: [0, 0],
+        description="Rango de pausa aleatoria entre subidas (en minutos). Ej: '10,30'. [0,0] para desactivar.",
+        json_schema_extra={"is_sensitive": False, "access": AccessLevel.EDITABLE},
+    )
 
     # exclude_files_default: CommaSeparatedList = ["*.json", "*.json.xz"]
 
@@ -77,8 +82,16 @@ class Settings(BaseSettings):
         description="Ruta del archivo de log. Si está vacío, se usa la ruta por defecto en la carpeta de trabajo.",
     )
 
-    # def all_exclusion_patterns(self) -> List[str]:
-    #     return self.exclude_files + self.exclude_files_default
+    @field_validator("upload_pause_range", mode="after")
+    @classmethod
+    def validate_pause_range(cls, v: List[int]) -> List[int]:
+        if len(v) == 1:
+            return [v[0], v[0]]  # Si pone '30', la pausa es fija de 30 min.
+        if len(v) > 2:
+            return v[:2]  # Ignorar si pone más de dos números
+        if not v:
+            return [0, 0]
+        return v
 
     @classmethod
     def get_info(cls, field_name: str) -> Optional[InfoField]:

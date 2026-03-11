@@ -370,6 +370,11 @@ def validate_item(value: str) -> str:
     return value.strip("'").strip('"')
 
 
+IntList = Annotated[
+    List[int],
+    BeforeValidator(parse_comma_list),
+]
+
 CommaSeparatedList = Annotated[
     List[str],
     BeforeValidator(parse_comma_list),

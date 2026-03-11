@@ -1,8 +1,10 @@
+import time
 from contextlib import contextmanager
 from pathlib import Path
 from typing import List, Literal, Optional, Union
 
 import typer
+from rich.columns import Columns
 from rich.console import Console
 from rich.markup import escape
 from rich.panel import Panel
@@ -27,7 +29,7 @@ custom_theme = Theme(
     }
 )
 
-console = Console(theme=custom_theme)
+console = Console(theme=custom_theme, force_terminal=True, legacy_windows=True)
 
 
 def get_friendly_chat_name(chat_id: str, database_path: str) -> str:
@@ -58,6 +60,31 @@ def get_friendly_chat_name(chat_id: str, database_path: str) -> str:
 
 
 class UI:
+    @classmethod
+    def separator(cls):
+        console.print(Columns([Rule(style="bright_black")], width=45))
+
+    @staticmethod
+    def sleep_progress(seconds: int):
+        """Muestra una cuenta regresiva visual sin inundar el log."""
+        if seconds <= 0:
+            return
+
+        UI.info(f"Iniciando pausa de seguridad ({seconds // 60} min)...")
+
+        with console.status("[bold blue]Pausa activa...", spinner="line") as status:
+            for i in range(seconds, 0, -1):
+                time.sleep(1)
+
+                if i % 60 == 0 or i <= 10:
+                    mins = i // 60
+                    secs = i % 60
+                    status.update(
+                        f"[bold blue]Pausa activa: Siguiente parte en {mins}m {secs}s..."
+                    )
+
+        UI.success("Pausa finalizada. Reanudando subida.")
+
     @staticmethod
     def _print(
         message: str, *, indent: bool = False, spacing: Spacing = None, **kwargs
@@ -169,7 +196,7 @@ class DisplayUpload:
     def show_backup_header(cls, folder_name: str, index: int, total: int):
         """Muestra el encabezado de procesamiento de una carpeta en el backup."""
         if index > 1:
-            console.print(Rule(style="bright_black"))
+            UI.separator()
 
         prefix = f"[dim]{index}/{total}[/] " if total > 1 else ""
         UI.print(

@@ -3,7 +3,6 @@ from pathlib import Path
 from typing import List
 
 import typer
-from rich.rule import Rule
 
 from totelegram.cli.commands.config import _get_config_tools
 from totelegram.cli.logic import (
@@ -73,7 +72,7 @@ def backup_folders(
 
     # --- Subida de lo encontrado ---
 
-    console.print(Rule(style="bright_black"))
+    UI.separator()
 
     with state.scope() as (client, db):
         u_ctx = prepare_upload_context(client, db, settings)
@@ -110,5 +109,5 @@ def backup_folders(
             UI.success("Carpeta archivada.")
 
         if scan_report.skipped_by_integrity:
-            console.print(Rule(style="bright_black"))
+            UI.separator()
             DisplayUpload.show_integrity_advice(scan_report)
