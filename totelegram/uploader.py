@@ -5,8 +5,16 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Tuple, cast
 
 import tartape
+from rich.progress import (
+    BarColumn,
+    DownloadColumn,
+    Progress,
+    TextColumn,
+    TimeRemainingColumn,
+    TransferSpeedColumn,
+)
 
-from totelegram.cli.ui import UI
+from totelegram.cli.ui import UI, console
 from totelegram.models import Job, Payload, RemotePayload
 from totelegram.packaging import Chunker
 from totelegram.schemas import SourceType
@@ -20,28 +28,6 @@ if TYPE_CHECKING:
 
 
 logger = logging.getLogger(__name__)
-
-
-class UploadProgress:
-    def __init__(self, filename: str):
-        self.filename = filename
-        self.last_percentage = -1
-
-    def __call__(self, current: int, total: int):
-        percentage = int(current * 100 / total)
-
-        if percentage != self.last_percentage:
-            self.last_percentage = percentage
-
-            curr_mb = current / (1024 * 1024)
-            tot_mb = total / (1024 * 1024)
-
-            msg = f"  ↑ {self.filename} ({curr_mb:.1f}/{tot_mb:.1f} MB) {percentage}%"
-            print(f"\r{msg}\033[K", end="", flush=True)
-
-    def finish(self):
-        """Limpia la línea de progreso para dejar espacio al siguiente mensaje."""
-        print("\r\033[K", end="", flush=True)
 
 
 class UploadService:
@@ -89,7 +75,6 @@ class UploadService:
                 RemotePayload.register_upload(payload, message, self.owner)
 
             if idx < total - 1:
-
                 self._smart_pause()
 
         job.set_uploaded()
@@ -123,6 +108,21 @@ class UploadService:
         self, source_type: SourceType, md5sum: str, path: Path, payload: Payload
     ):
 
+        progress = Progress(
+            TextColumn("[bold blue]{task.fields[filename]}", justify="left"),
+            BarColumn(bar_width=20, pulse_style="white"),
+            "[progress.percentage]{task.percentage:>3.0f}%",
+            DownloadColumn(),
+            TransferSpeedColumn(),
+            TimeRemainingColumn(),
+            console=console,
+            transient=True,
+            expand=False,
+        )
+
+        def update_rich_progress(current, total):
+            progress.update(task_id, completed=current)
+
         if source_type == SourceType.FOLDER:
             tape = tartape.Tape(path)
             volumen = tape.get_volume(
@@ -137,23 +137,24 @@ class UploadService:
             )
 
         limit_bytes = self.u_ctx.settings.upload_limit_rate_kbps * 1024
-        with volumen:
-            with ThrottledFile(volumen, limit_bytes) as doc_stream:
-                filename, caption = self.resolve_naming_payload(payload)
-                progress_callback = UploadProgress(payload.filename)
-                tg_message = cast(
-                    "Message",
-                    self.client.send_document(
-                        chat_id=self.tg_chat.id,
-                        document=doc_stream,  # type: ignore
-                        file_name=filename,
-                        caption=caption,
-                        progress=progress_callback,
-                        force_document=True,
-                    ),
-                )
-                progress_callback.finish()
-                return tg_message, volumen.md5sum
+        filename, caption = self.resolve_naming_payload(payload)
+        with progress:
+            task_id = progress.add_task("upload", total=payload.size, filename=filename)
+
+            with volumen:
+                with ThrottledFile(volumen, limit_bytes) as doc_stream:
+                    tg_message = cast(
+                        "Message",
+                        self.client.send_document(
+                            chat_id=self.tg_chat.id,
+                            document=doc_stream,  # type: ignore
+                            file_name=filename,
+                            caption=caption,
+                            progress=update_rich_progress,
+                            force_document=True,
+                        ),
+                    )
+                    return tg_message, volumen.md5sum
 
     def _smart_forward_strategy(
         self,

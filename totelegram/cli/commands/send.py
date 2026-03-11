@@ -2,7 +2,6 @@ from pathlib import Path
 from typing import List
 
 import typer
-from rich.rule import Rule
 
 from totelegram.cli.commands.config import (
     _get_config_tools,
@@ -87,7 +86,7 @@ def send_files(
         UI.print("", indent=False)
 
         for path in candidates:
-            console.print(Rule(style="bright_black"))
+            UI.separator()
             job = get_or_create_job(path, u_ctx, force)
 
             report = u_ctx.discovery.investigate(job)
