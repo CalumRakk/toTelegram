@@ -1,3 +1,4 @@
+import time
 from contextlib import contextmanager
 from pathlib import Path
 from typing import List, Literal, Optional, Union
@@ -58,6 +59,27 @@ def get_friendly_chat_name(chat_id: str, database_path: str) -> str:
 
 
 class UI:
+    @staticmethod
+    def sleep_progress(seconds: int):
+        """Muestra una cuenta regresiva visual sin inundar el log."""
+        if seconds <= 0:
+            return
+
+        UI.info(f"Iniciando pausa de seguridad ({seconds // 60} min)...")
+
+        with console.status("[bold blue]Pausa activa...") as status:
+            for i in range(seconds, 0, -1):
+                time.sleep(1)
+
+                if i % 60 == 0 or i <= 10:
+                    mins = i // 60
+                    secs = i % 60
+                    status.update(
+                        f"[bold blue]Pausa activa: Siguiente parte en {mins}m {secs}s..."
+                    )
+
+        UI.success("Pausa finalizada. Reanudando subida.")
+
     @staticmethod
     def _print(
         message: str, *, indent: bool = False, spacing: Spacing = None, **kwargs

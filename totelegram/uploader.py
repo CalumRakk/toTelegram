@@ -1,4 +1,5 @@
 import logging
+import random
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Tuple, cast
@@ -60,10 +61,21 @@ class UploadService:
         self.owner = u_ctx.owner
         self.tg_chat = u_ctx.tg_chat
 
+    def _smart_pause(self):
+        """Calcula y ejecuta una pausa aleatoria basada en la configuración."""
+        r = self.settings.upload_pause_range
+
+        minutes = random.randint(min(r), max(r))
+
+        if minutes > 0:
+            UI.sleep_progress(minutes * 60)
+
     def execute_physical_upload(self, job: Job, path: Path):
         payloads = Chunker.get_or_create(self.db, job)
         md5sum = job.source.md5sum
-        for payload in payloads:
+
+        total = len(payloads)
+        for idx, payload in enumerate(payloads):
             if payload.has_remote:
                 continue
 
@@ -75,6 +87,10 @@ class UploadService:
                 payload.md5sum = part_md5
                 payload.save(only=[Payload.md5sum])
                 RemotePayload.register_upload(payload, message, self.owner)
+
+            if idx < total - 1:
+
+                self._smart_pause()
 
         job.set_uploaded()
 
