@@ -86,6 +86,7 @@ def backup_folders(
         UI.print("", indent=False)
 
         for index, folder in enumerate(candidates, 1):
+            is_last= (index == len(candidates)-1)
             DisplayUpload.show_backup_header(folder.name, index, len(candidates))
 
             with UI.loading("Analizando contenido..."):
@@ -94,7 +95,11 @@ def backup_folders(
 
             DisplayUpload.show_internal_scan_result(report_internal)
 
-            job = get_or_create_job(path=folder, u_ctx=u_ctx, force=force)
+            job = get_or_create_job(folder, u_ctx, force, is_last)
+            if job is None:
+                continue
+
+
             report = u_ctx.discovery.investigate(job)
             if report.state == AvailabilityState.FULFILLED:
                 if job.status != JobStatus.UPLOADED:

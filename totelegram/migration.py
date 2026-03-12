@@ -56,16 +56,18 @@ def run_migrations(db: peewee.SqliteDatabase, db_path: Path | str):
 
 def _migrate_to_v1(db):
     """Migración para soporte de concurrencia."""
+    try:
+        logger.info("Aplicando cambios de esquema para soporte multi-worker...")
 
-    logger.info("Aplicando cambios de esquema para soporte multi-worker...")
+        db.execute_sql("ALTER TABLE payload ADD COLUMN status TEXT DEFAULT 'PENDING'")
+        db.execute_sql("ALTER TABLE payload ADD COLUMN claimed_by TEXT")
 
-    db.execute_sql("ALTER TABLE payload ADD COLUMN status TEXT DEFAULT 'PENDING'")
-    db.execute_sql("ALTER TABLE payload ADD COLUMN claimed_by TEXT")
-
-    # Sincronizar datos: Si tiene un RemotePayload, ya está subido.
-    db.execute_sql(
+        # Sincronizar datos: Si tiene un RemotePayload, ya está subido.
+        db.execute_sql(
+            """
+            UPDATE payload SET status = 'UPLOADED'
+            WHERE id IN (SELECT payload_id FROM remotepayload)
         """
-        UPDATE payload SET status = 'UPLOADED'
-        WHERE id IN (SELECT payload_id FROM remotepayload)
-    """
-    )
+        )
+    except:
+        pass

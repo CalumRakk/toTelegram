@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import TYPE_CHECKING, List, cast
+from typing import TYPE_CHECKING, List, Optional, cast
 
 import peewee
 import tartape
@@ -9,10 +9,7 @@ from totelegram.cli.ui import UI, console
 from totelegram.discovery import DiscoveryService
 from totelegram.identity import Settings
 from totelegram.models import Job, Source, TelegramChat, TelegramUser
-from totelegram.schemas import (
-    CLIState,
-    ScanReport,
-)
+from totelegram.schemas import CLIState, ScanReport
 from totelegram.types import UploadContext
 from totelegram.utils import delete_snapshot, has_snapshot, is_excluded
 
@@ -53,35 +50,43 @@ def get_or_create_job(
     path: Path,
     u_ctx: UploadContext,
     force: bool,
-) -> Job:
-    chat_db, _ = TelegramChat.get_or_create_from_chat(u_ctx.tg_chat)
+    wait_if_busy:bool=False,
+) -> Optional[Job]:
 
-    if path.is_dir():
-        source = get_or_create_tape(path, u_ctx, force)
-    else:
-        with console.status(f"[dim]Procesando {path}...[/dim]"):
-            source = Source.get_or_create_from_filepath(path)
+    lock = u_ctx.state.manager.get_lock_for_path(path)
+    timeout = None if wait_if_busy else 0.01
 
-    job = Job.get_for_source_in_chat(source, chat_db)
-    if job and not force:
-        UI.info(f"Ya existe un contrato de disponibilidad para [bold]{path.name}[/]")
+    try:
+        with lock.acquire(timeout=timeout):
+            chat_db, _ = TelegramChat.get_or_create_from_chat(u_ctx.tg_chat)
+            if path.is_dir():
+                source = get_or_create_tape(path, u_ctx, force)
+            else:
+                with console.status(f"[dim]Procesando {path}...[/dim]"):
+                    source = Source.get_or_create_from_filepath(path)
+
+        job = Job.get_for_source_in_chat(source, chat_db)
+        if job and not force:
+            UI.info(f"Ya existe un contrato de disponibilidad para [bold]{path.name}[/]")
+            return job
+
+        if job and force:
+            UI.info(f"Invalidando contrato previo para [bold]{path.name}[/]")
+            delete_snapshot(path)
+            with u_ctx.db.atomic():
+                job.mark_deleted()
+                job = None
+
+        tg_limit = (
+            u_ctx.settings.tg_max_size_premium
+            if u_ctx.owner.is_premium
+            else u_ctx.settings.tg_max_size_normal
+        )
+        job = Job.formalize_intent(source, chat_db, u_ctx.owner.is_premium, tg_limit)
+        UI.success("Nuevo contrato de subida generado.")
         return job
-
-    if job and force:
-        UI.info(f"Invalidando contrato previo para [bold]{path.name}[/]")
-        delete_snapshot(path)
-        with u_ctx.db.atomic():
-            job.mark_deleted()
-            job = None
-
-    tg_limit = (
-        u_ctx.settings.tg_max_size_premium
-        if u_ctx.owner.is_premium
-        else u_ctx.settings.tg_max_size_normal
-    )
-    job = Job.formalize_intent(source, chat_db, u_ctx.owner.is_premium, tg_limit)
-    UI.success("Nuevo contrato de subida generado.")
-    return job
+    except Exception:
+        pass
 
 
 def prepare_upload_context(

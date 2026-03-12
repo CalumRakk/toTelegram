@@ -1,9 +1,11 @@
+import hashlib
 import json
 import logging
 from pathlib import Path
 from typing import Annotated, Any, ClassVar, Dict, List, Literal, Optional, Tuple, cast
 
 from dotenv import dotenv_values
+from filelock import FileLock
 from pydantic import BaseModel, Field, TypeAdapter, ValidationError, field_validator
 from pydantic.fields import FieldInfo
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -220,6 +222,23 @@ class SettingsManager:
         self.profiles_dir = self.worktable / "profiles"
         self.inventories_dir = self.worktable / "inventories"
         self.database_path = self.worktable / f"{self.worktable.name}.sqlite"
+
+    def get_lock_for_path(self, path:Path):
+        """Obtiene un FileLock específico para un archivo dado, basado en su ruta.
+
+        args:
+            path (Path): La ruta del archivo para el cual se desea obtener el lock.
+
+        raises:
+            IOError: Si no se puede crear el directorio de locks o el lock file.
+        """
+        lock_dir= self.worktable / "locks"
+        lock_dir.mkdir(exist_ok=True)
+
+        path_string= str(path.absolute()).encode()
+        path_hash= hashlib.md5(path_string).hexdigest()
+        lock_path= lock_dir / f"{path_hash}.lock"
+        return FileLock(lock_path)
 
     def _get_all_profile_names(self) -> List[str]:
         """Busca todos los nombres únicos que tienen un .env o un .session"""

@@ -3,10 +3,7 @@ from typing import List
 
 import typer
 
-from totelegram.cli.commands.config import (
-    _get_config_tools,
-    handle_config_errors,
-)
+from totelegram.cli.commands.config import _get_config_tools, handle_config_errors
 from totelegram.cli.logic import (
     InventoryEngine,
     get_or_create_job,
@@ -86,9 +83,13 @@ def send_files(
         UI.info(f"Destino: [bold cyan]{chat_n}[/] [dim](ID: {u_ctx.tg_chat.id})[/]")
         UI.print("", indent=False)
 
-        for path in candidates:
+        for idx, path in enumerate(candidates):
+            is_last= (idx == len(candidates)-1)
             UI.separator()
-            job = get_or_create_job(path, u_ctx, force)
+
+            job = get_or_create_job(path, u_ctx, force, is_last)
+            if job is None:
+                continue
 
             report = u_ctx.discovery.investigate(job)
             if report.state == AvailabilityState.FULFILLED:
