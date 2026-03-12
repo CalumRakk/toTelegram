@@ -93,24 +93,24 @@ class UploadService:
                         Payload.select(Payload.id)
                         .where(
                             (Payload.job == job)
-                            & (Payload.status == PayloadStatus.PENDING)
+                            & (
+                                (Payload.status == PayloadStatus.PENDING) |
+                                ((Payload.status == PayloadStatus.CLAIMED) & (Payload.claimed_by == self.profile_name))
+                            )
                         )
                         .order_by(Payload.sequence_index)
                         .limit(1)
                     )
 
                     query = Payload.update(
-                        status=PayloadStatus.CLAIMED, claimed_by=self.profile_name
+                        status=PayloadStatus.CLAIMED,
+                        claimed_by=self.profile_name
                     ).where(Payload.id == next_available_id)
 
                     rows_affected = query.execute()
 
                     if rows_affected > 0:
-                        return Payload.get(
-                            (Payload.job == job)
-                            & (Payload.claimed_by == self.profile_name)
-                            & (Payload.status == PayloadStatus.CLAIMED)
-                        )
+                        return Payload.get(Payload.id == next_available_id)
                 return None
 
             except peewee.OperationalError as e:
