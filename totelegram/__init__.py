@@ -9,4 +9,5 @@ En este modelo, los registros son globales, porque la propiedad no se define por
 Ver: docs/VISION.md
 """
 
-__version__ = "0.9.6"
+__version__ = "0.9.7"
+CURRENT_DB_VERSION = 1

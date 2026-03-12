@@ -4,7 +4,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Tuple, cast
 
-import peewee
 from pydantic import BaseModel
 
 from totelegram import __version__
@@ -131,18 +130,17 @@ def build_payload_names(source: Source, idx: int, total: int) -> Tuple[str, str]
 
 class Chunker:
     @classmethod
-    def get_or_create(cls, db: peewee.SqliteDatabase, job: Job) -> List[Payload]:
+    def get_or_create(cls, job: Job) -> List[Payload]:
         """Decide la segmentación basándose en el tipo de recurso."""
 
         if job.payloads.count() > 0:
             logger.debug(f"El Job {job.id} ya tiene payloads. Saltando segmentación.")
             return list(job.payloads.order_by(Payload.sequence_index))
 
-        with db.atomic():
-            if job.source.type == SourceType.FOLDER:
-                return cls._process_folder_job(job)
-            else:
-                return cls._process_file_job(job)
+        if job.source.type == SourceType.FOLDER:
+            return cls._process_folder_job(job)
+        else:
+            return cls._process_file_job(job)
 
     @classmethod
     def _process_file_job(cls, job: Job) -> List[Payload]:
@@ -213,7 +211,7 @@ class Chunker:
 
 class SnapshotService:
     @staticmethod
-    def generate_snapshot(job: Job) -> UploadManifest:
+    def generate_snapshot(job: Job):
         source = job.source
         original_file_path = Path(source.path_str)
 

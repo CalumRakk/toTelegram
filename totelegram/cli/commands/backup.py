@@ -11,6 +11,7 @@ from totelegram.cli.logic import (
     prepare_upload_context,
 )
 from totelegram.cli.ui import UI, DisplayUpload, console
+from totelegram.models import Job
 from totelegram.packaging import SnapshotService
 from totelegram.schemas import (
     VALUE_NOT_SET,
@@ -75,7 +76,7 @@ def backup_folders(
     UI.separator()
 
     with state.scope() as (client, db):
-        u_ctx = prepare_upload_context(client, db, settings)
+        u_ctx = prepare_upload_context(state, client, db, settings)
         uploader = UploadService(u_ctx)
 
         user = u_ctx.owner.first_name or u_ctx.owner.username
@@ -105,8 +106,10 @@ def backup_folders(
             else:
                 raise ValueError(f"Invalid state: {report.state}")
 
-            SnapshotService.generate_snapshot(job)
-            UI.success("Carpeta archivada.")
+            job = Job.get(job.id)
+            if job.status == JobStatus.UPLOADED:
+                SnapshotService.generate_snapshot(job)
+                UI.success("Carpeta archivada.")
 
         if scan_report.skipped_by_integrity:
             UI.separator()

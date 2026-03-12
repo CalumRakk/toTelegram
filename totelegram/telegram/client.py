@@ -6,6 +6,8 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional, cast
 
+from filelock import FileLock, Timeout
+
 if TYPE_CHECKING:
     from pyrogram import Client  # type: ignore
     from pyrogram import enums
@@ -38,12 +40,31 @@ class TelegramSession:
         self.name = session_name
         self.api_id = api_id
         self.api_hash = api_hash
-        self.profiles_dir = profiles_dir
+        self.profiles_dir = Path(profiles_dir)
+
+        self.lock_path = self.profiles_dir / f"{self.name}.lock"
+        self._lock = FileLock(self.lock_path, timeout=0)
 
     def start(self) -> Client:
         """Inicia la conexión manualmente."""
+        return self.__enter__()
+
+    def stop(self):
+        """Detiene la conexión manualmente."""
+        self.__exit__(None, None, None)
+
+    def __enter__(self) -> Client:
         if self.client and self.client.is_connected:
             return self.client
+
+        try:
+            self._lock.acquire()
+            logger.debug(f"Lock adquirido para el perfil: {self.name}")
+        except Timeout:
+            raise RuntimeError(
+                f"El perfil '{self.name}' ya está siendo utilizado por otra consola.\n"
+                f"Si estás seguro de que no es así, borra el archivo: {self.lock_path}"
+            )
 
         logger.info(f"Iniciando sesión de Telegram: {self.name}")
 
@@ -82,23 +103,19 @@ class TelegramSession:
             logger.debug(f"Error: inesperado: {e}")
             raise e
 
-    def stop(self):
-        """Detiene la conexión manualmente."""
+    def __exit__(self, exc_type, exc_val, exc_tb):
         if self.client and self.client.is_connected:
             logger.info("Cerrando sesión de Telegram...")
             try:
                 self.client.stop()  # type: ignore
             except Exception as e:
                 logger.warning(f"Error al cerrar cliente (ignorable): {e}")
+
+        if self._lock.is_locked:
+            self._lock.release()
+            logger.debug(f"Lock liberado para el perfil: {self.name}")
+
         self.client = None
-
-    def __enter__(self) -> Client:
-        """Soporte para Context Manager (with)."""
-        return self.start()
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        """Soporte para Context Manager (with)."""
-        self.stop()
 
     @classmethod
     def from_profile(

@@ -14,7 +14,7 @@ if TYPE_CHECKING:
         TelegramUser,
     )
     from totelegram.packaging import Chunker
-    from totelegram.schemas import AvailabilityState
+    from totelegram.schemas import AvailabilityState, CLIState
     from totelegram.uploader import UploadService
 
 
@@ -26,6 +26,7 @@ class UploadContext:
     db: peewee.SqliteDatabase
     discovery: "DiscoveryService"
     settings: "Settings"
+    state: "CLIState"
 
 
 @dataclass

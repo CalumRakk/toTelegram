@@ -1,7 +1,6 @@
 import logging
 import re
 import sys
-from decimal import __version__
 from typing import Optional
 
 import typer
@@ -13,6 +12,7 @@ from totelegram.utils import APP_NAME, get_user_config_dir
 logging.getLogger("dotenv").setLevel(logging.CRITICAL)
 
 
+from totelegram import __version__
 from totelegram.cli.commands import send
 from totelegram.cli.ui import UI, console
 from totelegram.identity import SettingsManager

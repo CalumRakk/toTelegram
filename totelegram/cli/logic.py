@@ -10,6 +10,7 @@ from totelegram.discovery import DiscoveryService
 from totelegram.identity import Settings
 from totelegram.models import Job, Source, TelegramChat, TelegramUser
 from totelegram.schemas import (
+    CLIState,
     ScanReport,
 )
 from totelegram.types import UploadContext
@@ -69,8 +70,9 @@ def get_or_create_job(
     if job and force:
         UI.info(f"Invalidando contrato previo para [bold]{path.name}[/]")
         delete_snapshot(path)
-        job.mark_deleted()
-        job = None
+        with u_ctx.db.atomic():
+            job.mark_deleted()
+            job = None
 
     tg_limit = (
         u_ctx.settings.tg_max_size_premium
@@ -82,7 +84,9 @@ def get_or_create_job(
     return job
 
 
-def prepare_upload_context(client: "Client", db, settings: Settings) -> UploadContext:
+def prepare_upload_context(
+    state: CLIState, client: "Client", db: peewee.SqliteDatabase, settings: Settings
+) -> UploadContext:
     """
     Centraliza la inicialización de servicios y validación de red.
     Lanza typer.Exit si algo falla, limpiando el comando principal.
@@ -104,6 +108,7 @@ def prepare_upload_context(client: "Client", db, settings: Settings) -> UploadCo
         tg_chat=tg_chat,
         owner=owner,
         settings=settings,
+        state=state,
     )
 
 

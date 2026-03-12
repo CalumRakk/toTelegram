@@ -33,7 +33,10 @@ class TestCliConfig(unittest.TestCase):
         self.manager = manager
 
     def tearDown(self):
-        self.tmp_dir.cleanup()
+        try:
+            self.tmp_dir.cleanup()
+        except Exception:
+            pass
 
     def test_config_display_table(self):
         """Verificar que el comando base muestra la tabla de configuración."""

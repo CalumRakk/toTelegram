@@ -7,6 +7,8 @@ from typing import Literal, Union
 import peewee
 from peewee import Field
 
+from totelegram.migration import run_migrations
+
 logger = logging.getLogger(__name__)
 db_proxy = peewee.Proxy()
 
@@ -37,7 +39,13 @@ class DatabaseSession:
 
         self.db = peewee.SqliteDatabase(
             str(self.db_path),
-            pragmas={"journal_mode": "wal", "cache_size": -1024 * 64},
+            pragmas={
+                "journal_mode": "wal",  # Permite leer mientras otro escribe
+                "cache_size": -1024 * 64,
+                "synchronous": "NORMAL",
+                "busy_timeout": 30000,  # Esperar 30s si está bloqueada
+                "foreign_keys": 1,  # Asegurar integridad referencial
+            },
             timeout=10,
         )
 
@@ -68,6 +76,8 @@ class DatabaseSession:
             ],
             safe=True,
         )
+
+        run_migrations(self.db, self.db_path)
         return self.db
 
     def __exit__(self, exc_type, exc_val, exc_tb):
