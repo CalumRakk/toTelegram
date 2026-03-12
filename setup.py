@@ -1,6 +1,11 @@
+from pathlib import Path
+
 from setuptools import find_packages, setup
 
 from totelegram import __version__
+
+this_directory = Path(__file__).parent
+long_description = (this_directory / "README.md").read_text(encoding="utf-8")
 
 setup(
     name="totelegram",
@@ -8,6 +13,8 @@ setup(
     description="toTelegram sube archivos a telegram sin importar el tamaño.",
     author="Leo",
     url="https://github.com/CalumRakk/toTelegram",
+    long_description=long_description,
+    long_description_content_type="text/markdown",
     install_requires=[
         "filetype==1.2.0",
         "peewee>=3.17.9",
