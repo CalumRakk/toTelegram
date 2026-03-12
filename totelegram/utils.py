@@ -136,7 +136,6 @@ def parse_comma_list(value):
 
 def is_excluded(path: Path, patterns: List[str]) -> bool:
     """Devuelve True si el path debe ser excluido según las reglas de exclusión."""
-    logger.info(f"Comprobando path exclusion de {path=}")
     if not path.exists():
         logger.info(f"No existe: {path}, se omite")
         return True
@@ -144,6 +143,7 @@ def is_excluded(path: Path, patterns: List[str]) -> bool:
     for pattern in patterns:
         # Para coincidencia directa (archivo o carpeta exacta)
         if path.match(pattern):
+            logger.info(f"Está excluido por configuración: {path}, se omite")
             return True
 
         # Para coincidencia recursiva (si una carpeta padre está excluida)
@@ -151,7 +151,10 @@ def is_excluded(path: Path, patterns: List[str]) -> bool:
             if str(parent) == ".":
                 break
             if parent.match(pattern):
+                logger.info(f"Está excluido por configuración: {path}, se omite")
                 return True
+
+    logger.info(f"No está excluido por configuración: {path}")
     return False
 
 

@@ -1,6 +1,7 @@
 import logging
 import re
 import sys
+from datetime import datetime
 from typing import Optional
 
 import typer
@@ -14,7 +15,7 @@ logging.getLogger("dotenv").setLevel(logging.CRITICAL)
 
 from totelegram import __version__
 from totelegram.cli.commands import send
-from totelegram.cli.ui import UI, console
+from totelegram.cli.ui import console
 from totelegram.identity import SettingsManager
 from totelegram.logging_config import setup_logging
 
@@ -69,18 +70,21 @@ def main(
     worktable = get_user_config_dir(APP_NAME)
     config_manager = SettingsManager(worktable)
 
+    cmd_name = ctx.invoked_subcommand or "sys"
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    log_dir = worktable / "logs"
+    log_path = log_dir / f"{timestamp}_{cmd_name}.log"
+
+    log_level = logging.DEBUG if debug else logging.INFO
+    setup_logging(log_path, level=log_level)
+
     # main resuelve la intencion del nombre del perfil a usar; las validaciones dependen del contexto del comando.
     profile_name = use or config_manager.get_active_profile_name()
-    if debug is True:
-        setup_logging("debug_execution.log", logging.DEBUG)
-        UI.info(f"[bold yellow]MODO DEBUG ACTIVADO[/]")
-    else:
-        # setup_logging("execution.log", logging.INFO)
-        pass
-
     ctx.obj = CLIState(
         manager=config_manager, profile_name=profile_name, is_debug=debug
     )
+    logger.debug(f"--- Nueva Ejecución: {sys.argv} ---")
 
 
 def run_script():

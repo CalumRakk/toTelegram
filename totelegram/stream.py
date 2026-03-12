@@ -1,8 +1,11 @@
 import hashlib
 import io
+import logging
 from pathlib import Path
 
 from tartape.stream import TapeVolume
+
+logger = logging.getLogger(__name__)
 
 
 class FileVolume(TapeVolume):
@@ -13,7 +16,12 @@ class FileVolume(TapeVolume):
         self.end_offset = end_offset
         self._file = None
         self._position = 0
-        self._md5 = hashlib.md5()
+
+        # Lógica de Integridad
+        self._md5_context = hashlib.md5()
+        self._hash_cursor = 0
+        self._integrity_broken = False
+        self._final_md5 = None
         self._closed = True
 
     @property
@@ -26,25 +34,65 @@ class FileVolume(TapeVolume):
 
     def read(self, size: int = -1) -> bytes:  # type: ignore
         if self._closed:
-            raise ValueError("File already closed")
+            raise ValueError("I/O operation on closed file volume.")
 
-        remaining = self.size - self._position
+        if self._file is None:
+            raise RuntimeError("File not opened")
+
+        # conoce posición real ANTES de la lectura
+        current_relative_pos = self._file.tell() - self.start_offset
+
+        remaining = self.size - current_relative_pos
         if remaining <= 0:
             return b""
 
-        # Determinar cuánto leer (size=-1 significa todo)
         bytes_to_read = remaining if (size < 0) else min(size, remaining)
-        if not self._file:
-            raise RuntimeError("File not opened")
-
         chunk = self._file.read(bytes_to_read)
+
         if not chunk:
             return b""
 
-        self._position += len(chunk)
-        self._md5.update(chunk)
+        if not self._integrity_broken:
+            if current_relative_pos == self._hash_cursor:
+                self._md5_context.update(chunk)
+                self._hash_cursor += len(chunk)
 
+            # Se leyó algo más allá de lo que teníamos hasheado. Integridad rota.
+            elif current_relative_pos > self._hash_cursor:
+                logger.debug(
+                    f"Integridad on-the-fly rota en {self.name}: Salto detectado de {self._hash_cursor} a {current_relative_pos}"
+                )
+                self._integrity_broken = True
+
+            # Re-lectura o Retroceso (Rewind/Retry)
+            else:
+                # Comprobamos si esta re-lectura termina aportando algo nuevo al cursor
+                new_data_start = self._hash_cursor - current_relative_pos
+                if len(chunk) > new_data_start:
+                    # Una parte es vieja y una parte es nueva (Overlap)
+                    # Esto puede pasar si un chunk de reintento es más grande que el original
+                    extra_data = chunk[new_data_start:]
+                    self._md5_context.update(extra_data)
+                    self._hash_cursor += len(extra_data)
+
+        self._position = self._file.tell() - self.start_offset
         return chunk
+
+    def _calculate_manually(self) -> str:
+        logger.info(
+            f"Calculando MD5 manual para {self.name} (Integridad on-the-fly no garantizada)."
+        )
+        hasher = hashlib.md5()
+        with open(self.path, "rb") as f:
+            f.seek(self.start_offset)
+            remaining = self.size
+            while remaining > 0:
+                chunk = f.read(min(remaining, 1024 * 1024))
+                if not chunk:
+                    break
+                hasher.update(chunk)
+                remaining -= len(chunk)
+        return hasher.hexdigest()
 
     def seek(self, offset: int, whence: int = io.SEEK_SET) -> int:
         if whence == io.SEEK_SET:
@@ -62,6 +110,7 @@ class FileVolume(TapeVolume):
         self._position = new_pos
         if not self._file:
             raise RuntimeError("File not opened")
+
         self._file.seek(self.start_offset + new_pos)
         return self._position
 
@@ -76,11 +125,15 @@ class FileVolume(TapeVolume):
 
     @property
     def md5sum(self) -> str:
-        if self._position < self.size:
-            raise RuntimeError(
-                f"MD5 not available: Incomplete read ({self._position}/{self.size})."
-            )
-        return self._md5.hexdigest()
+        if self._final_md5:
+            return self._final_md5
+
+        if not self._integrity_broken and self._hash_cursor == self.size:
+            self._final_md5 = self._md5_context.hexdigest()
+            return self._final_md5
+
+        self._final_md5 = self._calculate_manually()
+        return self._final_md5
 
     def close(self):
         self.__exit__(None, None, None)

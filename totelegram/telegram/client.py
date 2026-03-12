@@ -83,7 +83,9 @@ class TelegramSession:
             lang_code=iso639,
             in_memory=False,
             no_updates=True,
-        )
+            workers=1,
+            max_concurrent_transmissions = 1
+            )
 
         try:
             self.client.start()  # type: ignore

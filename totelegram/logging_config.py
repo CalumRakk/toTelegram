@@ -1,15 +1,19 @@
 import logging
 import os
-import sys
-import warnings
+from pathlib import Path
 
 
-def logger_formatter() -> logging.Formatter:
-    formatter = logging.Formatter(
-        "%(asctime)s [%(levelname)s] %(message)s",
-        datefmt="%d-%m-%Y %I:%M:%S %p",
-    )
-    return formatter
+def logger_formatter(for_file: bool = False) -> logging.Formatter:
+    if for_file:
+        return logging.Formatter(
+            fmt="%(asctime)s.%(msecs)03d | %(levelname)-8s | %(name)s:%(funcName)s:%(lineno)d - %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+        )
+    else:
+        return logging.Formatter(
+            fmt="%(asctime)s | %(levelname)-7s | %(message)s",
+            datefmt="%H:%M:%S",
+        )
 
 
 def handler_stream(formatter: logging.Formatter, level: int) -> logging.StreamHandler:
@@ -26,65 +30,37 @@ def handler_file(path: str, formatter: logging.Formatter) -> logging.FileHandler
     return file_handler
 
 
-def handler_supervisor_stdout(formatter: logging.Formatter) -> logging.StreamHandler:
-    handler = logging.StreamHandler(sys.stdout)
-    handler.setLevel(logging.DEBUG)
-    handler.setFormatter(formatter)
-    return handler
+def setup_logging(
+    log_file: Path, level: int = logging.INFO, max_history: int = 20
+) -> None:
+    log_file.parent.mkdir(parents=True, exist_ok=True)
 
+    existing_logs = sorted(log_file.parent.glob("*.log"), key=os.path.getmtime)
+    if len(existing_logs) > max_history:
+        for old_log in existing_logs[:-max_history]:
+            try:
+                old_log.unlink()
+            except Exception:
+                pass
 
-def handler_supervisor_stderr(formatter: logging.Formatter) -> logging.StreamHandler:
-    handler = logging.StreamHandler(sys.stderr)
-    handler.setLevel(logging.WARNING)
-    handler.setFormatter(formatter)
-    return handler
-
-
-def setup_logging(path: str, level: int = logging.INFO) -> None:
     for handler in logging.root.handlers[:]:
         logging.root.removeHandler(handler)
         handler.close()
 
-    formatter = logger_formatter()
+    # Handler para archivo Siempre DEBUG
+    file_h = logging.FileHandler(log_file, encoding="utf-8")
+    file_h.setLevel(logging.DEBUG)
+    file_h.setFormatter(logger_formatter(True))
 
-    running_under_supervisord = any(
-        key in os.environ
-        for key in [
-            "SUPERVISOR_PROCESS_NAME",
-            "SUPERVISOR_ENABLED",
-            "SUPERVISOR_GROUP_NAME",
-        ]
-    )
-
-    if running_under_supervisord:
-        handlers = [
-            handler_supervisor_stdout(formatter),
-            handler_supervisor_stderr(formatter),
-        ]
-    else:
-        handlers = [handler_stream(formatter, level), handler_file(path, formatter)]
+    # # Handler para consola INFO por defecto
+    # console_h = logging.StreamHandler()
+    # console_h.setLevel(level)
+    # console_h.setFormatter(formatter)
 
     logging.basicConfig(
         level=logging.DEBUG,
-        handlers=handlers,
+        handlers=[file_h],
     )
 
-    # Silenciar loggers de librerías de terceros
-    libraries_to_silence = [
-        "urllib3",
-        "seleniumwire",
-        "selenium",
-        "undetected_chromedriver",
-        "hpack",
-        "peewee",
-        "pyrogram",
-    ]
-    warnings.filterwarnings("ignore", category=DeprecationWarning, module="pyrogram")
-
-    if level > logging.DEBUG:
-        libraries_to_silence = ["pyrogram", "peewee", "urllib3"]
-        for lib_name in libraries_to_silence:
-            logging.getLogger(lib_name).setLevel(logging.CRITICAL)
-    else:
-        logging.getLogger("pyrogram").setLevel(logging.WARNING)
-        logging.getLogger("peewee").setLevel(logging.DEBUG)
+    for lib in ["pyrogram", "peewee", "urllib3"]:
+        logging.getLogger(lib).setLevel(logging.INFO)
