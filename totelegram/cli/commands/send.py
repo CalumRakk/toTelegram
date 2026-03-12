@@ -10,14 +10,10 @@ from totelegram.cli.logic import (
     prepare_upload_context,
 )
 from totelegram.cli.ui import UI, DisplayUpload, console
-from totelegram.models import Job
-from totelegram.packaging import SnapshotService
 from totelegram.schemas import (
     VALUE_NOT_SET,
-    AvailabilityState,
     CLIState,
     Commands,
-    JobStatus,
 )
 from totelegram.uploader import UploadService
 
@@ -91,19 +87,5 @@ def send_files(
             if job is None:
                 continue
 
-            report = u_ctx.discovery.investigate(job)
-            if report.state == AvailabilityState.FULFILLED:
-                UI.info(f"{path.name=} ya está disponible en Telegram.")
-                if job.status != JobStatus.UPLOADED:
-                    job.set_uploaded()
-            elif report.state == AvailabilityState.NEEDS_UPLOAD:
-                uploader.execute_physical_upload(job, path)
-            elif report.state == AvailabilityState.CAN_FORWARD:
-                uploader.execute_smart_forward(job, report)
-            else:
-                raise ValueError(f"Invalid state: {report.state}")
-
-            job = Job.get(job.id)
-            if job.status == JobStatus.UPLOADED:
-                SnapshotService.generate_snapshot(job)
-                UI.success(f"Enviado: [bold]{path.name}[/]")
+            if uploader.process_job(job, path):
+                UI.success(f"Archivo [bold]{path.name}[/] enviado exitosamente.")

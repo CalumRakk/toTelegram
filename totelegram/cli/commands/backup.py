@@ -11,15 +11,7 @@ from totelegram.cli.logic import (
     prepare_upload_context,
 )
 from totelegram.cli.ui import UI, DisplayUpload, console
-from totelegram.models import Job
-from totelegram.packaging import SnapshotService
-from totelegram.schemas import (
-    VALUE_NOT_SET,
-    AvailabilityState,
-    CLIState,
-    Commands,
-    JobStatus,
-)
+from totelegram.schemas import VALUE_NOT_SET, CLIState, Commands
 from totelegram.uploader import UploadService
 
 
@@ -100,21 +92,8 @@ def backup_folders(
                 continue
 
 
-            report = u_ctx.discovery.investigate(job)
-            if report.state == AvailabilityState.FULFILLED:
-                if job.status != JobStatus.UPLOADED:
-                    job.set_uploaded()
-            elif report.state == AvailabilityState.NEEDS_UPLOAD:
-                uploader.execute_physical_upload(job, folder)
-            elif report.state == AvailabilityState.CAN_FORWARD:
-                uploader.execute_smart_forward(job, report)
-            else:
-                raise ValueError(f"Invalid state: {report.state}")
-
-            job = Job.get(job.id)
-            if job.status == JobStatus.UPLOADED:
-                SnapshotService.generate_snapshot(job)
-                UI.success("Carpeta archivada.")
+            if uploader.process_job(job, folder):
+                UI.success(f"Carpeta [bold]{folder.name}[/] procesada exitosamente.")
 
         if scan_report.skipped_by_integrity:
             UI.separator()

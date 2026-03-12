@@ -18,8 +18,8 @@ from rich.progress import (
 
 from totelegram.cli.ui import UI, console
 from totelegram.models import Job, Payload, RemotePayload
-from totelegram.packaging import Chunker
-from totelegram.schemas import PayloadStatus, SourceType
+from totelegram.packaging import Chunker, SnapshotService
+from totelegram.schemas import AvailabilityState, JobStatus, PayloadStatus, SourceType
 from totelegram.stream import FileVolume
 from totelegram.types import AvailabilityReport, UploadContext
 from totelegram.utils import ThrottledFile
@@ -50,6 +50,35 @@ class UploadService:
         self.u_ctx = u_ctx
         self.owner = u_ctx.owner
         self.tg_chat = u_ctx.tg_chat
+
+    def process_job(self, job: Job, path: Path):
+        """
+        Orquesta el ciclo de vida de un Job: Investigación, Ejecución y Cierre.
+        Este es el 'cerebro' que decide si reenviar, subir o marcar como completado.
+        """
+        report = self.u_ctx.discovery.investigate(job)
+
+        if report.state == AvailabilityState.FULFILLED:
+            UI.info(f"[dim]{path.name}[/] ya está disponible en el destino.")
+            if job.status != JobStatus.UPLOADED:
+                job.set_uploaded()
+
+        elif report.state == AvailabilityState.NEEDS_UPLOAD:
+            self.execute_physical_upload(job, path)
+
+        elif report.state == AvailabilityState.CAN_FORWARD:
+            UI.info(f"Recurso encontrado en otro chat. Iniciando [bold]Smart Forward[/]...")
+            self.execute_smart_forward(job, report)
+
+        else:
+            raise ValueError(f"Estado de disponibilidad no reconocido: {report.state}")
+
+        job = Job.get_by_id(job.id)
+        if job.status == JobStatus.UPLOADED:
+            SnapshotService.generate_snapshot(job)
+            return True
+
+        return False
 
     def _is_worker_alive(self, profile_name: str) -> bool:
         """Verifica mediante el archivo .lock si el worker/perfil sigue activo."""
@@ -141,9 +170,7 @@ class UploadService:
             if payload is None:
                 break
 
-            UI.info(
-                f"Reclamada pieza [bold]{payload.sequence_index}[/] por [cyan]{self.profile_name}[/]"
-            )
+            UI.info(f"Subiendo la pieza [bold]{payload.filename}[/]")
 
             try:
                 message, part_md5 = self._upload_payload(
@@ -156,7 +183,7 @@ class UploadService:
 
                 # if idx < total - 1:
                 #     self._smart_pause()
-
+                UI.success(f"Pieza subida exitosamente.")
             except Exception as e:
                 with self.db.atomic():
                     payload.release()
