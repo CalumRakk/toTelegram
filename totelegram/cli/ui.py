@@ -70,7 +70,7 @@ class UI:
         if seconds <= 0:
             return
 
-        UI.info(f"Iniciando pausa de seguridad ({seconds // 60} min)...")
+        UI.info(f"Iniciando pausa ({seconds // 60} min)...")
 
         with console.status("[bold blue]Pausa activa...", spinner="line") as status:
             for i in range(seconds, 0, -1):

@@ -363,6 +363,15 @@ class Payload(BaseModel):
         self.claimed_by = None
         self.save(only=[Payload.status, Payload.updated_at, Payload.claimed_by])
 
+    @staticmethod
+    def total_pending_for_job(job: "Job") -> int:
+        return (
+                Payload.select()
+                .where(
+                    (Payload.job == job) & (Payload.status != PayloadStatus.UPLOADED)
+                )
+                .count()
+            )
 
 class RemotePayload(BaseModel):
     """Representa el Acceso Efectivo: El vínculo entre el Payload y el mensaje en Telegram."""

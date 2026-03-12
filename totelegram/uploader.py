@@ -181,23 +181,17 @@ class UploadService:
                     payload.set_uploaded(part_md5)
                     RemotePayload.register_upload(payload, message, self.owner)
 
-                # if idx < total - 1:
-                #     self._smart_pause()
                 UI.success(f"Pieza subida exitosamente.")
+
+                if Payload.total_pending_for_job(job) > 0:
+                     self._smart_pause()
             except Exception as e:
                 with self.db.atomic():
                     payload.release()
                 raise e
 
         with self.db.atomic():
-            total_pending = (
-                Payload.select()
-                .where(
-                    (Payload.job == job) & (Payload.status != PayloadStatus.UPLOADED)
-                )
-                .count()
-            )
-            if total_pending == 0:
+            if Payload.total_pending_for_job(job) == 0:
                 job.set_uploaded()
                 UI.success("¡Subida completa! Todas las piezas están en Telegram.")
 
