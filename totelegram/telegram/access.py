@@ -183,7 +183,7 @@ class ChatAccessService:
 
         Devuelve un AccessReport con el resultado del análisis.
         """
-
+        logger.info(f"Verificando permisos de acceso para el destino: {query}")
         normalized_id = normalize_chat_id(query)
         chat = self.get_chat(normalized_id)
         if not chat:
@@ -208,6 +208,10 @@ class ChatAccessService:
                 )
 
             if not self.can_interact(chat):
+                logger.error(
+                    f"Permisos insuficientes: El usuario no puede enviar mensajes en {chat.title}"
+                )
+
                 return AccessReport(
                     status=AccessStatus.RESTRICTED,
                     chat=ChatMatch.from_chat(chat),

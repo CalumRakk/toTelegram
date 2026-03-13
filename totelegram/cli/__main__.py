@@ -76,8 +76,7 @@ def main(
     log_dir = worktable / "logs"
     log_path = log_dir / f"{timestamp}_{cmd_name}.log"
 
-    log_level = logging.DEBUG if debug else logging.INFO
-    setup_logging(log_path, level=log_level)
+    setup_logging(log_path, debug)
 
     # main resuelve la intencion del nombre del perfil a usar; las validaciones dependen del contexto del comando.
     profile_name = use or config_manager.get_active_profile_name()

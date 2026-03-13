@@ -56,6 +56,7 @@ class UploadService:
         Orquesta el ciclo de vida de un Job: Investigación, Ejecución y Cierre.
         Este es el 'cerebro' que decide si reenviar, subir o marcar como completado.
         """
+        logger.info(f"Iniciando procesamiento de Job {job.id} para: {path.name}")
         report = self.u_ctx.discovery.investigate(job)
 
         if report.state == AvailabilityState.FULFILLED:
@@ -67,7 +68,9 @@ class UploadService:
             self.execute_physical_upload(job, path)
 
         elif report.state == AvailabilityState.CAN_FORWARD:
-            UI.info(f"Recurso encontrado en otro chat. Iniciando [bold]Smart Forward[/]...")
+            UI.info(
+                f"Recurso encontrado en otro chat. Iniciando [bold]Smart Forward[/]..."
+            )
             self.execute_smart_forward(job, report)
 
         else:
@@ -94,6 +97,8 @@ class UploadService:
             return True
 
     def _claim_next_payload(self, job: Job) -> Optional[Payload]:
+        logger.debug(f"Buscando siguiente pieza disponible para Job {job.id}...")
+
         max_retries = 5
         for attempt in range(max_retries):
             try:
@@ -123,8 +128,11 @@ class UploadService:
                         .where(
                             (Payload.job == job)
                             & (
-                                (Payload.status == PayloadStatus.PENDING) |
-                                ((Payload.status == PayloadStatus.CLAIMED) & (Payload.claimed_by == self.profile_name))
+                                (Payload.status == PayloadStatus.PENDING)
+                                | (
+                                    (Payload.status == PayloadStatus.CLAIMED)
+                                    & (Payload.claimed_by == self.profile_name)
+                                )
                             )
                         )
                         .order_by(Payload.sequence_index)
@@ -132,13 +140,15 @@ class UploadService:
                     )
 
                     query = Payload.update(
-                        status=PayloadStatus.CLAIMED,
-                        claimed_by=self.profile_name
+                        status=PayloadStatus.CLAIMED, claimed_by=self.profile_name
                     ).where(Payload.id == next_available_id)
 
                     rows_affected = query.execute()
 
                     if rows_affected > 0:
+                        logger.info(
+                            f"Pieza {next_available_id} reclamada exitosamente por el perfil {self.profile_name}"
+                        )
                         return Payload.get(Payload.id == next_available_id)
                 return None
 
@@ -159,7 +169,9 @@ class UploadService:
             UI.sleep_progress(minutes * 60)
 
     def execute_physical_upload(self, job: Job, path: Path):
-
+        logger.info(
+            f"Iniciando subida física de {path.name}. Estrategia: {job.strategy}"
+        )
         with self.db.atomic():
             Chunker.get_or_create(job)
 
@@ -173,6 +185,7 @@ class UploadService:
             UI.info(f"Subiendo la pieza [bold]{payload.filename}[/]")
 
             try:
+
                 message, part_md5 = self._upload_payload(
                     job.source.type, md5sum, path, payload
                 )
@@ -184,7 +197,7 @@ class UploadService:
                 UI.success(f"Pieza subida exitosamente.")
 
                 if Payload.total_pending_for_job(job) > 0:
-                     self._smart_pause()
+                    self._smart_pause()
             except Exception as e:
                 with self.db.atomic():
                     payload.release()
@@ -245,6 +258,7 @@ class UploadService:
         def update_rich_progress(current, total):
             progress.update(task_id, completed=current)
 
+        logger.debug(f"Preparando stream de datos para pieza {payload.sequence_index}")
         if source_type == SourceType.FOLDER:
             tape = tartape.Tape(path)
             volumen = tape.get_volume(
@@ -264,6 +278,10 @@ class UploadService:
             task_id = progress.add_task("upload", total=payload.size, filename=filename)
 
             with volumen:
+                logger.info(
+                    f"Transmitiendo pieza {payload.filename} a Telegram (Tamaño: {payload.size} bytes)"
+                )
+
                 with ThrottledFile(volumen, limit_bytes) as doc_stream:
                     tg_message = cast(
                         "Message",

@@ -79,8 +79,8 @@ class FileVolume(TapeVolume):
         return chunk
 
     def _calculate_manually(self) -> str:
-        logger.info(
-            f"Calculando MD5 manual para {self.name} (Integridad on-the-fly no garantizada)."
+        logger.warning(
+            f"Se requiere cálculo MD5 manual para {self.name} debido a saltos en el cursor de lectura."
         )
         hasher = hashlib.md5()
         with open(self.path, "rb") as f:
@@ -130,6 +130,9 @@ class FileVolume(TapeVolume):
 
         if not self._integrity_broken and self._hash_cursor == self.size:
             self._final_md5 = self._md5_context.hexdigest()
+            logger.debug(
+                f"MD5 calculado on-the-fly para {self.name}: {self._final_md5}"
+            )
             return self._final_md5
 
         self._final_md5 = self._calculate_manually()

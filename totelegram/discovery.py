@@ -26,6 +26,9 @@ class DiscoveryService:
         """
         Analiza la disponibilidad del Job y devuelve un reporte con los recursos encontrados.
         """
+        logger.info(
+            f"Investigando disponibilidad de MD5 {job.source.md5sum} en chat {job.chat.id}"
+        )
 
         if self.is_fulfilled_local(job):
             return AvailabilityReport(state=AvailabilityState.FULFILLED)
@@ -88,6 +91,9 @@ class DiscoveryService:
         Verifica en Telegram si los mensajes de un Job siguen existiendo.
         Usa caché interna para evitar peticiones redundantes.
         """
+        logger.debug(
+            f"Iniciando validación JIT en Telegram para {len(remotes)} mensajes"
+        )
         if not remotes:
             return False
 
@@ -108,16 +114,24 @@ class DiscoveryService:
                         messages: List["Message"]
                         messages = [messages]
 
-
                     for msg in messages:
-                        remote = next((r for r in to_verify if r.message_id == msg.id), None)
+                        remote = next(
+                            (r for r in to_verify if r.message_id == msg.id), None
+                        )
                         if not remote:
                             continue
 
                         # Si un solo mensaje del set falló, el espejo no es íntegro
-                        if (msg is None or getattr(msg, "empty", True) or not msg.document):
+                        if (
+                            msg is None
+                            or getattr(msg, "empty", True)
+                            or not msg.document
+                        ):
                             remote.mark_orphaned()
                             is_integral = False
+                            logger.warning(
+                                f"Mensaje {remote.message_id} no encontrado o vacío en Telegram. Marcando como huérfano."
+                            )
                             continue
 
                         # Verificación extra: ¿El tamaño coincide? (Anti-edición)

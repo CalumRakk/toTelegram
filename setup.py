@@ -22,7 +22,6 @@ setup(
         "pydantic-settings>=2.10.1",
         "Pyrogram @ git+https://github.com/CalumRakk/pyrogram.git",
         "TgCrypto>=1.2.5",
-        "rich>=14.2.0",
         "typer>=0.21.1",
         "filelock>=3.20.3",
         "tartape>=2.2.0",
