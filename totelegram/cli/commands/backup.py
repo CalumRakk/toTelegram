@@ -71,6 +71,14 @@ def backup_folders(
         u_ctx = prepare_upload_context(state, client, db, settings)
         uploader = UploadService(u_ctx)
 
+        from totelegram.telegram.patches import get_patch_status
+
+        status = get_patch_status()
+        if status["applied"]:
+            UI.success("Core Engine: Pyrogram Runtime Patches [ACTIVE]")
+        else:
+            UI.error("Core Engine: Pyrogram Runtime Patches [FAILED]")
+
         user = u_ctx.owner.first_name or u_ctx.owner.username
         chat_n = u_ctx.tg_chat.title or u_ctx.tg_chat.username
         UI.success(f"Conectado como [bold]{user}[/]")
@@ -78,7 +86,7 @@ def backup_folders(
         UI.print("", indent=False)
 
         for index, folder in enumerate(candidates, 1):
-            is_last= (index == len(candidates)-1)
+            is_last = index == len(candidates)
             DisplayUpload.show_backup_header(folder.name, index, len(candidates))
 
             with UI.loading("Analizando contenido..."):
@@ -90,7 +98,6 @@ def backup_folders(
             job = get_or_create_job(folder, u_ctx, force, is_last)
             if job is None:
                 continue
-
 
             if uploader.process_job(job, folder):
                 UI.success(f"Carpeta [bold]{folder.name}[/] procesada exitosamente.")

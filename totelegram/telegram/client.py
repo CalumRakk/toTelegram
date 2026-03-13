@@ -54,6 +54,7 @@ class TelegramSession:
         self.__exit__(None, None, None)
 
     def __enter__(self) -> Client:
+
         if self.client and self.client.is_connected:
             return self.client
 
@@ -71,6 +72,11 @@ class TelegramSession:
         lang, encoding = locale.getdefaultlocale()
         iso639 = lang.split("_")[0] if lang else "en"
 
+        # Punto de entrada para aplicar parches a Pyrogram antes de iniciar el cliente.
+        from totelegram.telegram.patches import apply_pyrogram_patches
+
+        apply_pyrogram_patches()
+
         from pyrogram import Client  # type: ignore
         from pyrogram.errors import ApiIdInvalid, ApiIdPublishedFlood
         from pyrogram.types import Chat  # type: ignore
@@ -84,8 +90,8 @@ class TelegramSession:
             in_memory=False,
             no_updates=True,
             workers=1,
-            max_concurrent_transmissions = 1
-            )
+            max_concurrent_transmissions=1,
+        )
 
         try:
             self.client.start()  # type: ignore

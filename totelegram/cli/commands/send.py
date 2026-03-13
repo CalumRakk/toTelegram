@@ -73,14 +73,22 @@ def send_files(
         u_ctx = prepare_upload_context(state, client, db, settings)
         uploader = UploadService(u_ctx)
 
+        from totelegram.telegram.patches import get_patch_status
+
+        status = get_patch_status()
+        if status["applied"]:
+            UI.success("Core Engine: Pyrogram Runtime Patches [ACTIVE]")
+        else:
+            UI.error("Core Engine: Pyrogram Runtime Patches [FAILED]")
+
         user = u_ctx.owner.first_name or u_ctx.owner.username
         chat_n = u_ctx.tg_chat.title or u_ctx.tg_chat.username
         UI.success(f"Conectado como [bold]{user}[/]")
         UI.info(f"Destino: [bold cyan]{chat_n}[/] [dim](ID: {u_ctx.tg_chat.id})[/]")
         UI.print("", indent=False)
 
-        for idx, path in enumerate(candidates):
-            is_last= (idx == len(candidates)-1)
+        for idx, path in enumerate(candidates, 1):
+            is_last = idx == len(candidates)
             UI.separator()
 
             job = get_or_create_job(path, u_ctx, force, is_last)
