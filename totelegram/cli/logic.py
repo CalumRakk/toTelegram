@@ -50,8 +50,13 @@ def get_or_create_job(
     path: Path,
     u_ctx: UploadContext,
     force: bool,
-    wait_if_busy:bool=False,
+    wait_if_busy: bool = False,
 ) -> Optional[Job]:
+    """
+    Obtiene el job asociado a un path. Si no existe, lo crea.
+
+    Nota: Intenta obtener un lock para el archivo. Si no se puede obtener y wait_if_busy es False, retorna None
+    """
 
     lock = u_ctx.state.manager.get_lock_for_path(path)
     timeout = None if wait_if_busy else 0.01
@@ -64,29 +69,30 @@ def get_or_create_job(
             else:
                 with console.status(f"[dim]Procesando {path}...[/dim]"):
                     source = Source.get_or_create_from_filepath(path)
-
-        job = Job.get_for_source_in_chat(source, chat_db)
-        if job and not force:
-            UI.info(f"Ya existe un contrato de disponibilidad para [bold]{path.name}[/]")
-            return job
-
-        if job and force:
-            UI.info(f"Invalidando contrato previo para [bold]{path.name}[/]")
-            delete_snapshot(path)
-            with u_ctx.db.atomic():
-                job.mark_deleted()
-                job = None
-
-        tg_limit = (
-            u_ctx.settings.tg_max_size_premium
-            if u_ctx.owner.is_premium
-            else u_ctx.settings.tg_max_size_normal
-        )
-        job = Job.formalize_intent(source, chat_db, u_ctx.owner.is_premium, tg_limit)
-        UI.success("Nuevo contrato de subida generado.")
-        return job
     except Exception:
-        pass
+        UI.info("Otro proceso esta trabajando con este archivo.")
+        return
+
+    job = Job.get_for_source_in_chat(source, chat_db)
+    if job and not force:
+        UI.info(f"Subida previa recuperada: [bold]{path.name}[/]")
+        return job
+
+    if job and force:
+        UI.info(f"Forzando subida de nuevo: [bold]{path.name}[/]")
+        delete_snapshot(path)
+        with u_ctx.db.atomic():
+            job.mark_deleted()
+            job = None
+
+    tg_limit = (
+        u_ctx.settings.tg_max_size_premium
+        if u_ctx.owner.is_premium
+        else u_ctx.settings.tg_max_size_normal
+    )
+    job = Job.formalize_intent(source, chat_db, u_ctx.owner.is_premium, tg_limit)
+    UI.success("Preparando subida.")
+    return job
 
 
 def prepare_upload_context(

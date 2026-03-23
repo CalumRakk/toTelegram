@@ -213,7 +213,7 @@ class DisplayUpload:
                 report, item_type="archivo", force_verbose=False, skip_title=True
             )
         else:
-            UI.success("Contenido íntegro y listo.")
+            UI.success("Sin archivos omitidos.")
 
     @classmethod
     def show_skip_report(
