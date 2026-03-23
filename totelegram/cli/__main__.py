@@ -20,7 +20,6 @@ from totelegram.identity import SettingsManager
 from totelegram.logging_config import setup_logging
 
 logger = logging.getLogger(__name__)
-COMMANDS_IGNORING_USE = ["profile", "version"]
 
 app = typer.Typer(
     help="Herramienta para subir archivos a Telegram sin límite de tamaño.",

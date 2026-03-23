@@ -60,13 +60,29 @@ def apply_pyrogram_patches():
             queue = asyncio.Queue(1)
 
             async def worker(session):
+                import asyncio
+
+                from pyrogram.errors import FloodWait
+
                 while True:
                     data = await queue.get()
-
                     if data is None:
                         return
-                    # Elimina try-except para que las excepciones no se silencien y puedan ser capturadas por el bloque externo
-                    await session.invoke(data)
+
+                    # Bucle de reintento interno para este trozo
+                    while True:
+                        try:
+                            await session.invoke(data)
+                            break
+                        except FloodWait as e:
+                            logger.warning(
+                                f"FloodWait detectado en worker: esperando {e.value} segundos..."
+                            )
+                            await asyncio.sleep(int(e.value) + 1)  # type: ignore
+                        except Exception as e:
+                            logger.error(f"Error crítico en worker de subida: {e}")
+                            raise e
+
                     queue.task_done()
 
             part_size = 512 * 1024

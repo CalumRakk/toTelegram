@@ -223,7 +223,7 @@ class SettingsManager:
         self.inventories_dir = self.worktable / "inventories"
         self.database_path = self.worktable / f"{self.worktable.name}.sqlite"
 
-    def get_lock_for_path(self, path:Path):
+    def get_lock_for_path(self, path: Path):
         """Obtiene un FileLock específico para un archivo dado, basado en su ruta.
 
         args:
@@ -232,12 +232,12 @@ class SettingsManager:
         raises:
             IOError: Si no se puede crear el directorio de locks o el lock file.
         """
-        lock_dir= self.worktable / "locks"
+        lock_dir = self.worktable / "locks"
         lock_dir.mkdir(exist_ok=True)
 
-        path_string= str(path.absolute()).encode()
-        path_hash= hashlib.md5(path_string).hexdigest()
-        lock_path= lock_dir / f"{path_hash}.lock"
+        path_string = str(path.absolute()).encode()
+        path_hash = hashlib.md5(path_string).hexdigest()
+        lock_path = lock_dir / f"{path_hash}.lock"
         return FileLock(lock_path)
 
     def _get_all_profile_names(self) -> List[str]:
@@ -366,7 +366,8 @@ class SettingsManager:
 
         - Si se proporciona `profile_name`, verifica que exista el archivo `.env`.
         - Si no se proporciona, utiliza el perfil activo guardado en `worktable/active_profile_name`.
-        - Si la validación falla y `strict` es True, lanza ValueError;
+
+        Si la validación falla y `strict` es True, lanza ValueError;
         de lo contrario, devuelve None.
 
         Args:

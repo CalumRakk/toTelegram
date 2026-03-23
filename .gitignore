@@ -43,3 +43,4 @@ upload_state.json
 manual/
 build/
 prompt.md
+delete_source.py
