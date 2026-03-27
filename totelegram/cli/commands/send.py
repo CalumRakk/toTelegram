@@ -95,5 +95,5 @@ def send_files(
             if job is None:
                 continue
 
-            if uploader.process_job(job, path):
+            if uploader.process_job(job, path, is_last):
                 UI.success(f"Archivo [bold]{path.name}[/] enviado exitosamente.")

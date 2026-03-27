@@ -51,7 +51,7 @@ class UploadService:
         self.owner = u_ctx.owner
         self.tg_chat = u_ctx.tg_chat
 
-    def process_job(self, job: Job, path: Path):
+    def process_job(self, job: Job, path: Path, is_last_job: bool = False):
         """
         Orquesta el ciclo de vida de un Job: Investigación, Ejecución y Cierre.
         Este es el 'cerebro' que decide si reenviar, subir o marcar como completado.
@@ -65,7 +65,7 @@ class UploadService:
                 job.set_uploaded()
 
         elif report.state == AvailabilityState.NEEDS_UPLOAD:
-            self.execute_physical_upload(job, path)
+            self.execute_physical_upload(job, path, is_last_job)
 
         elif report.state == AvailabilityState.CAN_FORWARD:
             UI.info(
@@ -168,7 +168,7 @@ class UploadService:
         if minutes > 0:
             UI.sleep_progress(minutes * 60)
 
-    def execute_physical_upload(self, job: Job, path: Path):
+    def execute_physical_upload(self, job: Job, path: Path, is_last_job: bool):
         logger.info(
             f"Iniciando subida física de {path.name}. Estrategia: {job.strategy}"
         )
@@ -196,8 +196,10 @@ class UploadService:
 
                 UI.success(f"Pieza subida exitosamente.")
 
-                if Payload.total_pending_for_job(job) > 0:
+                has_more_payloads = Payload.total_pending_for_job(job) > 0
+                if has_more_payloads and not is_last_job:
                     self._smart_pause()
+
             except Exception as e:
                 with self.db.atomic():
                     payload.release()

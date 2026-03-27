@@ -99,7 +99,7 @@ def backup_folders(
             if job is None:
                 continue
 
-            if uploader.process_job(job, folder):
+            if uploader.process_job(job, folder, is_last):
                 UI.success(f"Carpeta [bold]{folder.name}[/] procesada exitosamente.")
 
         if scan_report.skipped_by_integrity:
