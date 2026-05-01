@@ -11,7 +11,6 @@ from contextlib import nullcontext
 from pathlib import Path
 from time import sleep
 from typing import (
-    TYPE_CHECKING,
     Annotated,
     Any,
     Iterable,
@@ -26,10 +25,6 @@ from pydantic import BeforeValidator
 from pydantic.fields import FieldInfo
 
 from totelegram.schemas import APP_NAME, SELF_CHAT_ALIASES, VALUE_NOT_SET
-
-if TYPE_CHECKING:
-    from totelegram.identity import Settings
-
 
 logger = logging.getLogger(__name__)
 

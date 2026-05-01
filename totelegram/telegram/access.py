@@ -7,7 +7,7 @@ from totelegram.schemas import AccessReport, AccessStatus, ChatMatch
 from totelegram.utils import normalize_chat_id
 
 if TYPE_CHECKING:
-    from pyrogram import Client  # type: ignore
+    from pyrogram.client import Client
     from pyrogram.types import Chat, ChatMember
 
 logger = logging.getLogger(__name__)

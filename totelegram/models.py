@@ -15,9 +15,9 @@ from totelegram.schemas import JobStatus, PayloadStatus, SourceType, Strategy
 from totelegram.telegram.client import parse_message_json_data
 
 if TYPE_CHECKING:
-    from totelegram.identity import Settings
     from pyrogram.types import Chat as TgChat
     from pyrogram.types import Message
+
 
 from totelegram.database import EnumField, PydanticJSONField, db_proxy
 from totelegram.schemas import StrategyConfig, TapeCatalog
@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 class BaseModel(peewee.Model):
     created_at = cast(datetime, peewee.DateTimeField(default=datetime.now))
-    updated_at = peewee.DateTimeField(default=datetime.now)
+    updated_at = cast(datetime, peewee.DateTimeField(default=datetime.now))
 
     def save(self, *args, **kwargs):
         self.updated_at = datetime.now()
@@ -50,7 +50,7 @@ class TelegramChat(BaseModel):
     type = cast(str, peewee.CharField())  # 'private', 'group', 'channel', etc.
 
     is_public = cast(bool, peewee.BooleanField(default=False))
-    last_verified = peewee.DateTimeField(null=True)
+    last_verified = cast(datetime, peewee.DateTimeField(null=True))
 
     @staticmethod
     def get_or_create_from_chat(tg_chat: "TgChat") -> Tuple["TelegramChat", bool]:
@@ -247,7 +247,7 @@ class Source(BaseModel):
 
 class Job(BaseModel):
     id: int
-    payloads: peewee.ModelSelect  # type: ignore
+    payloads: peewee.ModelSelect
 
     source = cast(Source, peewee.ForeignKeyField(Source, backref="jobs"))
     chat = peewee.ForeignKeyField(TelegramChat, backref="jobs")
@@ -263,7 +263,7 @@ class Job(BaseModel):
         return Path(self.source.path_str)
 
     def set_uploaded(self):
-        self.status = JobStatus.UPLOADED.value
+        self.status = JobStatus.UPLOADED
         self.save(only=[Job.status, Job.updated_at])
 
     @staticmethod
@@ -348,7 +348,7 @@ class Payload(BaseModel):
         return (
             RemotePayload.select()
             .where(
-                (RemotePayload.payload == self) & (RemotePayload.is_orphaned == False)
+                (RemotePayload.payload == self) & (not RemotePayload.is_orphaned)
             )
             .exists()
         )
@@ -460,7 +460,7 @@ class TapeMember(BaseModel):
     size = cast(int, peewee.BigIntegerField())
     md5sum = cast(str, peewee.CharField())
 
-    class Meta:  # type: ignore
+    class Meta: # type: ignore
         indexes = (
             # Un archivo solo puede estar una vez en una carpeta específica
             (("source", "relative_path"), True),

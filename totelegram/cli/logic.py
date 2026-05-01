@@ -14,7 +14,7 @@ from totelegram.types import UploadContext
 from totelegram.utils import delete_snapshot, has_snapshot, is_excluded
 
 if TYPE_CHECKING:
-    from pyrogram import Client  # type: ignore
+    from pyrogram.client import Client
     from pyrogram.types import Chat, User
 
 

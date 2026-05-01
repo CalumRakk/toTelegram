@@ -14,7 +14,6 @@ def apply_pyrogram_patches():
     import functools
     import inspect
     import io
-    import logging
     import math
     import os
     from hashlib import md5
@@ -28,7 +27,7 @@ def apply_pyrogram_patches():
         BadRequest,
         SessionPasswordNeeded,
     )
-    from pyrogram.session import Session  # type: ignore
+    from pyrogram.session.session import Session
     from pyrogram.types import TermsOfService, User
     from pyrogram.utils import ainput
 
@@ -45,7 +44,7 @@ def apply_pyrogram_patches():
     import pyrogram.methods.advanced.save_file
 
     async def save_file_patched(
-        self: "pyrogram.Client",  # type: ignore
+        self: "pyrogram.client.Client",
         path: Union[str, BinaryIO],
         file_id: Optional[int] = None,
         file_part: int = 0,
@@ -73,8 +72,35 @@ def apply_pyrogram_patches():
                     while True:
                         try:
                             await session.invoke(data)
+
+                            # Reemplazamos el status de la barra de progreso
+                            if progress_args and hasattr(progress_args[0], "status"):
+                                if "Limitado" in progress_args[0].status:
+                                    progress_args[0].status = "[blue]Subiendo...[/]"
                             break
                         except FloodWait as e:
+
+                            if progress_args and hasattr(progress_args[0], "status"):
+                                progress_args[0].status = (
+                                    f"[bold magenta]Limitado ({e.value}s)[/]"
+                                )
+
+                                if progress:
+                                    # Calculamos el progreso actual para el callback
+                                    current_progress = file_part * part_size
+                                    if inspect.iscoroutinefunction(progress):
+                                        await progress(
+                                            current_progress, file_size, *progress_args
+                                        )
+                                    else:
+                                        await self.loop.run_in_executor(
+                                            self.executor,
+                                            progress,
+                                            current_progress,
+                                            file_size,
+                                            *progress_args,
+                                        )
+
                             logger.warning(
                                 f"FloodWait detectado en worker: esperando {e.value} segundos..."
                             )
@@ -363,7 +389,7 @@ def apply_pyrogram_patches():
     # --- MARCA DE AGUA  ---
 
     _PATCHED = True
-    setattr(pyrogram.Client, "_patched_by_totelegram", True)  # type: ignore
+    setattr(pyrogram.client.Client, "_patched_by_totelegram", True)
     logger.debug("Core: Pyrogram Runtime Patches aplicados exitosamente.")
     logger.debug("Parches aplicados correctamente.")
 
@@ -375,10 +401,10 @@ def get_patch_status() -> dict:
     """
     try:
         import pyrogram
-        from pyrogram.session import Session  # type: ignore
+        from pyrogram.session.session import Session
 
-        is_patched = getattr(pyrogram.Client, "_patched_by_totelegram", False)  # type: ignore
-        is_save_file_custom = pyrogram.Client.save_file.__name__ == "save_file_patched"  # type: ignore
+        is_patched = getattr(pyrogram.client.Client, "_patched_by_totelegram", False)
+        is_save_file_custom = pyrogram.client.Client.save_file.__name__ == "save_file_patched"
 
         return {
             "applied": is_patched,

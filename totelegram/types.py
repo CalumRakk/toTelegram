@@ -4,8 +4,8 @@ from typing import TYPE_CHECKING, List
 import peewee
 
 if TYPE_CHECKING:
-    from pyrogram import Client  # type: ignore
-    from pyrogram.types import Chat, Message, User
+    from pyrogram.client import Client
+    from pyrogram.types import Chat
 
     from totelegram.discovery import DiscoveryService
     from totelegram.identity import Settings
@@ -13,9 +13,7 @@ if TYPE_CHECKING:
         RemotePayload,
         TelegramUser,
     )
-    from totelegram.packaging import Chunker
     from totelegram.schemas import AvailabilityState, CLIState
-    from totelegram.uploader import UploadService
 
 
 @dataclass

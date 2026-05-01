@@ -121,9 +121,9 @@ class Settings(BaseSettings):
 
         level = cast(
             AccessLevel,
-            field.json_schema_extra.get("access", AccessLevel.DEBUG_READONLY),
+            field.json_schema_extra.get("access", AccessLevel.DEBUG_READONLY), # type: ignore
         )
-        is_sensitive = cast(bool, field.json_schema_extra.get("is_sensitive", False))
+        is_sensitive = cast(bool, field.json_schema_extra.get("is_sensitive", False)) # type: ignore
         type_annotation = get_type_annotation(field)
 
         return InfoField(

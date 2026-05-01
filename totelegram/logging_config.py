@@ -1,6 +1,7 @@
 import logging
 import os
 from pathlib import Path
+from typing import cast
 
 
 def logger_formatter(for_file: bool = False) -> logging.Formatter:
@@ -33,7 +34,7 @@ def handler_file(path: str, formatter: logging.Formatter) -> logging.FileHandler
 def setup_logging(log_file: Path, is_debug: bool, max_history: int = 20) -> None:
     log_file.parent.mkdir(parents=True, exist_ok=True)
 
-    existing_logs = sorted(log_file.parent.glob("*.log"), key=os.path.getmtime)
+    existing_logs = cast(list[Path],sorted(log_file.parent.glob("*.log"), key=os.path.getmtime))
     if len(existing_logs) > max_history:
         for old_log in existing_logs[:-max_history]:
             try:

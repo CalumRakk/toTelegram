@@ -1,7 +1,7 @@
 import logging
 import math
 import time
-from typing import TYPE_CHECKING, List
+from typing import TYPE_CHECKING, List, Union, cast
 
 import peewee
 
@@ -11,8 +11,7 @@ from totelegram.types import AvailabilityReport
 from totelegram.utils import batched
 
 if TYPE_CHECKING:
-    from pyrogram import Client  # type: ignore
-    from pyrogram.types import Message
+    from pyrogram.client import Client
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +58,7 @@ class DiscoveryService:
             remotes = list(
                 RemotePayload.select(RemotePayload, Payload)
                 .join(Payload)
-                .where((Payload.job == hist_job) & (RemotePayload.is_orphaned == False))
+                .where((Payload.job == hist_job) & (not RemotePayload.is_orphaned))
                 .order_by(Payload.sequence_index)
             )
 
@@ -77,7 +76,7 @@ class DiscoveryService:
         local_remotes = list(
             RemotePayload.select()
             .join(Payload)
-            .where((Payload.job == job) & (RemotePayload.is_orphaned == False))
+            .where((Payload.job == job) & (not RemotePayload.is_orphaned))
             .order_by(Payload.sequence_index)
         )
 
@@ -107,11 +106,12 @@ class DiscoveryService:
         is_integral = True
 
         try:
+            from pyrogram.types import Message
+
             with self.db.atomic():
                 for batch_ids in batched(msg_ids, 200):
-                    messages = self.client.get_messages(chat_id, batch_ids)  # type: ignore
-                    if not isinstance(messages, list):
-                        messages: List["Message"]
+                    messages = cast(Union[Message, List[Message]], self.client.get_messages(chat_id, batch_ids))
+                    if isinstance(messages, Message):
                         messages = [messages]
 
                     for msg in messages:

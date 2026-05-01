@@ -7,7 +7,7 @@ from totelegram.schemas import Commands
 from totelegram.telegram.search import ChatSearchService
 
 if TYPE_CHECKING:
-    from pyrogram import Client  # type: ignore
+    from pyrogram.client import Client
 
 from totelegram.cli.ui import UI, DisplayGeneric, DisplayProfile, console
 from totelegram.schemas import AccessStatus, CLIState
@@ -89,10 +89,10 @@ def _run_destination_wizard(
                         f" [1] Reintentar con '{query}' (Si ya enviaste el mensaje)"
                     )
                     console.print(
-                        f" [2] Búsqueda profunda (Escanear más chats antiguos)"
+                        " [2] Búsqueda profunda (Escanear más chats antiguos)"
                     )
-                    console.print(f" [3] Probar otro nombre.")
-                    console.print(f" [4] Volver al menú principal.")
+                    console.print(" [3] Probar otro nombre.")
+                    console.print(" [4] Volver al menú principal.")
 
                     sub_opt = typer.prompt("\nSelecciona una acción", default="1")
                     if sub_opt == "1":
@@ -174,7 +174,7 @@ def list_profiles(
         UI.warn("No se encontraron perfiles en el sistema.")
         command = f"{Commands.PROFILE_CREATE}"
         UI.tip(
-            f"Crea un perfil usando el siguiente comando:",
+            "Crea un perfil usando el siguiente comando:",
             commands=command,
             spacing="top",
         )
@@ -262,7 +262,7 @@ def create_profile(
             if report.is_ready and report.chat:
                 UI.success("Tienes permisos de escritura.")
                 manager.set_setting(profile_name, "chat_id", report.chat.id)
-                UI.success(f"Configuración 'chat_id' actualizada.")
+                UI.success("Configuración 'chat_id' actualizada.")
             elif report.status == AccessStatus.NOT_FOUND:
                 DisplayGeneric.warn_report_access_not_found(chat_id_normalized)
                 raise typer.Exit(1)

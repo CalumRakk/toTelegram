@@ -2,7 +2,7 @@ import logging
 import random
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Iterable, Optional, Tuple, cast
+from typing import TYPE_CHECKING, BinaryIO, Iterable, Optional, Tuple, cast
 
 import peewee
 import tartape
@@ -19,14 +19,19 @@ from rich.progress import (
 from totelegram.cli.ui import UI, console
 from totelegram.models import Job, Payload, RemotePayload
 from totelegram.packaging import Chunker, SnapshotService
-from totelegram.schemas import AvailabilityState, JobStatus, PayloadStatus, SourceType
+from totelegram.schemas import (
+    AvailabilityState,
+    JobStatus,
+    PayloadStatus,
+    ProgressState,
+    SourceType,
+)
 from totelegram.stream import FileVolume
 from totelegram.types import AvailabilityReport, UploadContext
 from totelegram.utils import ThrottledFile
 
 if TYPE_CHECKING:
-    from pyrogram import Client  # type: ignore
-    from pyrogram.types import Message, User
+    from pyrogram.types import Message
 
 
 logger = logging.getLogger(__name__)
@@ -68,9 +73,7 @@ class UploadService:
             self.execute_physical_upload(job, path, is_last_job)
 
         elif report.state == AvailabilityState.CAN_FORWARD:
-            UI.info(
-                f"Recurso encontrado en otro chat. Iniciando [bold]Smart Forward[/]..."
-            )
+            UI.info("Recurso encontrado en otro chat. Iniciando [bold]Smart Forward[/]...")
             self.execute_smart_forward(job, report)
 
         else:
@@ -194,7 +197,7 @@ class UploadService:
                     payload.set_uploaded(part_md5)
                     RemotePayload.register_upload(payload, message, self.owner)
 
-                UI.success(f"Pieza subida exitosamente.")
+                UI.success("Pieza subida exitosamente.")
 
                 has_more_payloads = Payload.total_pending_for_job(job) > 0
                 if has_more_payloads and not is_last_job:
@@ -245,20 +248,22 @@ class UploadService:
         self, source_type: SourceType, md5sum: str, path: Path, payload: Payload
     ):
 
+        state_control = ProgressState()
         progress = Progress(
             TextColumn("[bold blue]{task.fields[filename]}", justify="left"),
             BarColumn(bar_width=20, pulse_style="white"),
             "[progress.percentage]{task.percentage:>3.0f}%",
             DownloadColumn(),
             TransferSpeedColumn(),
+            TextColumn("{task.fields[status]}"),
             TimeRemainingColumn(),
             console=console,
             transient=True,
             expand=False,
         )
 
-        def update_rich_progress(current, total):
-            progress.update(task_id, completed=current)
+        def update_rich_progress(current, total, state: ProgressState):
+            progress.update(task_id, completed=current, status=state.status)
 
         logger.debug(f"Preparando stream de datos para pieza {payload.sequence_index}")
         if source_type == SourceType.FOLDER:
@@ -277,7 +282,12 @@ class UploadService:
         limit_bytes = self.u_ctx.settings.upload_limit_rate_kbps * 1024
         filename, caption = self.resolve_naming_payload(payload)
         with progress:
-            task_id = progress.add_task("upload", total=payload.size, filename=filename)
+            task_id = progress.add_task(
+                "upload",
+                total=payload.size,
+                filename=filename,
+                status=state_control.status,
+            )
 
             with volumen:
                 logger.info(
@@ -285,15 +295,18 @@ class UploadService:
                 )
 
                 with ThrottledFile(volumen, limit_bytes) as doc_stream:
+                    doc_stream= cast(BinaryIO, doc_stream )
+
                     tg_message = cast(
                         "Message",
                         self.client.send_document(
                             chat_id=self.tg_chat.id,
-                            document=doc_stream,  # type: ignore
+                            document=doc_stream,
                             file_name=filename,
                             caption=caption,
                             progress=update_rich_progress,
                             force_document=True,
+                            progress_args=(state_control,),
                         ),
                     )
                     return tg_message, volumen.md5sum

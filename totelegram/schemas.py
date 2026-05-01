@@ -16,7 +16,6 @@ from typing import (
 
 from pydantic import BaseModel, Field
 
-from totelegram import __version__
 from totelegram.database import DatabaseSession
 from totelegram.telegram.client import TelegramSession
 
@@ -24,7 +23,6 @@ if TYPE_CHECKING:
     from pyrogram.types import Chat
 
     from totelegram.identity import SettingsManager
-    from totelegram.models import RemotePayload
 
 
 APP_NAME = "toTelegram"
@@ -324,3 +322,10 @@ class ScanReport(BaseModel):
             "integrity": self.skipped_by_integrity,
         }
         mapping[reason].append(path)
+
+
+@dataclass
+class ProgressState:
+    """Objeto para comunicar estados extra desde los parches a la UI."""
+
+    status: str = "[blue]Subiendo...[/]"

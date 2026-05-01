@@ -544,7 +544,7 @@ class DisplayProfile:
             console.print()
             UI.warn("Se detecto al menos un perfil huérfano.")
             UI.info(
-                f"Usa 'totelegram profile delete <PERFIL>' para limpiar archivos huérfanos"
+                "Usa 'totelegram profile delete <PERFIL>' para limpiar archivos huérfanos"
             )
 
     @staticmethod
@@ -554,7 +554,7 @@ class DisplayProfile:
         elif profile.has_session:
             UI.warn("Existe una sesión de Telegram huérfana con este nombre.")
         elif profile.has_env:
-            UI.warn(f"Existe un archivo de configuración (.env) sin sesión asociada.")
+            UI.warn("Existe un archivo de configuración (.env) sin sesión asociada.")
             tip = f"[bold]totelegram --use {profile.name} config check[/]"
             UI.info(f"Ejecuta un diagnóstico usando: {tip} ")
 
@@ -572,7 +572,7 @@ class DisplayGeneric:
 
     @staticmethod
     def show_matches_summary(query: str, matches: List[ChatMatch]):
-        base = f"Explore tus chats más recientes"
+        base = "Explore tus chats más recientes"
         if len(matches) > 0:
             message = (
                 f"[green]Ok[/green] {base}, y"

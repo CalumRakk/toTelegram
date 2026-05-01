@@ -6,18 +6,15 @@ from typing import Optional
 
 import typer
 
-from totelegram.cli.commands import backup, config, profile
+from totelegram import __version__
+from totelegram.cli.commands import backup, config, profile, send
+from totelegram.cli.ui import console
+from totelegram.identity import SettingsManager
+from totelegram.logging_config import setup_logging
 from totelegram.schemas import CLIState
 from totelegram.utils import APP_NAME, get_user_config_dir
 
 logging.getLogger("dotenv").setLevel(logging.CRITICAL)
-
-
-from totelegram import __version__
-from totelegram.cli.commands import send
-from totelegram.cli.ui import console
-from totelegram.identity import SettingsManager
-from totelegram.logging_config import setup_logging
 
 logger = logging.getLogger(__name__)
 

@@ -20,7 +20,6 @@ from totelegram.utils import (
 )
 
 if TYPE_CHECKING:
-    from pyrogram import Client  # type: ignore
     from pyrogram.types import User
 
 app = typer.Typer(help="Configuración del perfil actual.")
@@ -207,7 +206,7 @@ def check_config(ctx: typer.Context):
 
             command = f"{Commands.PROFILE_CREATE} --force"
             UI.tip(
-                f"Créalo de nuevo usando el siguiente comando:",
+                "Créalo de nuevo usando el siguiente comando:",
                 commands=command,
                 spacing="top",
             )

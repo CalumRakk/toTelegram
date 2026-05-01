@@ -9,18 +9,8 @@ from typing import TYPE_CHECKING, Optional, cast
 from filelock import FileLock, Timeout
 
 if TYPE_CHECKING:
-    from pyrogram import Client  # type: ignore
-    from pyrogram import enums
-    from pyrogram.enums import MessageMediaType
-    from pyrogram.errors import (
-        ApiIdInvalid,
-        ApiIdPublishedFlood,
-        ChannelPrivate,
-        ChatWriteForbidden,
-        PeerIdInvalid,
-        UsernameInvalid,
-    )
-    from pyrogram.types import Chat, Message
+    from pyrogram.client import Client
+    from pyrogram.types import Message
 
     from totelegram.identity import SettingsManager
 
@@ -77,15 +67,15 @@ class TelegramSession:
 
         apply_pyrogram_patches()
 
-        from pyrogram import Client  # type: ignore
+        from pyrogram.client import Client
         from pyrogram.errors import ApiIdInvalid, ApiIdPublishedFlood
-        from pyrogram.types import Chat  # type: ignore
+        from pyrogram.types import Chat
 
         self.client = Client(
-            name=self.name,  # type: ignore
-            api_id=self.api_id,  # type: ignore
-            api_hash=self.api_hash,  # type: ignore
-            workdir=str(self.profiles_dir),  # type: ignore
+            name=self.name,
+            api_id=self.api_id,
+            api_hash=self.api_hash,
+            workdir=str(self.profiles_dir),
             lang_code=iso639,
             in_memory=False,
             no_updates=True,

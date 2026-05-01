@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING, Generator, List
 from totelegram.schemas import ChatMatch, ChatResolution
 
 if TYPE_CHECKING:
-    from pyrogram import Client  # type: ignore
+    from pyrogram.client import Client
     from pyrogram.types import Chat
 
 
