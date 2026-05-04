@@ -7,6 +7,7 @@ import os
 import re
 import sys
 import time
+import uuid
 from contextlib import nullcontext
 from pathlib import Path
 from time import sleep
@@ -102,6 +103,14 @@ class ThrottledFile(io.BufferedIOBase):
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.close()
 
+def get_node_id(worktable: Path) -> str:
+    """Genera o recupera un identificador único para esta máquina."""
+    node_id_file = worktable / "node_id"
+    if not node_id_file.exists():
+        node_id = str(uuid.uuid4())
+        node_id_file.write_text(node_id)
+        return node_id
+    return node_id_file.read_text().strip()
 
 def get_type_annotation(field: FieldInfo) -> str:
     type_annotation = field.annotation

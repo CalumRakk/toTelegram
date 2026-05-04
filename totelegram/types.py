@@ -3,6 +3,8 @@ from typing import TYPE_CHECKING, List
 
 import peewee
 
+from totelegram.concurrency import LeaseManager
+
 if TYPE_CHECKING:
     from pyrogram.client import Client
     from pyrogram.types import Chat
@@ -25,6 +27,7 @@ class UploadContext:
     discovery: "DiscoveryService"
     settings: "Settings"
     state: "CLIState"
+    lease_manager: "LeaseManager"
 
 
 @dataclass

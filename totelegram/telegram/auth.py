@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Tuple, cast
 
 from totelegram.identity import Profile, SettingsManager
 from totelegram.telegram.client import TelegramSession
@@ -23,7 +23,7 @@ class AuthLogic:
         self.manager = manager
         self.chat_id = chat_id
 
-    def _create_session(self) -> Path:
+    def _create_session(self) -> Tuple[Path, int]:
         """
         Genera una sesión autenticada en el directorio temporal (self.temp_dir).
 
@@ -32,10 +32,13 @@ class AuthLogic:
 
         Returns:
             Path: La ruta del archivo de sesión generado.
+            int: El Telegram Account ID asociado a la sesión.
 
         Raises:
             FileExistsError: Si el archivo de sesión ya existe.
         """
+        from pyrogram.types import User
+
         final_session_path = self.manager.get_session_path(self.profile_name)
         if final_session_path.exists():
             raise FileExistsError(
@@ -48,10 +51,12 @@ class AuthLogic:
             api_id=self.api_id,
             api_hash=self.api_hash,
             profiles_dir=self.temp_dir,
-        ):
+        ) as client:
             # Una vez dentro ya no necesitamos la session temp, salimos para liberar el archivo
-            pass
-        return temp_session_path
+            me = cast(User, client.get_me())
+            account_id = me.id
+
+        return temp_session_path, account_id
 
     def _persist_session(self, temp_session_path: Path):
         """
@@ -77,13 +82,14 @@ class AuthLogic:
         temp_session_path.rename(final_session_path)
         return final_session_path
 
-    def _write_profile_settings(self):
+    def _write_profile_settings(self,account_id: int):
         """Crea y guarda el archivo de configuración asociado al perfil."""
         settings_dict = {
             "api_id": self.api_id,
             "api_hash": self.api_hash,
             "profile_name": self.profile_name,
             "chat_id": self.chat_id or VALUE_NOT_SET,
+            "telegram_account_id": account_id,
         }
         self.manager._write_all_settings(self.profile_name, settings_dict)
 
@@ -96,9 +102,13 @@ class AuthLogic:
         Returns:
             Profile: El perfil inicializado.
         """
-        temp_path = self._create_session()
+
+        temp_path, account_id = self._create_session()
+
         self._persist_session(temp_path)
-        self._write_profile_settings()
+
+        self._write_profile_settings(account_id)
+
         profile = self.manager.get_profile(self.profile_name)
         assert profile is not None, "Perfil inconsistente tras inicialización"
         return profile

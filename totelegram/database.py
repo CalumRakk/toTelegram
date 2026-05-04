@@ -53,6 +53,7 @@ class DatabaseSession:
         self.db.connect()
 
         from totelegram.models import (
+            Claim,
             Job,
             Payload,
             RemotePayload,
@@ -73,6 +74,7 @@ class DatabaseSession:
                 TelegramUser,
                 TapeMember,
                 TapeMemberGPS,
+                Claim
             ],
             safe=True,
         )

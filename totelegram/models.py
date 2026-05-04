@@ -11,7 +11,7 @@ from playhouse.sqlite_ext import JSONField
 from tartape.schemas import EntryState, ManifestEntry
 
 from totelegram import __version__
-from totelegram.schemas import JobStatus, SourceType, Strategy
+from totelegram.schemas import JobStatus, ResourceType, SourceType, Strategy
 from totelegram.telegram.client import parse_message_json_data
 
 if TYPE_CHECKING:
@@ -517,3 +517,14 @@ class TapeMemberGPS(BaseModel):
     state = cast(EntryState, EnumField(EntryState))
     offset_in_volume = cast(int, peewee.BigIntegerField())
     bytes_in_volume = cast(int, peewee.BigIntegerField())
+
+class Claim(BaseModel):
+    # 'account:123456789' o 'job:543'
+    resource_id = peewee.CharField(primary_key=True)
+    resource_type = EnumField(ResourceType)
+    node_id = peewee.CharField()
+    expires_at = cast(datetime, peewee.DateTimeField())
+
+    @classmethod
+    def is_expired(cls, claim: "Claim") -> bool:
+        return datetime.now() > claim.expires_at

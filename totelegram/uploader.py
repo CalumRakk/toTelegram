@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, BinaryIO, Optional, Tuple, cast
 
 import peewee
 import tartape
+import typer
 from filelock import FileLock, Timeout
 from rich.progress import (
     BarColumn,
@@ -18,7 +19,8 @@ from rich.progress import (
 )
 
 from totelegram.cli.ui import UI, console
-from totelegram.models import Job, Payload, RemotePayload
+from totelegram.concurrency import LeaseKeeper
+from totelegram.models import Job, Payload, RemotePayload, ResourceType
 from totelegram.packaging import Chunker, SnapshotService
 from totelegram.schemas import (
     AvailabilityState,
@@ -56,28 +58,64 @@ class UploadService:
         self.owner = u_ctx.owner
         self.tg_chat = u_ctx.tg_chat
 
+        self.lease_manager = u_ctx.lease_manager
+        self.account_id = u_ctx.settings.telegram_account_id
+
+    def _ensure_account_lease(self):
+        """Bloquea la cuenta de Telegram a nivel de base de datos."""
+        if not self.account_id:
+            logger.warning("No hay account_id configurado, saltando lock de cuenta.")
+            return
+
+        resource_id = f"account:{self.account_id}"
+        if not self.lease_manager.try_acquire(resource_id, ResourceType.ACCOUNT):
+            UI.error(f"La cuenta {self.account_id} está siendo utilizada por otro nodo.")
+            raise typer.Exit(1)
+
+        logger.info(f"Lock de cuenta {resource_id} adquirido.")
+
+    def _release_account_lease(self):
+        """Libera el lock de la cuenta explícitamente al terminar."""
+        if self.account_id:
+            resource_id = f"account:{self.account_id}"
+            self.lease_manager.release(resource_id)
+            logger.info(f"Lock de cuenta {resource_id} liberado explícitamente.")
+
     def process_job(self, job: Job, path: Path, is_last_job: bool = False):
         """
         Orquesta el ciclo de vida de un Job: Investigación, Ejecución y Cierre.
         Este es el 'cerebro' que decide si reenviar, subir o marcar como completado.
         """
+        self._ensure_account_lease()
+
+        job_resource_id = f"job:{job.id}"
+        if not self.lease_manager.try_acquire(job_resource_id, ResourceType.JOB):
+            UI.info(f"El Job {job.id} está siendo procesado por otro nodo.")
+            return False
+
+        account_resource_id = f"account:{self.account_id}"
+
         logger.info(f"Iniciando procesamiento de Job {job.id} para: {path.name}")
         report = self.u_ctx.discovery.investigate(job)
 
-        if report.state == AvailabilityState.FULFILLED:
-            UI.info(f"[dim]{path.name}[/] ya está disponible en el destino.")
-            if job.status != JobStatus.UPLOADED:
-                job.set_uploaded()
+        try:
+            with LeaseKeeper(self.lease_manager, account_resource_id), \
+                 LeaseKeeper(self.lease_manager, job_resource_id):
 
-        elif report.state == AvailabilityState.NEEDS_UPLOAD:
-            self.execute_physical_upload(job, path, is_last_job)
+                if report.state == AvailabilityState.FULFILLED:
+                    UI.info(f"[dim]{path.name}[/] ya está disponible en el destino.")
+                    if job.status != JobStatus.UPLOADED:
+                        job.set_uploaded()
 
-        elif report.state == AvailabilityState.CAN_FORWARD:
-            UI.info("Recurso encontrado en otro chat. Iniciando [bold]Smart Forward[/]...")
-            self.execute_smart_forward(job, report)
+                elif report.state == AvailabilityState.NEEDS_UPLOAD:
+                    self.execute_physical_upload(job, path, is_last_job)
 
-        else:
-            raise ValueError(f"Estado de disponibilidad no reconocido: {report.state}")
+                elif report.state == AvailabilityState.CAN_FORWARD:
+                    UI.info("Iniciando [bold]Smart Forward[/]...")
+                    self.execute_smart_forward(job, report)
+
+        finally:
+            self.lease_manager.release(job_resource_id)
 
         job = Job.get_by_id(job.id)
         logger.info(f"Evaluando cierre del Job {job.id}. Estado actual en DB: {job.status}")
@@ -91,6 +129,9 @@ class UploadService:
             except Exception as e:
                 logger.error(f"Fallo catastrófico generando el Snapshot: {e}", exc_info=True)
                 raise e
+            finally:
+                if is_last_job:
+                    self._release_account_lease()
 
         logger.info(f"El Job {job.id} todavía no está completado, saltando Snapshot.")
         return False

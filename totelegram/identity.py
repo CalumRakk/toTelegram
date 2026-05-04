@@ -73,6 +73,14 @@ class Settings(BaseSettings):
         json_schema_extra={"is_sensitive": False, "access": AccessLevel.EDITABLE},
     )
 
+    telegram_account_id: Optional[int] = Field(
+        default=None,
+        description="ID único de la cuenta de Telegram. Usado para locks distribuidos.",
+        json_schema_extra={"is_sensitive": False, "access": AccessLevel.DEBUG_READONLY},
+    )
+
+
+
     # exclude_files_default: CommaSeparatedList = ["*.json", "*.json.xz"]
 
     model_config = SettingsConfigDict(

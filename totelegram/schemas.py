@@ -322,3 +322,8 @@ class ProgressState:
     """Objeto para comunicar estados extra desde los parches a la UI."""
 
     status: str = "[blue]Subiendo...[/]"
+
+
+class ResourceType(str, Enum):
+    ACCOUNT = "account" # Telegram account (account:12345)
+    JOB = "job"         # Work unit (job:123)

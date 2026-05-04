@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, List, Optional, cast
 
@@ -6,17 +7,19 @@ import tartape
 import typer
 
 from totelegram.cli.ui import UI, console
+from totelegram.concurrency import LeaseManager
 from totelegram.discovery import DiscoveryService
 from totelegram.identity import Settings
 from totelegram.models import Job, Source, TelegramChat, TelegramUser
 from totelegram.schemas import CLIState, ScanReport
 from totelegram.types import UploadContext
-from totelegram.utils import delete_snapshot, has_snapshot, is_excluded
+from totelegram.utils import delete_snapshot, get_node_id, has_snapshot, is_excluded
 
 if TYPE_CHECKING:
     from pyrogram.client import Client
     from pyrogram.types import Chat, User
 
+logger=logging.getLogger(__name__)
 
 def get_or_create_tape(
     path: Path,
@@ -107,10 +110,29 @@ def prepare_upload_context(
             tg_chat = cast("Chat", client.get_chat(settings.chat_id))
             me = cast("User", client.get_me())
             owner = TelegramUser.get_or_create_from_tg(me)
+
+            # --- AUTO-HEALING: Reparación de perfiles antiguos ---
+            if settings.telegram_account_id is None:
+                # Obtenemos el nombre real del perfil en uso
+                profile_name = cast(str, state.manager.resolve_profile_name(state.profile_name))
+
+                # Lo guardamos físicamente en el archivo .env
+                state.manager.set_setting(profile_name, "telegram_account_id", owner.id)
+
+                # Lo actualizamos en memoria para el flujo actual
+                settings.telegram_account_id = owner.id
+
+                logger.info(f"Auto-healed: telegram_account_id ({owner.id}) agregado al perfil '{profile_name}'.")
+            # -----------------------------------------------------
+
         except Exception as e:
             UI.error(f"Error de conexión: {e}")
             raise typer.Exit(1)
+
     discovery = DiscoveryService(client, db)
+
+    node_id = get_node_id(state.manager.worktable)
+    lease_manager = LeaseManager(db, node_id)
 
     return UploadContext(
         client=client,
@@ -120,6 +142,7 @@ def prepare_upload_context(
         owner=owner,
         settings=settings,
         state=state,
+        lease_manager=lease_manager,
     )
 
 
