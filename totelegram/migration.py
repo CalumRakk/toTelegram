@@ -41,8 +41,8 @@ def run_migrations(db: peewee.SqliteDatabase, db_path: Path | str):
                 if db_version < 1:
                     _migrate_to_v1(db)
 
-                # if db_version < 2:
-                #     _migrate_to_v2(db)
+                if db_version < 2:
+                    _migrate_to_v2(db)
 
                 db.execute_sql(f"PRAGMA user_version = {CURRENT_DB_VERSION}")
                 logger.info(
@@ -69,3 +69,14 @@ def _migrate_to_v1(db):
         WHERE id IN (SELECT payload_id FROM remotepayload)
     """
     )
+
+def _migrate_to_v2(db):
+    """Limpieza de esquema: eliminando status de payload y delegando locks al OS"""
+    logger.info("Migrando a V2: Eliminando gestión de estado manual...")
+    try:
+        # SQLite soporta DROP COLUMN a partir de la versión 3.35.0 (2021)
+        db.execute_sql("ALTER TABLE payload DROP COLUMN status")
+        db.execute_sql("ALTER TABLE payload DROP COLUMN claimed_by")
+    except Exception as e:
+        # Si la versión de SQLite es muy vieja, ignoramos. Peewee no lee esas columnas igual.
+        logger.debug(f"DROP COLUMN no soportado en esta versión de SQLite, ignorando: {e}")

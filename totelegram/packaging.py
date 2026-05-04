@@ -219,7 +219,7 @@ class SnapshotService:
         remotes_db = (
             RemotePayload.select(RemotePayload, Payload)
             .join(Payload)
-            .where((Payload.job == job) & (not RemotePayload.is_orphaned))
+            .where((Payload.job == job) & (RemotePayload.is_orphaned == False)) # noqa: E712
             .order_by(Payload.sequence_index)
         )
 

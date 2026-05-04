@@ -11,7 +11,7 @@ from playhouse.sqlite_ext import JSONField
 from tartape.schemas import EntryState, ManifestEntry
 
 from totelegram import __version__
-from totelegram.schemas import JobStatus, PayloadStatus, SourceType, Strategy
+from totelegram.schemas import JobStatus, SourceType, Strategy
 from totelegram.telegram.client import parse_message_json_data
 
 if TYPE_CHECKING:
@@ -338,40 +338,32 @@ class Payload(BaseModel):
     end_offset = cast(int, peewee.IntegerField())
     size = cast(int, peewee.IntegerField())
 
-    status = cast(
-        PayloadStatus, EnumField(PayloadStatus, default=PayloadStatus.PENDING)
-    )
-    claimed_by = cast(Optional[str], peewee.CharField(null=True))  # Nombre del perfil
-
     @property
     def has_remote(self) -> bool:
         return (
             RemotePayload.select()
             .where(
-                (RemotePayload.payload == self) & (not RemotePayload.is_orphaned)
+                (RemotePayload.payload == self) & (RemotePayload.is_orphaned == False) # noqa: E712
             )
             .exists()
         )
 
-    def set_uploaded(self, md5sum: str):
-        self.status = PayloadStatus.UPLOADED
-        self.md5sum = md5sum
-        self.save(only=[Payload.status, Payload.updated_at, Payload.md5sum])
-
-    def release(self):
-        self.status = PayloadStatus.PENDING
-        self.claimed_by = None
-        self.save(only=[Payload.status, Payload.updated_at, Payload.claimed_by])
-
     @staticmethod
     def total_pending_for_job(job: "Job") -> int:
+        """Cuenta las piezas que aún no tienen un RemotePayload válido."""
+        valid_remotes = RemotePayload.select().where(
+            (RemotePayload.payload == Payload.id) &
+            (RemotePayload.is_orphaned == False) # noqa: E712
+        )
+
         return (
-                Payload.select()
-                .where(
-                    (Payload.job == job) & (Payload.status != PayloadStatus.UPLOADED)
-                )
-                .count()
+            Payload.select()
+            .where(
+                (Payload.job == job) &
+                (~peewee.fn.EXISTS(valid_remotes))
             )
+            .count()
+        )
 
 class RemotePayload(BaseModel):
     """Representa el Acceso Efectivo: El vínculo entre el Payload y el mensaje en Telegram."""

@@ -10,4 +10,4 @@ Ver: docs/VISION.md
 """
 
 __version__ = "0.9.13"
-CURRENT_DB_VERSION = 1
+CURRENT_DB_VERSION = 2

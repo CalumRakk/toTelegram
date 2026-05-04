@@ -1,8 +1,9 @@
 import logging
 import random
+import shutil
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, BinaryIO, Iterable, Optional, Tuple, cast
+from typing import TYPE_CHECKING, BinaryIO, Optional, Tuple, cast
 
 import peewee
 import tartape
@@ -22,7 +23,6 @@ from totelegram.packaging import Chunker, SnapshotService
 from totelegram.schemas import (
     AvailabilityState,
     JobStatus,
-    PayloadStatus,
     ProgressState,
     SourceType,
 )
@@ -108,69 +108,42 @@ class UploadService:
         except Timeout:
             return True
 
-    def _claim_next_payload(self, job: Job) -> Optional[Payload]:
-        logger.debug(f"Buscando siguiente pieza disponible para Job {job.id}...")
+    def _claim_next_payload(self, job: Job) -> Optional[Tuple[Payload, FileLock]]:
+            """Busca y bloquea a nivel de SO la siguiente pieza disponible."""
+            logger.debug(f"Buscando siguiente pieza disponible para Job {job.id}...")
 
-        max_retries = 5
-        for attempt in range(max_retries):
-            try:
-                with self.db.atomic():
-                    # Liberamos las piezas abandonadas
-                    stale_payloads = cast(
-                        Iterable[Payload],
-                        Payload.select().where(
-                            (Payload.job == job)
-                            & (Payload.status == PayloadStatus.CLAIMED)
-                            & (Payload.claimed_by != self.profile_name)
-                        ),
+            valid_remotes = RemotePayload.select().where(
+                (RemotePayload.payload == Payload.id) &
+                (RemotePayload.is_orphaned == False) # noqa: E712
+            )
+
+            pending_payloads = (
+                Payload.select()
+                .where(
+                    (Payload.job == job) &
+                    (~peewee.fn.EXISTS(valid_remotes))
+                )
+                .order_by(Payload.sequence_index)
+            )
+
+            lock_dir = self.manager.worktable / "locks" / f"job_{job.id}"
+            lock_dir.mkdir(parents=True, exist_ok=True)
+
+            for payload in pending_payloads:
+                lock_path = lock_dir / f"payload_{payload.id}.lock"
+                lock = FileLock(lock_path, timeout=0)
+
+                try:
+                    lock.acquire()
+                    logger.info(
+                        f"Pieza {payload.sequence_index} reclamada (OS Lock) por {self.profile_name}"
                     )
-
-                    for p in stale_payloads:
-                        if p.claimed_by is None:
-                            p.release()
-                        elif not self._is_worker_alive(p.claimed_by):
-                            logger.info(
-                                f"Liberando pieza {p.sequence_index} abandonada por {p.claimed_by}"
-                            )
-                            p.release()
-
-                    # Reclamamos la siguiente pieza PENDING
-                    next_available_id = (
-                        Payload.select(Payload.id)
-                        .where(
-                            (Payload.job == job)
-                            & (
-                                (Payload.status == PayloadStatus.PENDING)
-                                | (
-                                    (Payload.status == PayloadStatus.CLAIMED)
-                                    & (Payload.claimed_by == self.profile_name)
-                                )
-                            )
-                        )
-                        .order_by(Payload.sequence_index)
-                        .limit(1)
-                    )
-
-                    query = Payload.update(
-                        status=PayloadStatus.CLAIMED, claimed_by=self.profile_name
-                    ).where(Payload.id == next_available_id)
-
-                    rows_affected = query.execute()
-
-                    if rows_affected > 0:
-                        logger.info(
-                            f"Pieza {next_available_id} reclamada exitosamente por el perfil {self.profile_name}"
-                        )
-                        return Payload.get(Payload.id == next_available_id)
-                return None
-
-            except peewee.OperationalError as e:
-                if "locked" in str(e).lower() and attempt < max_retries - 1:
-                    wait_time = (2**attempt) * 0.1  # 0.1s, 0.2s, 0.4s...
-                    time.sleep(wait_time)
+                    return payload, lock  # type:ignore - Retornamos el payload y el candado activo
+                except Timeout:
+                    # El archivo ya está bloqueado por otro proceso, pasamos al siguiente
                     continue
-                raise e
 
+            return None
     def _smart_pause(self):
         """Calcula y ejecuta una pausa aleatoria basada en la configuración."""
         r = self.settings.upload_pause_range
@@ -181,53 +154,63 @@ class UploadService:
             UI.sleep_progress(minutes * 60)
 
     def execute_physical_upload(self, job: Job, path: Path, is_last_job: bool):
-        logger.info(
-            f"Iniciando subida física de {path.name}. Estrategia: {job.strategy}"
-        )
-        with self.db.atomic():
-            Chunker.get_or_create(job)
+            logger.info(
+                f"Iniciando subida física de {path.name}. Estrategia: {job.strategy}"
+            )
+            with self.db.atomic():
+                Chunker.get_or_create(job)
 
-        md5sum = job.source.md5sum
-        while True:
-            payload = self._claim_next_payload(job)
+            md5sum = job.source.md5sum
+            while True:
+                claim_result = self._claim_next_payload(job)
 
-            if payload is None:
-                break
+                if claim_result is None:
+                    break # No hay más piezas disponibles (subidas o procesándose)
 
-            UI.info(f"Subiendo la pieza [bold]{payload.filename}[/]")
+                payload, lock = claim_result
 
-            try:
+                # MAGIA: El lock se mantendrá solo dentro de este bloque 'with'
+                with lock:
+                    UI.info(f"Subiendo la pieza [bold]{payload.filename}[/]")
 
-                message, part_md5 = self._upload_payload(
-                    job.source.type, md5sum, path, payload
-                )
+                    try:
+                        message, part_md5 = self._upload_payload(
+                            job.source.type, md5sum, path, payload
+                        )
 
-                with self.db.atomic():
-                    payload.set_uploaded(part_md5)
-                    RemotePayload.register_upload(payload, message, self.owner)
+                        with self.db.atomic():
+                            # Actualizamos el md5sum en vez de usar set_uploaded()
+                            payload.md5sum = part_md5
+                            payload.save(only=[Payload.md5sum, Payload.updated_at])
 
-                UI.success("Pieza subida exitosamente.")
+                            RemotePayload.register_upload(payload, message, self.owner)
 
-                has_more_payloads = Payload.total_pending_for_job(job) > 0
-                if has_more_payloads and not is_last_job:
-                    self._smart_pause()
+                        UI.success("Pieza subida exitosamente.")
 
-            except Exception as e:
-                with self.db.atomic():
-                    payload.release()
-                raise e
+                        has_more_payloads = Payload.total_pending_for_job(job) > 0
+                        if has_more_payloads and not is_last_job:
+                            self._smart_pause()
 
-        with self.db.atomic():
-            pending = Payload.total_pending_for_job(job)
-            logger.info(f"Evaluando piezas pending para el Job {job.id}: quedan {pending}")
+                    except Exception as e:
+                        # El bloque 'with lock' finaliza y el SO libera el archivo automáticamente.
+                        raise e
 
-            if pending == 0:
-                logger.info(f"Marcando Job {job.id} como UPLOADED en la base de datos.")
-                job.set_uploaded()
-                UI.success("¡Subida completa! Todas las piezas están en Telegram.")
-            else:
-                logger.info(f"Worker terminó su cola, pero faltan {pending} piezas que otro worker está subiendo.")
+            # Fuera del bucle (terminó la subida o la cola):
+            with self.db.atomic():
+                pending = Payload.total_pending_for_job(job)
+                logger.info(f"Evaluando piezas pending para el Job {job.id}: quedan {pending}")
 
+                if pending == 0:
+                    logger.info(f"Marcando Job {job.id} como UPLOADED en la base de datos.")
+                    job.set_uploaded()
+                    UI.success("¡Subida completa! Todas las piezas están en Telegram.")
+
+                    # Limpieza: Borramos la carpeta de locks porque ya no se necesita
+                    lock_dir = self.manager.worktable / "locks" / f"job_{job.id}"
+                    if lock_dir.exists():
+                        shutil.rmtree(lock_dir, ignore_errors=True)
+                else:
+                    logger.info(f"Worker terminó su cola, pero faltan {pending} piezas que otro worker está subiendo.")
     def execute_smart_forward(self, job: Job, report: AvailabilityReport):
         mirrros = {r.payload.sequence_index: r for r in report.remotes}
         UI.info(f"Reenviando {len(mirrros)} partes...")

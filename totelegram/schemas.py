@@ -69,13 +69,6 @@ class JobStatus(str, enum.Enum):
     UPLOADED = "UPLOADED"
     DELETED = "DELETED"
 
-
-class PayloadStatus(str, enum.Enum):
-    PENDING = "PENDING"
-    CLAIMED = "CLAIMED"
-    UPLOADED = "UPLOADED"
-
-
 class AvailabilityState(str, enum.Enum):
     FULFILLED = "fulfilled"
     CAN_FORWARD = "can-forward"

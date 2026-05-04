@@ -58,7 +58,7 @@ class DiscoveryService:
             remotes = list(
                 RemotePayload.select(RemotePayload, Payload)
                 .join(Payload)
-                .where((Payload.job == hist_job) & (not RemotePayload.is_orphaned))
+                .where((Payload.job == hist_job) & (RemotePayload.is_orphaned == False)) # noqa: E712
                 .order_by(Payload.sequence_index)
             )
 
@@ -76,7 +76,7 @@ class DiscoveryService:
         local_remotes = list(
             RemotePayload.select()
             .join(Payload)
-            .where((Payload.job == job) & (not RemotePayload.is_orphaned))
+            .where((Payload.job == job) & (RemotePayload.is_orphaned == False)) # noqa: E712
             .order_by(Payload.sequence_index)
         )
 
