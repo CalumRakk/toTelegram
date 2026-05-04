@@ -80,10 +80,19 @@ class UploadService:
             raise ValueError(f"Estado de disponibilidad no reconocido: {report.state}")
 
         job = Job.get_by_id(job.id)
-        if job.status == JobStatus.UPLOADED:
-            SnapshotService.generate_snapshot(job)
-            return True
+        logger.info(f"Evaluando cierre del Job {job.id}. Estado actual en DB: {job.status}")
 
+        if job.status == JobStatus.UPLOADED:
+            try:
+                logger.info(f"Generando Snapshot para el Job {job.id}...")
+                SnapshotService.generate_snapshot(job)
+                logger.info("Snapshot generado y guardado con éxito.")
+                return True
+            except Exception as e:
+                logger.error(f"Fallo catastrófico generando el Snapshot: {e}", exc_info=True)
+                raise e
+
+        logger.info(f"El Job {job.id} todavía no está completado, saltando Snapshot.")
         return False
 
     def _is_worker_alive(self, profile_name: str) -> bool:
@@ -209,9 +218,15 @@ class UploadService:
                 raise e
 
         with self.db.atomic():
-            if Payload.total_pending_for_job(job) == 0:
+            pending = Payload.total_pending_for_job(job)
+            logger.info(f"Evaluando piezas pending para el Job {job.id}: quedan {pending}")
+
+            if pending == 0:
+                logger.info(f"Marcando Job {job.id} como UPLOADED en la base de datos.")
                 job.set_uploaded()
                 UI.success("¡Subida completa! Todas las piezas están en Telegram.")
+            else:
+                logger.info(f"Worker terminó su cola, pero faltan {pending} piezas que otro worker está subiendo.")
 
     def execute_smart_forward(self, job: Job, report: AvailabilityReport):
         mirrros = {r.payload.sequence_index: r for r in report.remotes}

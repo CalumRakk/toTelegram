@@ -91,11 +91,16 @@ def run_script():
 
     try:
         from totelegram.cli.__main__ import app
-
         app()
+    except SystemExit:
+        pass  # Salidas limpias (ej. sys.exit(0))
     except Exception as e:
-        from totelegram.cli.ui import UI
+        import typer
+        if not isinstance(e, typer.Exit):
+            import logging
+            logging.getLogger("totelegram.crash").exception("Error crítico no controlado:")
 
+        from totelegram.cli.ui import UI
         UI.error(str(e))
         sys.exit(1)
 
