@@ -37,7 +37,8 @@ def run_migrations(db: peewee.SqliteDatabase, db_path: Path | str):
         logger.info(f"Backup de seguridad creado: {backup_path.name}")
 
         try:
-            with db.atomic():
+            from totelegram.database import db_transaction
+            with db_transaction(db):
                 if db_version < 1:
                     _migrate_to_v1(db)
 

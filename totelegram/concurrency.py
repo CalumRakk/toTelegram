@@ -2,9 +2,11 @@
 import logging
 import threading
 from datetime import datetime, timedelta
+from typing import cast
 
 import peewee
 
+from totelegram.database import db_transaction
 from totelegram.models import Claim, ResourceType
 
 logger = logging.getLogger(__name__)
@@ -20,11 +22,11 @@ class LeaseManager:
         try:
             # connection_context() es VITAL aquí porque Peewee usa conexiones thread-local.
             with self.db.connection_context():
-                with self.db.atomic():
-                    claim = Claim.get_or_none(Claim.resource_id == resource_id)
+                with db_transaction(self.db):
+                    claim = cast(Claim,Claim.get_or_none(Claim.resource_id == resource_id))
                     if claim and claim.node_id == self.node_id:
                         claim.expires_at = expires
-                        claim.save()
+                        claim.save(only=[Claim.expires_at, Claim.updated_at])
                         return True
             return False
         except Exception as e:
@@ -40,7 +42,7 @@ class LeaseManager:
         expires = now + timedelta(minutes=ttl_minutes)
 
         try:
-            with self.db.atomic():
+            with db_transaction(self.db):
                 # Intentar crear el registro
                 Claim.create(
                     resource_id=resource_id,
@@ -51,19 +53,19 @@ class LeaseManager:
                 return True
         except peewee.IntegrityError:
             # Ya existe, comprobamos si es nuestro o si está expirado
-            claim = Claim.get_or_none(Claim.resource_id == resource_id)
+            claim = cast(Claim,Claim.get_or_none(Claim.resource_id == resource_id))
             if claim:
                 if claim.node_id == self.node_id:
                     # Es nuestro, renovamos
                     claim.expires_at = expires
-                    claim.save()
+                    claim.save(only=[Claim.expires_at, Claim.updated_at])
                     return True
 
                 if datetime.now() > claim.expires_at:
                     # Expiró, lo robamos
                     claim.node_id = self.node_id
                     claim.expires_at = expires
-                    claim.save()
+                    claim.save(only=[Claim.node_id, Claim.expires_at, Claim.updated_at])
                     logger.info(f"Lock robado para {resource_id}")
                     return True
 

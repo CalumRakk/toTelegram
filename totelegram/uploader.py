@@ -20,6 +20,7 @@ from rich.progress import (
 
 from totelegram.cli.ui import UI, console
 from totelegram.concurrency import LeaseKeeper
+from totelegram.database import db_transaction
 from totelegram.models import Job, Payload, RemotePayload, ResourceType
 from totelegram.packaging import Chunker, SnapshotService
 from totelegram.schemas import (
@@ -198,7 +199,7 @@ class UploadService:
             logger.info(
                 f"Iniciando subida física de {path.name}. Estrategia: {job.strategy}"
             )
-            with self.db.atomic():
+            with db_transaction(self.db):
                 Chunker.get_or_create(job)
 
             md5sum = job.source.md5sum
@@ -219,7 +220,7 @@ class UploadService:
                             job.source.type, md5sum, path, payload
                         )
 
-                        with self.db.atomic():
+                        with db_transaction(self.db):
                             # Actualizamos el md5sum en vez de usar set_uploaded()
                             payload.md5sum = part_md5
                             payload.save(only=[Payload.md5sum, Payload.updated_at])
@@ -237,7 +238,7 @@ class UploadService:
                         raise e
 
             # Fuera del bucle (terminó la subida o la cola):
-            with self.db.atomic():
+            with db_transaction(self.db):
                 pending = Payload.total_pending_for_job(job)
                 logger.info(f"Evaluando piezas pending para el Job {job.id}: quedan {pending}")
 
@@ -256,7 +257,7 @@ class UploadService:
         mirrros = {r.payload.sequence_index: r for r in report.remotes}
         UI.info(f"Reenviando {len(mirrros)} partes...")
 
-        with self.db.atomic():
+        with db_transaction(self.db):
             job_adopted = job.adopt_job(report.remotes[0].payload.job)
             md5sum = job_adopted.source.md5sum
             payloads = Chunker.get_or_create(job_adopted)
@@ -269,12 +270,12 @@ class UploadService:
             message = self._smart_forward_strategy(
                 md5sum, payload_adopted, remote_mirror
             )
-            with self.db.atomic():
+            with db_transaction(self.db):
                 RemotePayload.register_upload(payload_adopted, message, self.owner)
 
             time.sleep(1)
 
-        with self.db.atomic():
+        with db_transaction(self.db):
             job_adopted.set_uploaded()
 
     def resolve_naming_payload(self, payload: "Payload") -> Tuple[str, str]:

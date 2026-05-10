@@ -522,7 +522,7 @@ class Claim(BaseModel):
     # 'account:123456789' o 'job:543'
     resource_id = peewee.CharField(primary_key=True)
     resource_type = EnumField(ResourceType)
-    node_id = peewee.CharField()
+    node_id =cast(str,  peewee.CharField())
     expires_at = cast(datetime, peewee.DateTimeField())
 
     @classmethod

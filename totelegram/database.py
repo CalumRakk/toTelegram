@@ -1,6 +1,8 @@
 import enum
 import json
 import logging
+import threading
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Literal, Union
 
@@ -11,6 +13,34 @@ from totelegram.migration import run_migrations
 
 logger = logging.getLogger(__name__)
 db_proxy = peewee.Proxy()
+
+# Semáforo global para sincronizar hilos cuando se usa SQLite
+_sqlite_write_lock = threading.RLock()
+
+@contextmanager
+def db_transaction(db: peewee.Database):
+    """
+    Gestor de transacciones seguro para hilos.
+    Aplica un semáforo (RLock) si el motor subyacente es SQLite para evitar 'database is locked'.
+    Delega de forma nativa si es otro motor (Postgres/MySQL).
+    """
+    is_sqlite = isinstance(db, peewee.SqliteDatabase)
+
+    if is_sqlite:
+        _sqlite_write_lock.acquire()
+
+    try:
+        # IMMEDIATE fuerza a SQLite a tomar el lock de escritura inmediatamente,
+        # evitando deadlocks cuando dos hilos solo-lectura intentan volverse de escritura.
+        transaction_type = 'IMMEDIATE' if is_sqlite else 'DEFERRED'
+
+        with db.atomic(transaction_type):
+            yield
+    finally:
+        if is_sqlite:
+            _sqlite_write_lock.release()
+
+# --------------------
 
 
 class DatabaseSession:

@@ -8,6 +8,7 @@ import typer
 
 from totelegram.cli.ui import UI, console
 from totelegram.concurrency import LeaseManager
+from totelegram.database import db_transaction
 from totelegram.discovery import DiscoveryService
 from totelegram.identity import Settings
 from totelegram.models import Job, Source, TelegramChat, TelegramUser
@@ -72,8 +73,8 @@ def get_or_create_job(
             else:
                 with console.status(f"[dim]Procesando {path}...[/dim]"):
                     source = Source.get_or_create_from_filepath(path)
-    except Exception:
-        UI.info("Otro proceso esta trabajando con este archivo.")
+    except Exception as e:
+        UI.info(f"Otro proceso esta trabajando con este archivo. Error: {e}")
         return
 
     job = Job.get_for_source_in_chat(source, chat_db)
@@ -84,7 +85,7 @@ def get_or_create_job(
     if job and force:
         UI.info(f"Forzando subida de nuevo: [bold]{path.name}[/]")
         delete_snapshot(path)
-        with u_ctx.db.atomic():
+        with db_transaction(u_ctx.db):
             job.mark_deleted()
             job = None
 

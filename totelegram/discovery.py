@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, List, Union, cast
 
 import peewee
 
+from totelegram.database import db_transaction
 from totelegram.models import Job, Payload, RemotePayload
 from totelegram.schemas import AvailabilityState, JobStatus
 from totelegram.types import AvailabilityReport
@@ -108,7 +109,7 @@ class DiscoveryService:
         try:
             from pyrogram.types import Message
 
-            with self.db.atomic():
+            with db_transaction(self.db):
                 for batch_ids in batched(msg_ids, 200):
                     messages = cast(Union[Message, List[Message]], self.client.get_messages(chat_id, batch_ids))
                     if isinstance(messages, Message):
