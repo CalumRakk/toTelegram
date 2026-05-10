@@ -1,6 +1,6 @@
 import time
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 import typer
 
@@ -28,14 +28,20 @@ def backup_folders(
         "-f",
         help="Fuerza ignorando el estado del archivo en el sistema",
     ),
+    auto_truncate: Optional[bool]= typer.Option(
+        None,
+        "--auto-truncate/--no-auto-truncate",
+        help="Activa o desactiva la truncación de nombres largos. Sobrescribe la configuración global.",
+    ),
 ):
     """
     Convierte una carpeta en una Cinta de Datos (TAR) y la distribuye en volúmenes.
     """
     state: CLIState = ctx.obj
     profile_name, _ = _get_config_tools(ctx)
-
     settings = state.manager.get_settings(profile_name)
+
+    final_auto_truncate = auto_truncate if auto_truncate is not None else settings.auto_truncate
 
     if settings.chat_id == VALUE_NOT_SET:
         UI.error("El chat destino no está configurado.")
@@ -95,7 +101,7 @@ def backup_folders(
 
             DisplayUpload.show_internal_scan_result(report_internal)
 
-            job = get_or_create_job(folder, u_ctx, force, is_last)
+            job = get_or_create_job(folder, u_ctx, force, is_last, final_auto_truncate)
             if job is None:
                 continue
 

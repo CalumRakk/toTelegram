@@ -6,7 +6,7 @@ import peewee
 import tartape
 import typer
 from filelock import Timeout
-from tartape.exceptions import TarIntegrityError
+from tartape.exceptions import PathConstraintReportError, TarIntegrityError
 
 from totelegram.cli.ui import UI, console
 from totelegram.concurrency import LeaseManager
@@ -28,6 +28,7 @@ def get_or_create_tape(
     path: Path,
     u_ctx: UploadContext,
     force: bool,
+    auto_truncate: bool = False,
 ) -> Source:
     if tartape.exists(path) and not force:
         try:
@@ -43,20 +44,42 @@ def get_or_create_tape(
 
     exclusion_patterns = u_ctx.settings.exclude_files
     with UI.loading("Generando índice de cinta..."):
-        tape = tartape.create(
-            path,
-            exclude=exclusion_patterns,
-            calculate_hashes=True,
-            overwrite=force,
-        )
-        return Source.create_from_tape(tape, exclusion_patterns)
+        try:
+            tape = tartape.create(
+                path,
+                exclude=exclusion_patterns,
+                calculate_hashes=True,
+                overwrite=force,
+                auto_truncate=auto_truncate,
+            )
+            return Source.create_from_tape(tape, exclusion_patterns)
 
+        except PathConstraintReportError:
+            UI.error(f"Error al empaquetar la carpeta: [bold]{path.name}[/]")
+            UI.print("[dim]El formato TAR tiene un límite estricto para la longitud de los nombres y rutas de archivos.[/dim]")
+            UI.print("[dim]Algunos archivos dentro de esta carpeta superan este límite.[/dim]")
+            # TODO ¿deberia mostrar las lista de archivos? por si el usuario quiere renombrarlos manualmente
+
+            UI.educational_tip(
+                title="Nombres de archivo demasiado largos",
+                message="Tienes dos opciones para resolver esto:\n"
+                        "1. Renombrar manualmente los archivos con rutas largas.\n"
+                        "2. Dejar que toTelegram trunque (recorte) los nombres automáticamente al subirlos.",
+                commands=[
+                    f"totelegram backup \"{path}\" --auto-truncate",
+                    "totelegram config set auto_truncate true"
+                ],
+                spacing="block",
+                border_style="yellow"
+            )
+            raise typer.Exit(1)
 
 def get_or_create_job(
     path: Path,
     u_ctx: UploadContext,
     force: bool,
     wait_if_busy: bool = False,
+    auto_truncate: bool = False,
 ) -> Optional[Job]:
     """
     Obtiene el job asociado a un path. Si no existe, lo crea.
@@ -71,7 +94,7 @@ def get_or_create_job(
         with lock.acquire(timeout=timeout):
             chat_db, _ = TelegramChat.get_or_create_from_chat(u_ctx.tg_chat)
             if path.is_dir():
-                source = get_or_create_tape(path, u_ctx, force)
+                source = get_or_create_tape(path, u_ctx, force, auto_truncate)
             else:
                 with console.status(f"[dim]Procesando {path}...[/dim]"):
                     source = Source.get_or_create_from_filepath(path)

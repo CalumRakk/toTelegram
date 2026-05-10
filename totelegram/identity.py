@@ -79,7 +79,11 @@ class Settings(BaseSettings):
         json_schema_extra={"is_sensitive": False, "access": AccessLevel.DEBUG_READONLY},
     )
 
-
+    auto_truncate: bool = Field(
+            default=False,
+            description="Trunca automáticamente los nombres largos al empaquetar carpetas en TAR.",
+            json_schema_extra={"is_sensitive": False, "access": AccessLevel.EDITABLE},
+    )
 
     # exclude_files_default: CommaSeparatedList = ["*.json", "*.json.xz"]
 
