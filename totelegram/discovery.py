@@ -106,48 +106,44 @@ class DiscoveryService:
         msg_ids = [r.message_id for r in to_verify]
         is_integral = True
 
-        try:
-            from pyrogram.types import Message
+        from pyrogram.types import Message
 
-            with db_transaction(self.db):
-                for batch_ids in batched(msg_ids, 200):
-                    messages = cast(Union[Message, List[Message]], self.client.get_messages(chat_id, batch_ids))
-                    if isinstance(messages, Message):
-                        messages = [messages]
+        with db_transaction(self.db):
+            for batch_ids in batched(msg_ids, 200):
+                messages = cast(Union[Message, List[Message]], self.client.get_messages(chat_id, batch_ids))
+                if isinstance(messages, Message):
+                    messages = [messages]
 
-                    for msg in messages:
-                        remote = next(
-                            (r for r in to_verify if r.message_id == msg.id), None
+                for msg in messages:
+                    remote = next(
+                        (r for r in to_verify if r.message_id == msg.id), None
+                    )
+                    if not remote:
+                        continue
+
+                    # Si un solo mensaje del set falló, el espejo no es íntegro
+                    if (
+                        msg is None
+                        or getattr(msg, "empty", True)
+                        or not msg.document
+                    ):
+                        remote.mark_orphaned()
+                        is_integral = False
+                        logger.warning(
+                            f"Mensaje {remote.message_id} no encontrado o vacío en Telegram. Marcando como huérfano."
                         )
-                        if not remote:
-                            continue
+                        continue
 
-                        # Si un solo mensaje del set falló, el espejo no es íntegro
-                        if (
-                            msg is None
-                            or getattr(msg, "empty", True)
-                            or not msg.document
-                        ):
-                            remote.mark_orphaned()
-                            is_integral = False
-                            logger.warning(
-                                f"Mensaje {remote.message_id} no encontrado o vacío en Telegram. Marcando como huérfano."
-                            )
-                            continue
+                    # Verificación extra: ¿El tamaño coincide? (Anti-edición)
+                    if msg.document.file_size != remote.payload.size:
+                        remote.mark_orphaned()
+                        is_integral = False
+                    else:
+                        remote.mark_verified(msg)
 
-                        # Verificación extra: ¿El tamaño coincide? (Anti-edición)
-                        if msg.document.file_size != remote.payload.size:
-                            remote.mark_orphaned()
-                            is_integral = False
-                        else:
-                            remote.mark_verified(msg)
+                time.sleep(0.5)
+            return is_integral
 
-                    time.sleep(0.5)
-                return is_integral
-
-        except Exception as e:
-            logger.debug(f"Error en validación JIT: {e}")
-            return False
 
     def _get_expected_count(self, job: Job) -> int:
         # BUG: comprobar si matematicamente esta comprobacion funciona para las cintas.

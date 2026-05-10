@@ -148,17 +148,12 @@ class PydanticJSONField(Field):
         return json.dumps(value)
 
     def python_value(self, value):
-        """DB -> Python"""
         if value is None:
             return None
-        try:
-            # Si viene como string desde la DB
-            if isinstance(value, str):
-                return self.schema_model.model_validate_json(value)
-            # Si viene como dict (algunos drivers)
-            return self.schema_model.model_validate(value)
-        except Exception:
-            return self.schema_model()
+
+        if isinstance(value, str):
+            return self.schema_model.model_validate_json(value)
+        return self.schema_model.model_validate(value)
 
 
 class EnumField(peewee.CharField):

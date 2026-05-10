@@ -5,6 +5,8 @@ from typing import TYPE_CHECKING, List, Optional, cast
 import peewee
 import tartape
 import typer
+from filelock import Timeout
+from tartape.exceptions import TarIntegrityError
 
 from totelegram.cli.ui import UI, console
 from totelegram.concurrency import LeaseManager
@@ -34,7 +36,7 @@ def get_or_create_tape(
                 tape.verify(raise_exception=True)
             return Source.get_or_create_from_tape(tape)
 
-        except (peewee.DoesNotExist, Exception):
+        except (peewee.DoesNotExist, TarIntegrityError):
             # Si no está en DB o la cinta está corrupta,
             # caemos en la creación/regeneración de abajo
             pass
@@ -73,8 +75,8 @@ def get_or_create_job(
             else:
                 with console.status(f"[dim]Procesando {path}...[/dim]"):
                     source = Source.get_or_create_from_filepath(path)
-    except Exception as e:
-        UI.info(f"Otro proceso esta trabajando con este archivo. Error: {e}")
+    except Timeout:
+        UI.info("Otro proceso esta trabajando con este archivo.")
         return
 
     job = Job.get_for_source_in_chat(source, chat_db)
