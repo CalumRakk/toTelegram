@@ -69,6 +69,7 @@ class JobStatus(str, enum.Enum):
     UPLOADED = "UPLOADED"
     DELETED = "DELETED"
 
+
 class AvailabilityState(str, enum.Enum):
     FULFILLED = "fulfilled"
     CAN_FORWARD = "can-forward"
@@ -84,9 +85,6 @@ class AccessLevel(IntEnum):
     EDITABLE = 1  # Visible y editable
     DEBUG_EDITABLE = 2  # Visible y editable en DEBUG
     DEBUG_READONLY = 3  # Visible en DEBUG (solo lectura)
-
-
-# --- SCHEMAS ---
 
 
 class InfoField(BaseModel):
@@ -325,5 +323,5 @@ class ProgressState:
 
 
 class ResourceType(str, Enum):
-    ACCOUNT = "account" # Telegram account (account:12345)
-    JOB = "job"         # Work unit (job:123)
+    ACCOUNT = "account"  # Telegram account (account:12345)
+    JOB = "job"  # Work unit (job:123)

@@ -28,7 +28,7 @@ def backup_folders(
         "-f",
         help="Fuerza ignorando el estado del archivo en el sistema",
     ),
-    auto_truncate: Optional[bool]= typer.Option(
+    auto_truncate: Optional[bool] = typer.Option(
         None,
         "--auto-truncate/--no-auto-truncate",
         help="Activa o desactiva la truncación de nombres largos. Sobrescribe la configuración global.",
@@ -41,7 +41,9 @@ def backup_folders(
     profile_name, _ = _get_config_tools(ctx)
     settings = state.manager.get_settings(profile_name)
 
-    final_auto_truncate = auto_truncate if auto_truncate is not None else settings.auto_truncate
+    final_auto_truncate = (
+        auto_truncate if auto_truncate is not None else settings.auto_truncate
+    )
 
     if settings.chat_id == VALUE_NOT_SET:
         UI.error("El chat destino no está configurado.")
@@ -55,7 +57,6 @@ def backup_folders(
     if force:
         UI.warn("Forzando la subida de carpetas sin comprobar el estado del archivo.")
 
-    # --- Scaneo y Informe ---
     with console.status("[dim]Escaneando directorios...[/]"):
         scan_report = InventoryEngine(settings, force).scan_backup_inventory(paths)
 
@@ -68,8 +69,6 @@ def backup_folders(
             "[dim]Asegúrate de que las rutas existan y no estén excluidas por tus patrones de configuración.[/]"
         )
         raise typer.Exit(0)
-
-    # --- Subida de lo encontrado ---
 
     UI.separator()
 

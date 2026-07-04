@@ -53,7 +53,6 @@ def send_files(
     if force:
         UI.warn("Forzando la subida de carpetas sin comprobar el estado del archivo.")
 
-    # --- Scaneo y Informe ---
     with console.status(f"[dim]Scaneando {len(paths)} archivos[/dim]"):
         scan_report = InventoryEngine(settings, force).scan_granular(paths)
 
@@ -66,8 +65,6 @@ def send_files(
             "[dim]Asegúrate de que las rutas existan y no estén excluidas por tus patrones de configuración.[/]"
         )
         raise typer.Exit(0)
-
-    # --- Subida de lo encontrado ---
 
     with state.scope() as (client, db):
         u_ctx = prepare_upload_context(state, client, db, settings)

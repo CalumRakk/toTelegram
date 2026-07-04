@@ -22,7 +22,8 @@ if TYPE_CHECKING:
     from pyrogram.client import Client
     from pyrogram.types import Chat, User
 
-logger=logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
+
 
 def get_or_create_tape(
     path: Path,
@@ -56,23 +57,28 @@ def get_or_create_tape(
 
         except PathConstraintReportError:
             UI.error(f"Error al empaquetar la carpeta: [bold]{path.name}[/]")
-            UI.print("[dim]El formato TAR tiene un límite estricto para la longitud de los nombres y rutas de archivos.[/dim]")
-            UI.print("[dim]Algunos archivos dentro de esta carpeta superan este límite.[/dim]")
+            UI.print(
+                "[dim]El formato TAR tiene un límite estricto para la longitud de los nombres y rutas de archivos.[/dim]"
+            )
+            UI.print(
+                "[dim]Algunos archivos dentro de esta carpeta superan este límite.[/dim]"
+            )
             # TODO ¿deberia mostrar las lista de archivos? por si el usuario quiere renombrarlos manualmente
 
             UI.educational_tip(
                 title="Nombres de archivo demasiado largos",
                 message="Tienes dos opciones para resolver esto:\n"
-                        "1. Renombrar manualmente los archivos con rutas largas.\n"
-                        "2. Dejar que toTelegram trunque (recorte) los nombres automáticamente al subirlos.",
+                "1. Renombrar manualmente los archivos con rutas largas.\n"
+                "2. Dejar que toTelegram trunque (recorte) los nombres automáticamente al subirlos.",
                 commands=[
-                    f"totelegram backup \"{path}\" --auto-truncate",
-                    "totelegram config set auto_truncate true"
+                    f'totelegram backup "{path}" --auto-truncate',
+                    "totelegram config set auto_truncate true",
                 ],
                 spacing="block",
-                border_style="yellow"
+                border_style="yellow",
             )
             raise typer.Exit(1)
+
 
 def get_or_create_job(
     path: Path,
@@ -137,10 +143,11 @@ def prepare_upload_context(
             me = cast("User", client.get_me())
             owner = TelegramUser.get_or_create_from_tg(me)
 
-            # --- AUTO-HEALING: Reparación de perfiles antiguos ---
             if settings.telegram_account_id is None:
                 # Obtenemos el nombre real del perfil en uso
-                profile_name = cast(str, state.manager.resolve_profile_name(state.profile_name))
+                profile_name = cast(
+                    str, state.manager.resolve_profile_name(state.profile_name)
+                )
 
                 # Lo guardamos físicamente en el archivo .env
                 state.manager.set_setting(profile_name, "telegram_account_id", owner.id)
@@ -148,8 +155,9 @@ def prepare_upload_context(
                 # Lo actualizamos en memoria para el flujo actual
                 settings.telegram_account_id = owner.id
 
-                logger.info(f"Auto-healed: telegram_account_id ({owner.id}) agregado al perfil '{profile_name}'.")
-            # -----------------------------------------------------
+                logger.info(
+                    f"Auto-healed: telegram_account_id ({owner.id}) agregado al perfil '{profile_name}'."
+                )
 
         except Exception as e:
             UI.error(f"Error de conexión: {e}")

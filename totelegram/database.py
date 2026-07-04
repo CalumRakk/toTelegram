@@ -17,6 +17,7 @@ db_proxy = peewee.Proxy()
 # Semáforo global para sincronizar hilos cuando se usa SQLite
 _sqlite_write_lock = threading.RLock()
 
+
 @contextmanager
 def db_transaction(db: peewee.Database):
     """
@@ -32,15 +33,13 @@ def db_transaction(db: peewee.Database):
     try:
         # IMMEDIATE fuerza a SQLite a tomar el lock de escritura inmediatamente,
         # evitando deadlocks cuando dos hilos solo-lectura intentan volverse de escritura.
-        transaction_type = 'IMMEDIATE' if is_sqlite else 'DEFERRED'
+        transaction_type = "IMMEDIATE" if is_sqlite else "DEFERRED"
 
         with db.atomic(transaction_type):
             yield
     finally:
         if is_sqlite:
             _sqlite_write_lock.release()
-
-# --------------------
 
 
 class DatabaseSession:
@@ -104,7 +103,7 @@ class DatabaseSession:
                 TelegramUser,
                 TapeMember,
                 TapeMemberGPS,
-                Claim
+                Claim,
             ],
             safe=True,
         )

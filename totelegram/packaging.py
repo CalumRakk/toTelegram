@@ -6,7 +6,7 @@ from typing import List, Optional, Tuple, cast
 
 from pydantic import BaseModel
 
-from totelegram import __version__
+from totelegram import __VERSION__
 from totelegram.models import (
     Job,
     Payload,
@@ -67,7 +67,7 @@ class RemotePart(BaseModel):
 
 class UploadManifest(BaseModel):
     manifest_version: str = MANIFEST_VERSION
-    app_version: str = __version__
+    app_version: str = __VERSION__
     created_at: datetime
     strategy: Strategy
     chunk_size: int
@@ -219,7 +219,7 @@ class SnapshotService:
         remotes_db = (
             RemotePayload.select(RemotePayload, Payload)
             .join(Payload)
-            .where((Payload.job == job) & (RemotePayload.is_orphaned == False)) # noqa: E712
+            .where((Payload.job == job) & (RemotePayload.is_orphaned == False))  # noqa: E712
             .order_by(Payload.sequence_index)
         )
 

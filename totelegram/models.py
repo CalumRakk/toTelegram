@@ -10,7 +10,7 @@ import tartape
 from playhouse.sqlite_ext import JSONField
 from tartape.schemas import EntryState, ManifestEntry
 
-from totelegram import __version__
+from totelegram import __VERSION__
 from totelegram.schemas import JobStatus, ResourceType, SourceType, Strategy
 from totelegram.telegram.client import parse_message_json_data
 
@@ -218,7 +218,7 @@ class Source(BaseModel):
             fingerprint=tape.fingerprint,
             total_size=tape.total_size,
             total_files=tape.count_files,
-            tartape_version=tartape.__version__,
+            tartape_version=tartape.__VERSION__,
             created_at=tape.created_at,
             exclude_patterns=exclude_patterns,
         )
@@ -279,7 +279,7 @@ class Job(BaseModel):
 
         strategy = Strategy.evaluate(source.size, tg_limit)
         config = StrategyConfig(
-            tg_max_size=tg_limit, user_is_premium=is_premium, app_version=__version__
+            tg_max_size=tg_limit, user_is_premium=is_premium, app_version=__VERSION__
         )
         return Job.create(
             source=source,
@@ -343,7 +343,7 @@ class Payload(BaseModel):
         return (
             RemotePayload.select()
             .where(
-                (RemotePayload.payload == self) & (RemotePayload.is_orphaned == False) # noqa: E712
+                (RemotePayload.payload == self) & (RemotePayload.is_orphaned == False)  # noqa: E712
             )
             .exists()
         )
@@ -352,18 +352,15 @@ class Payload(BaseModel):
     def total_pending_for_job(job: "Job") -> int:
         """Cuenta las piezas que aún no tienen un RemotePayload válido."""
         valid_remotes = RemotePayload.select().where(
-            (RemotePayload.payload == Payload.id) &
-            (RemotePayload.is_orphaned == False) # noqa: E712
+            (RemotePayload.payload == Payload.id) & (RemotePayload.is_orphaned == False)  # noqa: E712
         )
 
         return (
             Payload.select()
-            .where(
-                (Payload.job == job) &
-                (~peewee.fn.EXISTS(valid_remotes))
-            )
+            .where((Payload.job == job) & (~peewee.fn.EXISTS(valid_remotes)))
             .count()
         )
+
 
 class RemotePayload(BaseModel):
     """Representa el Acceso Efectivo: El vínculo entre el Payload y el mensaje en Telegram."""
@@ -452,7 +449,7 @@ class TapeMember(BaseModel):
     size = cast(int, peewee.BigIntegerField())
     md5sum = cast(str, peewee.CharField())
 
-    class Meta: # type: ignore
+    class Meta:  # type: ignore
         indexes = (
             # Un archivo solo puede estar una vez en una carpeta específica
             (("source", "relative_path"), True),
@@ -510,7 +507,6 @@ class TapeMember(BaseModel):
 
 
 class TapeMemberGPS(BaseModel):
-
     member = cast(TapeMember, peewee.ForeignKeyField(TapeMember, backref="fragments"))
     payload = cast("Payload", peewee.ForeignKeyField(Payload, backref="fragments"))
 
@@ -518,11 +514,12 @@ class TapeMemberGPS(BaseModel):
     offset_in_volume = cast(int, peewee.BigIntegerField())
     bytes_in_volume = cast(int, peewee.BigIntegerField())
 
+
 class Claim(BaseModel):
     # 'account:123456789' o 'job:543'
     resource_id = peewee.CharField(primary_key=True)
     resource_type = EnumField(ResourceType)
-    node_id =cast(str,  peewee.CharField())
+    node_id = cast(str, peewee.CharField())
     expires_at = cast(datetime, peewee.DateTimeField())
 
     @classmethod

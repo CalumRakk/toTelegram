@@ -5,7 +5,7 @@ from pathlib import Path
 
 import peewee
 
-from totelegram import CURRENT_DB_VERSION
+from totelegram import __CURRENT_DB_VERSION__
 
 logger = logging.getLogger(__name__)
 
@@ -16,13 +16,13 @@ def run_migrations(db: peewee.SqliteDatabase, db_path: Path | str):
     cursor = db.execute_sql("PRAGMA user_version")
     db_version = cursor.fetchone()[0]
 
-    if db_version == CURRENT_DB_VERSION:
+    if db_version == __CURRENT_DB_VERSION__:
         return
 
-    if db_version > CURRENT_DB_VERSION:
+    if db_version > __CURRENT_DB_VERSION__:
         msg = (
             f"Incompatibilidad detectada: La base de datos es versión {db_version}, "
-            f"pero este programa solo soporta hasta la versión {CURRENT_DB_VERSION}.\n"
+            f"pero este programa solo soporta hasta la versión {__CURRENT_DB_VERSION__}.\n"
             "ACCION: Actualiza toTelegram ('pip install -U totelegram') o borra la base de datos para empezar de cero."
         )
         logger.critical(msg)
@@ -38,6 +38,7 @@ def run_migrations(db: peewee.SqliteDatabase, db_path: Path | str):
 
         try:
             from totelegram.database import db_transaction
+
             with db_transaction(db):
                 if db_version < 1:
                     _migrate_to_v1(db)
@@ -45,9 +46,9 @@ def run_migrations(db: peewee.SqliteDatabase, db_path: Path | str):
                 if db_version < 2:
                     _migrate_to_v2(db)
 
-                db.execute_sql(f"PRAGMA user_version = {CURRENT_DB_VERSION}")
+                db.execute_sql(f"PRAGMA user_version = {__CURRENT_DB_VERSION__}")
                 logger.info(
-                    f"Base de datos migrada con éxito a la versión {CURRENT_DB_VERSION}"
+                    f"Base de datos migrada con éxito a la versión {__CURRENT_DB_VERSION__}"
                 )
 
         except Exception as e:
@@ -71,6 +72,7 @@ def _migrate_to_v1(db):
     """
     )
 
+
 def _migrate_to_v2(db):
     """Limpieza de esquema: eliminando status de payload y delegando locks al OS"""
     logger.info("Migrando a V2: Eliminando gestión de estado manual...")
@@ -80,4 +82,6 @@ def _migrate_to_v2(db):
         db.execute_sql("ALTER TABLE payload DROP COLUMN claimed_by")
     except Exception as e:
         # Si la versión de SQLite es muy vieja, ignoramos. Peewee no lee esas columnas igual.
-        logger.debug(f"DROP COLUMN no soportado en esta versión de SQLite, ignorando: {e}")
+        logger.debug(
+            f"DROP COLUMN no soportado en esta versión de SQLite, ignorando: {e}"
+        )

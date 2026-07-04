@@ -6,7 +6,7 @@ from typing import Optional
 
 import typer
 
-from totelegram import __version__
+from totelegram import __VERSION__
 from totelegram.cli.commands import backup, config, profile, send
 from totelegram.cli.ui import console
 from totelegram.identity import SettingsManager
@@ -32,7 +32,7 @@ app.command(name="backup")(backup.backup_folders)
 
 def version_callback(value: bool):
     if value:
-        console.print(f"toTelegram [bold cyan]v{__version__}[/bold cyan]")
+        console.print(f"toTelegram [bold cyan]v{__VERSION__}[/bold cyan]")
         raise typer.Exit()
 
 
@@ -91,16 +91,22 @@ def run_script():
 
     try:
         from totelegram.cli.__main__ import app
+
         app()
     except SystemExit:
         pass  # Salidas limpias (ej. sys.exit(0))
     except Exception as e:
         import typer
+
         if not isinstance(e, typer.Exit):
             import logging
-            logging.getLogger("totelegram.crash").exception("Error crítico no controlado:")
+
+            logging.getLogger("totelegram.crash").exception(
+                "Error crítico no controlado:"
+            )
 
         from totelegram.cli.ui import UI
+
         UI.error(str(e))
         sys.exit(1)
 

@@ -80,9 +80,9 @@ class Settings(BaseSettings):
     )
 
     auto_truncate: bool = Field(
-            default=False,
-            description="Trunca automáticamente los nombres largos al empaquetar carpetas en TAR.",
-            json_schema_extra={"is_sensitive": False, "access": AccessLevel.EDITABLE},
+        default=False,
+        description="Trunca automáticamente los nombres largos al empaquetar carpetas en TAR.",
+        json_schema_extra={"is_sensitive": False, "access": AccessLevel.EDITABLE},
     )
 
     # exclude_files_default: CommaSeparatedList = ["*.json", "*.json.xz"]
@@ -115,9 +115,9 @@ class Settings(BaseSettings):
         """
         field: FieldInfo | None = cls.model_fields.get(field_name.lower())
 
-        assert (
-            field is not None
-        ), f"El campo '{field_name}' no existe en la configuración."
+        assert field is not None, (
+            f"El campo '{field_name}' no existe en la configuración."
+        )
 
         description = field.description or "Sin descripción"
 
@@ -133,9 +133,9 @@ class Settings(BaseSettings):
 
         level = cast(
             AccessLevel,
-            field.json_schema_extra.get("access", AccessLevel.DEBUG_READONLY), # type: ignore
+            field.json_schema_extra.get("access", AccessLevel.DEBUG_READONLY),  # type: ignore
         )
-        is_sensitive = cast(bool, field.json_schema_extra.get("is_sensitive", False)) # type: ignore
+        is_sensitive = cast(bool, field.json_schema_extra.get("is_sensitive", False))  # type: ignore
         type_annotation = get_type_annotation(field)
 
         return InfoField(
@@ -418,11 +418,6 @@ class SettingsManager:
 
     def get_session_path(self, profile_name: str) -> Path:
         return self.profiles_dir / f"{profile_name}.session"
-
-    # --------------------------------
-    #  Métodos de escritura y sanidad en el contexto de `.env`
-    #  En este contexto solo existe settings_name
-    # --------------------------------
 
     # TODO: analizar si deberia cambiar los métodos settings_* por env_*
     def get_settings_path(self, profile_name: str) -> Path:

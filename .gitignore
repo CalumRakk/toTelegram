@@ -44,3 +44,12 @@ manual/
 build/
 prompt.md
 delete_source.py
+
+.project_context
+tests/
+.github/
+.pre-commit-config.yaml
+docs/
+README.md
+.venv
+totelegram/telegram/patches.py
