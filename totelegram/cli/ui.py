@@ -17,7 +17,8 @@ from rich.theme import Theme
 from totelegram.database import DatabaseSession
 from totelegram.identity import Profile, Settings, SettingsManager
 from totelegram.models import TelegramChat
-from totelegram.schemas import COLORS, AccessLevel, ChatMatch, Commands, ScanReport
+from totelegram.schemas import COLORS, AccessLevel, Commands, ScanReport
+from totelegram.telegram.types import ChatMatch
 
 Spacing = Optional[Literal["top", "bottom", "block"]]
 
@@ -34,9 +35,11 @@ custom_theme = Theme(
 console = Console(theme=custom_theme, force_terminal=True, legacy_windows=True)
 ui_logger = logging.getLogger("totelegram.ui")
 
+
 def strip_markup(text: str) -> str:
     """Elimina las etiquetas de color [bold], [red], etc. para el archivo de log."""
     return Text.from_markup(text).plain
+
 
 def get_friendly_chat_name(chat_id: str, database_path: str) -> str:
     """
@@ -93,7 +96,12 @@ class UI:
 
     @staticmethod
     def _print(
-        message: str, *, indent: bool = False, spacing: Spacing = None, log_level: int = logging.INFO, **kwargs
+        message: str,
+        *,
+        indent: bool = False,
+        spacing: Spacing = None,
+        log_level: int = logging.INFO,
+        **kwargs,
     ):
         """Imprime un mensaje con formato y opcionalmente agrega espacio antes o después.
 
@@ -120,23 +128,43 @@ class UI:
 
     @staticmethod
     def print(message: str, *, indent: bool = True, spacing: Spacing = None, **kwargs):
-        UI._print(f"{message}", indent=indent, spacing=spacing, log_level=logging.INFO, **kwargs)
+        UI._print(
+            f"{message}",
+            indent=indent,
+            spacing=spacing,
+            log_level=logging.INFO,
+            **kwargs,
+        )
 
     @staticmethod
     def info(message: str, *, spacing: Spacing = None, **kwargs):
-        UI._print(f"[info]i[/] {message}", spacing=spacing, log_level=logging.INFO, **kwargs)
+        UI._print(
+            f"[info]i[/] {message}", spacing=spacing, log_level=logging.INFO, **kwargs
+        )
 
     @staticmethod
     def success(message: str, *, spacing: Spacing = None, **kwargs):
-        UI._print(f"[success]>[/] {message}", spacing=spacing, log_level=logging.INFO, **kwargs)
+        UI._print(
+            f"[success]>[/] {message}",
+            spacing=spacing,
+            log_level=logging.INFO,
+            **kwargs,
+        )
 
     @staticmethod
     def warn(message: str, *, spacing: Spacing = None, **kwargs):
-        UI._print(f"[warning]![/] {message}", spacing=spacing, log_level=logging.WARNING, **kwargs)
+        UI._print(
+            f"[warning]![/] {message}",
+            spacing=spacing,
+            log_level=logging.WARNING,
+            **kwargs,
+        )
 
     @staticmethod
     def error(message: str, *, spacing: Spacing = None, **kwargs):
-        UI._print(f"[error]X[/] {message}", spacing=spacing, log_level=logging.ERROR, **kwargs)
+        UI._print(
+            f"[error]X[/] {message}", spacing=spacing, log_level=logging.ERROR, **kwargs
+        )
 
     @staticmethod
     def tip(
@@ -347,7 +375,6 @@ class DisplayUpload:
 
 
 class DisplayConfig:
-
     @staticmethod
     def confirm_expanded_pattern(
         action: Literal["agregar", "eliminar"], key: str, values: List[str]
@@ -579,7 +606,6 @@ class DisplayProfile:
 
 
 class DisplayGeneric:
-
     @staticmethod
     def show_matches_summary(query: str, matches: List[ChatMatch]):
         base = "Explore tus chats más recientes"

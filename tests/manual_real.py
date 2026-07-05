@@ -12,9 +12,10 @@ from totelegram.utils import get_user_config_dir
 sys.path.append(os.getcwd())
 
 if TYPE_CHECKING:
-    from pyrogram.types import User, Chat
+    from pyrogram.types import Chat, User
 
 from totelegram.common.enums import AvailabilityState
+
 from totelegram.database import DatabaseSession
 from totelegram.discovery import DiscoveryService
 from totelegram.models import Job, RemotePayload, Source, TelegramChat

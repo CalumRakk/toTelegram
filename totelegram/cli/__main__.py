@@ -8,10 +8,10 @@ import typer
 
 from totelegram import __VERSION__
 from totelegram.cli.commands import backup, config, profile, send
+from totelegram.cli.state import CLIState
 from totelegram.cli.ui import console
 from totelegram.identity import SettingsManager
 from totelegram.logging_config import setup_logging
-from totelegram.schemas import CLIState
 from totelegram.utils import APP_NAME, get_user_config_dir
 
 logging.getLogger("dotenv").setLevel(logging.CRITICAL)

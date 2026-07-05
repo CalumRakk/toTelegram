@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Optional, Union, cast
 
-from totelegram.schemas import AccessReport, AccessStatus, ChatMatch
+from totelegram.telegram.types import AccessReport, AccessStatus, ChatMatch
 from totelegram.utils import normalize_chat_id
 
 if TYPE_CHECKING:

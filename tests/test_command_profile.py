@@ -7,8 +7,9 @@ from unittest.mock import patch
 from typer.testing import CliRunner
 
 from totelegram.cli.commands.profile import app
+from totelegram.cli.state import CLIState
 from totelegram.identity import SettingsManager
-from totelegram.schemas import AccessReport, AccessStatus, ChatMatch, CLIState
+from totelegram.telegram.types import AccessReport, AccessStatus, ChatMatch
 
 
 class TestCliProfile(unittest.TestCase):

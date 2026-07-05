@@ -3,14 +3,15 @@ from typing import TYPE_CHECKING, Optional, Union
 
 import typer
 
+from totelegram.cli.state import CLIState
 from totelegram.schemas import Commands
 from totelegram.telegram.search import ChatSearchService
+from totelegram.telegram.types import AccessStatus
 
 if TYPE_CHECKING:
     from pyrogram.client import Client
 
 from totelegram.cli.ui import UI, DisplayGeneric, DisplayProfile, console
-from totelegram.schemas import AccessStatus, CLIState
 from totelegram.telegram.access import ChatAccessService
 from totelegram.telegram.auth import AuthLogic
 from totelegram.telegram.client import TelegramSession

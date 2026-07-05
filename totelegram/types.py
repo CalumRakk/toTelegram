@@ -9,13 +9,14 @@ if TYPE_CHECKING:
     from pyrogram.client import Client
     from pyrogram.types import Chat
 
+    from totelegram.cli.state import CLIState
     from totelegram.discovery import DiscoveryService
     from totelegram.identity import Settings
     from totelegram.models import (
         RemotePayload,
         TelegramUser,
     )
-    from totelegram.schemas import AvailabilityState, CLIState
+    from totelegram.schemas import AvailabilityState
 
 
 @dataclass

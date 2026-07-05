@@ -8,13 +8,14 @@ import typer
 from filelock import Timeout
 from tartape.exceptions import PathConstraintReportError, TarIntegrityError
 
+from totelegram.cli.state import CLIState
 from totelegram.cli.ui import UI, console
 from totelegram.concurrency import LeaseManager
 from totelegram.database import db_transaction
 from totelegram.discovery import DiscoveryService
 from totelegram.identity import Settings
 from totelegram.models import Job, Source, TelegramChat, TelegramUser
-from totelegram.schemas import CLIState, ScanReport
+from totelegram.schemas import ScanReport
 from totelegram.types import UploadContext
 from totelegram.utils import delete_snapshot, get_node_id, has_snapshot, is_excluded
 

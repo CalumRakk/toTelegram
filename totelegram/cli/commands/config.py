@@ -5,9 +5,10 @@ from typing import TYPE_CHECKING, List, Literal, Tuple, cast
 
 import typer
 
+from totelegram.cli.state import CLIState
 from totelegram.cli.ui import UI, DisplayConfig, DisplayGeneric, DisplayProfile
 from totelegram.identity import ConfigService
-from totelegram.schemas import VALUE_NOT_SET, CLIState, Commands
+from totelegram.schemas import VALUE_NOT_SET, Commands
 from totelegram.telegram.access import ChatAccessService
 from totelegram.telegram.client import TelegramSession
 from totelegram.telegram.search import ChatSearchService
@@ -296,7 +297,6 @@ def search_config(
                 raise typer.Exit(1)
 
             elif result.needs_help:
-
                 DisplayGeneric.show_chat_table(
                     result.suggestions, "Quizás quisiste decir:"
                 )

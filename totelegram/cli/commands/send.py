@@ -9,10 +9,10 @@ from totelegram.cli.logic import (
     get_or_create_job,
     prepare_upload_context,
 )
+from totelegram.cli.state import CLIState
 from totelegram.cli.ui import UI, DisplayUpload, console
 from totelegram.schemas import (
     VALUE_NOT_SET,
-    CLIState,
     Commands,
 )
 from totelegram.uploader import UploadService
