@@ -63,46 +63,46 @@ class UploadService:
         self.account_id = u_ctx.settings.telegram_account_id
 
     def _ensure_account_lease(self):
-        """Bloquea la cuenta de Telegram a nivel de base de datos."""
+        """Bloquea el uso de la cuenta de Telegram a nivel de base de datos."""
         if not self.account_id:
-            logger.warning("No hay account_id configurado, saltando lock de cuenta.")
+            logger.warning("No hay account_id configurado, saltando lease de cuenta.")
             return
 
-        resource_id = f"account:{self.account_id}"
-        if not self.lease_manager.try_acquire(resource_id, ResourceType.ACCOUNT):
-            UI.error(f"La cuenta {self.account_id} está siendo utilizada por otro nodo.")
+        if not self.lease_manager.try_acquire_account_lease(self.account_id):
+            UI.error(
+                f"La cuenta {self.account_id} está siendo utilizada por otro nodo."
+            )
             raise typer.Exit(1)
 
-        logger.info(f"Lock de cuenta {resource_id} adquirido.")
+        logger.info(f"Lease de cuenta adquirido para la cuenta: {self.account_id}")
 
     def _release_account_lease(self):
-        """Libera el lock de la cuenta explícitamente al terminar."""
+        """Libera el lease de la cuenta de Telegram."""
         if self.account_id:
-            resource_id = f"account:{self.account_id}"
-            self.lease_manager.release(resource_id)
-            logger.info(f"Lock de cuenta {resource_id} liberado explícitamente.")
+            self.lease_manager.release_account_lease(self.account_id)
+            logger.info(f"Lease de cuenta liberado para la cuenta: {self.account_id}")
 
     def process_job(self, job: Job, path: Path, is_last_job: bool = False):
         """
         Orquesta el ciclo de vida de un Job: Investigación, Ejecución y Cierre.
-        Este es el 'cerebro' que decide si reenviar, subir o marcar como completado.
         """
         self._ensure_account_lease()
 
-        job_resource_id = f"job:{job.id}"
-        if not self.lease_manager.try_acquire(job_resource_id, ResourceType.JOB):
+        if not self.lease_manager.try_acquire_job_lease(job.id):
             UI.info(f"El Job {job.id} está siendo procesado por otro nodo.")
             return False
 
         account_resource_id = f"account:{self.account_id}"
+        job_resource_id = f"job:{job.id}"
 
         logger.info(f"Iniciando procesamiento de Job {job.id} para: {path.name}")
         report = self.u_ctx.discovery.investigate(job)
 
         try:
-            with LeaseKeeper(self.lease_manager, account_resource_id), \
-                 LeaseKeeper(self.lease_manager, job_resource_id):
-
+            with (
+                LeaseKeeper(self.lease_manager, account_resource_id),
+                LeaseKeeper(self.lease_manager, job_resource_id),
+            ):
                 if report.state == AvailabilityState.FULFILLED:
                     UI.info(f"[dim]{path.name}[/] ya está disponible en el destino.")
                     if job.status != JobStatus.UPLOADED:
@@ -116,10 +116,12 @@ class UploadService:
                     self.execute_smart_forward(job, report)
 
         finally:
-            self.lease_manager.release(job_resource_id)
+            self.lease_manager.release_job_lease(job.id)
 
         job = Job.get_by_id(job.id)
-        logger.info(f"Evaluando cierre del Job {job.id}. Estado actual en DB: {job.status}")
+        logger.info(
+            f"Evaluando cierre del Job {job.id}. Estado actual en DB: {job.status}"
+        )
 
         if job.status == JobStatus.UPLOADED:
             try:
@@ -128,7 +130,9 @@ class UploadService:
                 logger.info("Snapshot generado y guardado con éxito.")
                 return True
             except Exception as e:
-                logger.error(f"Fallo catastrófico generando el Snapshot: {e}", exc_info=True)
+                logger.error(
+                    f"Fallo catastrófico generando el Snapshot: {e}", exc_info=True
+                )
                 raise e
             finally:
                 if is_last_job:
@@ -151,41 +155,38 @@ class UploadService:
             return True
 
     def _claim_next_payload(self, job: Job) -> Optional[Tuple[Payload, FileLock]]:
-            """Busca y bloquea a nivel de SO la siguiente pieza disponible."""
-            logger.debug(f"Buscando siguiente pieza disponible para Job {job.id}...")
+        """Busca y bloquea a nivel de S.O. la siguiente pieza disponible mediante FileLock."""
+        logger.debug(f"Buscando siguiente pieza disponible para Job {job.id}...")
 
-            valid_remotes = RemotePayload.select().where(
-                (RemotePayload.payload == Payload.id) &
-                (RemotePayload.is_orphaned == False) # noqa: E712
-            )
+        valid_remotes = RemotePayload.select().where(
+            (RemotePayload.payload == Payload.id) & (RemotePayload.is_orphaned == False)  # noqa: E712
+        )
 
-            pending_payloads = (
-                Payload.select()
-                .where(
-                    (Payload.job == job) &
-                    (~peewee.fn.EXISTS(valid_remotes))
+        pending_payloads = (
+            Payload.select()
+            .where((Payload.job == job) & (~peewee.fn.EXISTS(valid_remotes)))
+            .order_by(Payload.sequence_index)
+        )
+
+        local_lock_dir = self.manager.worktable / "locks" / f"job_{job.id}"
+        local_lock_dir.mkdir(parents=True, exist_ok=True)
+
+        for payload in pending_payloads:
+            local_lock_path = local_lock_dir / f"payload_{payload.id}.lock"
+            payload_segment_lock = FileLock(local_lock_path, timeout=0)
+
+            try:
+                payload_segment_lock.acquire()
+                logger.info(
+                    f"Pieza {payload.sequence_index} reclamada (Local OS Lock) por {self.profile_name}"
                 )
-                .order_by(Payload.sequence_index)
-            )
+                return payload, payload_segment_lock
+            except Timeout:
+                # Ya está bloqueado localmente por otro trabajador, pasamos al siguiente
+                continue
 
-            lock_dir = self.manager.worktable / "locks" / f"job_{job.id}"
-            lock_dir.mkdir(parents=True, exist_ok=True)
+        return None
 
-            for payload in pending_payloads:
-                lock_path = lock_dir / f"payload_{payload.id}.lock"
-                lock = FileLock(lock_path, timeout=0)
-
-                try:
-                    lock.acquire()
-                    logger.info(
-                        f"Pieza {payload.sequence_index} reclamada (OS Lock) por {self.profile_name}"
-                    )
-                    return payload, lock  # type:ignore - Retornamos el payload y el candado activo
-                except Timeout:
-                    # El archivo ya está bloqueado por otro proceso, pasamos al siguiente
-                    continue
-
-            return None
     def _smart_pause(self):
         """Calcula y ejecuta una pausa aleatoria basada en la configuración."""
         r = self.settings.upload_pause_range
@@ -196,63 +197,64 @@ class UploadService:
             UI.sleep_progress(minutes * 60)
 
     def execute_physical_upload(self, job: Job, path: Path, is_last_job: bool):
+        logger.info(
+            f"Iniciando subida física de {path.name}. Estrategia: {job.strategy}"
+        )
+        with db_transaction(self.db):
+            Chunker.get_or_create(job)
+
+        md5sum = job.source.md5sum
+        while True:
+            claim_result = self._claim_next_payload(job)
+
+            if claim_result is None:
+                break
+
+            payload, payload_segment_lock = claim_result
+
+            with payload_segment_lock:
+                UI.info(f"Subiendo la pieza [bold]{payload.filename}[/]")
+
+                try:
+                    message, part_md5 = self._upload_payload(
+                        job.source.type, md5sum, path, payload
+                    )
+
+                    with db_transaction(self.db):
+                        payload.md5sum = part_md5
+                        payload.save(only=[Payload.md5sum, Payload.updated_at])
+                        RemotePayload.register_upload(payload, message, self.owner)
+
+                    UI.success("Pieza subida exitosamente.")
+
+                    has_more_payloads = Payload.total_pending_for_job(job) > 0
+                    if has_more_payloads and not is_last_job:
+                        self._smart_pause()
+
+                except Exception as e:
+                    raise e
+
+        # Fuera del bucle (terminó la subida o la cola):
+        with db_transaction(self.db):
+            pending = Payload.total_pending_for_job(job)
             logger.info(
-                f"Iniciando subida física de {path.name}. Estrategia: {job.strategy}"
+                f"Evaluando piezas pending para el Job {job.id}: quedan {pending}"
             )
-            with db_transaction(self.db):
-                Chunker.get_or_create(job)
 
-            md5sum = job.source.md5sum
-            while True:
-                claim_result = self._claim_next_payload(job)
+            if pending == 0:
+                logger.info(f"Marcando Job {job.id} como UPLOADED en la base de datos.")
+                job.set_uploaded()
+                UI.success("¡Subida completa! Todas las piezas están en Telegram.")
 
-                if claim_result is None:
-                    break # No hay más piezas disponibles (subidas o procesándose)
+                # Limpieza: Borramos la carpeta de locks porque ya no se necesita
+                lock_dir = self.manager.worktable / "locks" / f"job_{job.id}"
+                if lock_dir.exists():
+                    shutil.rmtree(lock_dir, ignore_errors=True)
+            else:
+                logger.info(
+                    f"Worker terminó su cola, pero faltan {pending} piezas que otro worker está subiendo."
+                )
 
-                payload, lock = claim_result
-
-                # MAGIA: El lock se mantendrá solo dentro de este bloque 'with'
-                with lock:
-                    UI.info(f"Subiendo la pieza [bold]{payload.filename}[/]")
-
-                    try:
-                        message, part_md5 = self._upload_payload(
-                            job.source.type, md5sum, path, payload
-                        )
-
-                        with db_transaction(self.db):
-                            # Actualizamos el md5sum en vez de usar set_uploaded()
-                            payload.md5sum = part_md5
-                            payload.save(only=[Payload.md5sum, Payload.updated_at])
-
-                            RemotePayload.register_upload(payload, message, self.owner)
-
-                        UI.success("Pieza subida exitosamente.")
-
-                        has_more_payloads = Payload.total_pending_for_job(job) > 0
-                        if has_more_payloads and not is_last_job:
-                            self._smart_pause()
-
-                    except Exception as e:
-                        # El bloque 'with lock' finaliza y el SO libera el archivo automáticamente.
-                        raise e
-
-            # Fuera del bucle (terminó la subida o la cola):
-            with db_transaction(self.db):
-                pending = Payload.total_pending_for_job(job)
-                logger.info(f"Evaluando piezas pending para el Job {job.id}: quedan {pending}")
-
-                if pending == 0:
-                    logger.info(f"Marcando Job {job.id} como UPLOADED en la base de datos.")
-                    job.set_uploaded()
-                    UI.success("¡Subida completa! Todas las piezas están en Telegram.")
-
-                    # Limpieza: Borramos la carpeta de locks porque ya no se necesita
-                    lock_dir = self.manager.worktable / "locks" / f"job_{job.id}"
-                    if lock_dir.exists():
-                        shutil.rmtree(lock_dir, ignore_errors=True)
-                else:
-                    logger.info(f"Worker terminó su cola, pero faltan {pending} piezas que otro worker está subiendo.")
     def execute_smart_forward(self, job: Job, report: AvailabilityReport):
         mirrros = {r.payload.sequence_index: r for r in report.remotes}
         UI.info(f"Reenviando {len(mirrros)} partes...")
@@ -335,7 +337,7 @@ class UploadService:
                 )
 
                 with ThrottledFile(volumen, limit_bytes) as doc_stream:
-                    doc_stream= cast(BinaryIO, doc_stream )
+                    doc_stream = cast(BinaryIO, doc_stream)
 
                     tg_message = cast(
                         "Message",

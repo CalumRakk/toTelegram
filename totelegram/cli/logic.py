@@ -89,16 +89,13 @@ def get_or_create_job(
     auto_truncate: bool = False,
 ) -> Optional[Job]:
     """
-    Obtiene el job asociado a un path. Si no existe, lo crea.
-
-    Nota: Intenta obtener un lock para el archivo. Si no se puede obtener y wait_if_busy es False, retorna None
+    Obtiene el job asociado a un path. Si no existe, lo crea en base de datos.
     """
-
-    lock = u_ctx.state.manager.get_lock_for_path(path)
+    source_path_lock = u_ctx.state.manager.get_lock_for_path(path)
     timeout = None if wait_if_busy else 0.01
 
     try:
-        with lock.acquire(timeout=timeout):
+        with source_path_lock.acquire(timeout=timeout):
             chat_db, _ = TelegramChat.get_or_create_from_chat(u_ctx.tg_chat)
             if path.is_dir():
                 source = get_or_create_tape(path, u_ctx, force, auto_truncate)
@@ -106,7 +103,7 @@ def get_or_create_job(
                 with console.status(f"[dim]Procesando {path}...[/dim]"):
                     source = Source.get_or_create_from_filepath(path)
     except Timeout:
-        UI.info("Otro proceso esta trabajando con este archivo.")
+        UI.info("Otro proceso local está trabajando actualmente con este archivo.")
         return
 
     job = Job.get_for_source_in_chat(source, chat_db)
