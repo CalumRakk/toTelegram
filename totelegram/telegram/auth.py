@@ -1,114 +1,40 @@
+import logging
 from pathlib import Path
-from typing import Optional, Tuple, cast
+from typing import Tuple, cast
 
-from totelegram.identity import Profile, SettingsManager
 from totelegram.telegram.client import TelegramSession
-from totelegram.utils import VALUE_NOT_SET
+
+logger = logging.getLogger(__name__)
 
 
 class AuthLogic:
     def __init__(
         self,
-        profile_name: str,
-        temp_dir: Path | str,
+        session_name: str,
         api_id: int,
         api_hash: str,
-        manager: SettingsManager,
-        chat_id: Optional[str] = None,
+        workdir: Path | str,
     ) -> None:
-        self.profile_name = profile_name
-        self.temp_dir = Path(temp_dir)
+        self.session_name = session_name
         self.api_id = api_id
         self.api_hash = api_hash
-        self.manager = manager
-        self.chat_id = chat_id
+        self.workdir = Path(workdir)
 
-    def _create_session(self) -> Tuple[Path, int]:
+    def run_auth_flow(self) -> Tuple[Path, int]:
         """
-        Genera una sesión autenticada en el directorio temporal (self.temp_dir).
-
-        Verifica que no exista previamente una sesión definitiva para el perfil
-        y crea el archivo `.session` usando las credenciales proporcionadas.
-
-        Returns:
-            Path: La ruta del archivo de sesión generado.
-            int: El Telegram Account ID asociado a la sesión.
-
-        Raises:
-            FileExistsError: Si el archivo de sesión ya existe.
+        Inicia el flujo interactivo de autenticación de Pyrogram.
+        Retorna la ruta del archivo de sesión temporal generado y el ID de la cuenta.
         """
         from pyrogram.types import User
 
-        final_session_path = self.manager.get_session_path(self.profile_name)
-        if final_session_path.exists():
-            raise FileExistsError(
-                f"El archivo de sesión {final_session_path} ya existe."
-            )
-
-        temp_session_path = self.temp_dir / f"{self.profile_name}.session"
         with TelegramSession(
-            session_name=self.profile_name,
+            session_name=self.session_name,
             api_id=self.api_id,
             api_hash=self.api_hash,
-            profiles_dir=self.temp_dir,
+            profiles_dir=self.workdir,
         ) as client:
-            # Una vez dentro ya no necesitamos la session temp, salimos para liberar el archivo
             me = cast(User, client.get_me())
             account_id = me.id
 
+        temp_session_path = self.workdir / f"{self.session_name}.session"
         return temp_session_path, account_id
-
-    def _persist_session(self, temp_session_path: Path):
-        """
-        Mueve la sesión desde el directorio temporal al directorio definitivo
-        de perfiles.
-
-        Valida que el archivo temporal exista antes de persistirlo.
-
-        Args:
-            temp_session_path (Path): La ruta del archivo de sesión temporal.
-
-        Returns:
-            Path: La ruta del archivo de sesión definitivo.
-
-        Raises:
-            FileNotFoundError: Si el archivo de sesión temporal no existe.
-        """
-        final_session_path = self.manager.get_session_path(self.profile_name)
-        if not temp_session_path.exists():
-            raise FileNotFoundError("No se encontró el archivo de sesión.")
-
-        self.manager.profiles_dir.mkdir(parents=True, exist_ok=True)
-        temp_session_path.rename(final_session_path)
-        return final_session_path
-
-    def _write_profile_settings(self,account_id: int):
-        """Crea y guarda el archivo de configuración asociado al perfil."""
-        settings_dict = {
-            "api_id": self.api_id,
-            "api_hash": self.api_hash,
-            "profile_name": self.profile_name,
-            "chat_id": self.chat_id or VALUE_NOT_SET,
-            "telegram_account_id": account_id,
-        }
-        self.manager._write_all_settings(self.profile_name, settings_dict)
-
-    def initialize_profile(self) -> Profile:
-        """
-        Inicializa completamente un perfil.
-
-        Orquesta la creación de un Profile asegurando su trinidad.
-
-        Returns:
-            Profile: El perfil inicializado.
-        """
-
-        temp_path, account_id = self._create_session()
-
-        self._persist_session(temp_path)
-
-        self._write_profile_settings(account_id)
-
-        profile = self.manager.get_profile(self.profile_name)
-        assert profile is not None, "Perfil inconsistente tras inicialización"
-        return profile

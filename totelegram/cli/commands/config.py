@@ -10,7 +10,6 @@ from totelegram.cli.ui import UI, DisplayConfig, DisplayGeneric, DisplayProfile
 from totelegram.identity import ConfigService
 from totelegram.schemas import VALUE_NOT_SET, Commands
 from totelegram.telegram.access import ChatAccessService
-from totelegram.telegram.client import TelegramSession
 from totelegram.telegram.search import ChatSearchService
 from totelegram.utils import (
     is_direct_identifier,
@@ -226,7 +225,7 @@ def check_config(ctx: typer.Context):
         )
         raise typer.Exit(code=1)
 
-    with TelegramSession.from_profile(profile_name, manager) as client:
+    with state.get_telegram_session(profile_name) as client:
         with UI.loading("Verificando conexión y permisos en Telegram..."):
             validator = ChatAccessService(client)
             access_report = validator.verify_access(settings.chat_id)
@@ -262,7 +261,7 @@ def search_config(
     DisplayProfile.announce_profile_used(profile_name)
 
     # Obtener el ID del chat destino
-    with TelegramSession.from_profile(profile_name, manager) as client:
+    with state.get_telegram_session(profile_name) as client:
         chat_access = ChatAccessService(client)
         chat_searcher = ChatSearchService(client)
 

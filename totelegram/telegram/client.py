@@ -12,8 +12,6 @@ if TYPE_CHECKING:
     from pyrogram.client import Client
     from pyrogram.types import Message
 
-    from totelegram.identity import SettingsManager
-
 
 logger = logging.getLogger(__name__)
 
@@ -115,43 +113,6 @@ class TelegramSession:
 
         self.client = None
 
-    @classmethod
-    def from_profile(
-        cls, profile_name: str, manager: "SettingsManager"
-    ) -> "TelegramSession":
-        """
-        Construye una `TelegramSession` a partir de un perfil válido.
-
-        Verifica que el perfil exista y sea trinity, obtiene sus credenciales
-        y devuelve una sesión lista para iniciarse.
-
-        Args:
-            profile_name (str): Nombre del perfil a usar.
-            manager (SettingsManager): Manejador de configuraciones.
-
-        Raises:
-            ValueError: Si el perfil no existe o no es trinity
-
-        Examples:
-            >>> with TelegramSession.from_profile("default", manager) as client:
-            ...     client.get_me()
-        """
-        profile = manager.get_profile(profile_name)
-
-        if profile is None:
-            raise ValueError("Perfil no existe")
-
-        if not profile.is_trinity:
-            raise ValueError("Perfil no es trinity")
-
-        settings = manager.get_settings(profile_name)
-        return cls(
-            session_name=profile_name,
-            api_id=settings.api_id,
-            api_hash=settings.api_hash,
-            profiles_dir=manager.profiles_dir,
-        )
-
 
 def parse_message_json_data(json_data: dict) -> Message:
     """Utilidad para reconstruir objetos Message desde JSON almacenado en BD."""
@@ -179,7 +140,6 @@ def parse_message_json_data(json_data: dict) -> Message:
     media_raw = data.get("media")
     media_type = None
     if isinstance(media_raw, str) and "." in media_raw:
-
         media_type_str = media_raw.split(".")[-1].lower()
         media_type = MessageMediaType(media_type_str)
     elif media_raw:

@@ -1,5 +1,6 @@
 import tempfile
-from typing import TYPE_CHECKING, List, Optional, Union, cast
+from pathlib import Path
+from typing import TYPE_CHECKING, Optional, Union
 
 import typer
 
@@ -14,7 +15,6 @@ if TYPE_CHECKING:
 from totelegram.cli.ui import UI, DisplayGeneric, DisplayProfile, console
 from totelegram.telegram.access import ChatAccessService
 from totelegram.telegram.auth import AuthLogic
-from totelegram.telegram.client import TelegramSession
 from totelegram.utils import (
     VALUE_NOT_SET,
     is_direct_identifier,
@@ -26,7 +26,7 @@ app = typer.Typer(help="Gestión de perfiles de configuración.")
 
 
 def _run_destination_wizard(
-    client: "Client", current_depth: int = 100
+    state: CLIState, client: "Client", current_depth: int = 100
 ) -> Optional[Union[str, int]]:
     """
     Inicia el asistente interactivo para determinar y validar el chat destino.
@@ -234,14 +234,28 @@ def create_profile(
 
     with tempfile.TemporaryDirectory() as temp_dir:
         auth = AuthLogic(
-            profile_name=profile_name,
+            session_name=profile_name,
             api_id=api_id,
             api_hash=api_hash,
-            chat_id=chat_id,
-            manager=manager,
-            temp_dir=temp_dir,
+            workdir=Path(temp_dir),
         )
-        auth.initialize_profile()
+        temp_session_path, account_id = auth.run_auth_flow()
+
+        # Almacenamiento final de la sesión de Telegram
+        final_session_path = manager.get_session_path(profile_name)
+        manager.profiles_dir.mkdir(parents=True, exist_ok=True)
+        if temp_session_path.exists():
+            temp_session_path.rename(final_session_path)
+
+        # Creación y guardado del archivo .env asociado al perfil
+        settings_dict = {
+            "api_id": api_id,
+            "api_hash": api_hash,
+            "profile_name": profile_name,
+            "chat_id": chat_id or VALUE_NOT_SET,
+            "telegram_account_id": account_id,
+        }
+        manager._write_all_settings(profile_name, settings_dict)
 
     DisplayProfile.announce_profile_creation(profile_name)
 
@@ -250,7 +264,7 @@ def create_profile(
     assert chat_id is not None
     is_chat_id_specified = chat_id != VALUE_NOT_SET
 
-    with TelegramSession.from_profile(profile_name, manager) as client:
+    with state.get_telegram_session(profile_name) as client:
         access_service = ChatAccessService(client)
         if is_chat_id_specified:
             if not is_direct_identifier(chat_id):
@@ -271,7 +285,7 @@ def create_profile(
                 DisplayGeneric.warn_report_access_permissions()
                 raise typer.Exit(1)
         else:
-            resolved_chat_id = _run_destination_wizard(client)
+            resolved_chat_id = _run_destination_wizard(state, client)
             if resolved_chat_id:
                 manager.set_setting(profile_name, "chat_id", resolved_chat_id)
                 UI.success("Configuración 'chat_id' actualizada.")
@@ -339,21 +353,6 @@ def switch_profile(
     except Exception as e:
         UI.error(f"Ocurrió un error al intentar activar el perfil: {e}")
         raise typer.Exit(code=1)
-
-
-# def get_chat_name(settings: Settings) -> Optional[str]:
-
-#     with DatabaseSession(settings.database_path):
-#         target = settings.chat_id
-#         chat = None
-#         try:
-#             chat = TelegramChat.get_or_none(TelegramChat.id == int(target))
-#         except (ValueError, TypeError):
-#             clean_username = str(target).replace("@", "")
-#             chat = TelegramChat.get_or_none(TelegramChat.username == clean_username)
-
-#         if chat:
-#             return chat.title
 
 
 @app.command("delete")

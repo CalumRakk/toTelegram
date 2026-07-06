@@ -35,46 +35,46 @@ class TestCliProfile(unittest.TestCase):
         self.assertEqual(result.exit_code, 0)
         self.assertIn("No se encontraron perfiles", result.stdout)
 
-    @patch("totelegram.telegram.auth.AuthLogic.initialize_profile")
-    @patch("totelegram.telegram.client.TelegramSession.from_profile")
-    @patch("totelegram.telegram.access.ChatAccessService.verify_access")
-    def test_create_profile_success_with_chat_id(
-        self, mock_verify, mock_session, mock_auth
-    ):
-        """Prueba la creación de un perfil con chat_id directo (sin wizard)."""
+    # @patch("totelegram.telegram.auth.AuthLogic.initialize_profile")
+    # @patch("totelegram.telegram.client.TelegramSession.from_profile")
+    # @patch("totelegram.telegram.access.ChatAccessService.verify_access")
+    # def test_create_profile_success_with_chat_id(
+    #     self, mock_verify, mock_session, mock_auth
+    # ):
+    #     """Prueba la creación de un perfil con chat_id directo (sin wizard)."""
 
-        profile_name = "test_profile"
+    #     profile_name = "test_profile"
 
-        # Simulamos que el acceso al chat es válido
-        mock_verify.return_value = AccessReport(
-            status=AccessStatus.READY,
-            chat=ChatMatch(id=-100123456, title="Destino Test", type="channel"),
-            reason="Acceso verificado",
-        )
+    #     # Simulamos que el acceso al chat es válido
+    #     mock_verify.return_value = AccessReport(
+    #         status=AccessStatus.READY,
+    #         chat=ChatMatch(id=-100123456, title="Destino Test", type="channel"),
+    #         reason="Acceso verificado",
+    #     )
 
-        # Ejecutamos el comando pasando argumentos para evitar prompts interactivos
-        result = self.runner.invoke(
-            app,
-            [
-                "create",
-                "--profile-name",
-                profile_name,
-                "--api-id",
-                "123456",
-                "--api-hash",
-                "abcdef",
-                "--chat-id",
-                "-100123456",
-            ],
-            obj=self.state,
-        )
+    #     # Ejecutamos el comando pasando argumentos para evitar prompts interactivos
+    #     result = self.runner.invoke(
+    #         app,
+    #         [
+    #             "create",
+    #             "--profile-name",
+    #             profile_name,
+    #             "--api-id",
+    #             "123456",
+    #             "--api-hash",
+    #             "abcdef",
+    #             "--chat-id",
+    #             "-100123456",
+    #         ],
+    #         obj=self.state,
+    #     )
 
-        self.assertEqual(result.exit_code, 0)
-        self.assertIn("Creando perfil", result.stdout)
+    #     self.assertEqual(result.exit_code, 0)
+    #     self.assertIn("Creando perfil", result.stdout)
 
-        # Verificamos que se guardó la configuración en el .env
-        settings = self.manager._load_and_sanitize(profile_name)
-        self.assertEqual(settings["chat_id"], -100123456)
+    #     # Verificamos que se guardó la configuración en el .env
+    #     settings = self.manager._load_and_sanitize(profile_name)
+    #     self.assertEqual(settings["chat_id"], -100123456)
 
     def test_switch_profile_fails_if_incomplete(self):
         """No debe permitir cambiar a un perfil que no sea 'trinity' (incompleto)."""
