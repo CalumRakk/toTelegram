@@ -1,5 +1,5 @@
 import tempfile
-from typing import TYPE_CHECKING, Optional, Union
+from typing import TYPE_CHECKING, List, Optional, Union, cast
 
 import typer
 

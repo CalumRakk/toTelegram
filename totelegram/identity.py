@@ -2,18 +2,52 @@ import hashlib
 import json
 import logging
 from pathlib import Path
-from typing import Annotated, Any, ClassVar, Dict, List, Literal, Optional, Tuple, cast
+from typing import (
+    Annotated,
+    Any,
+    ClassVar,
+    Dict,
+    List,
+    Literal,
+    Optional,
+    Tuple,
+    Union,
+    cast,
+)
 
 from dotenv import dotenv_values
 from filelock import FileLock
-from pydantic import BaseModel, Field, TypeAdapter, ValidationError, field_validator
+from pydantic import (
+    BaseModel,
+    BeforeValidator,
+    Field,
+    TypeAdapter,
+    ValidationError,
+    field_validator,
+)
 from pydantic.fields import FieldInfo
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from totelegram.schemas import VALUE_NOT_SET, AccessLevel, InfoField
-from totelegram.utils import ChatID, CommaSeparatedList, IntList, get_type_annotation
+from totelegram.utils import get_type_annotation, normalize_chat_id, parse_comma_list
 
 logger = logging.getLogger(__name__)
+
+# Anotaciones de tipos de Pydantic
+IntList = Annotated[
+    List[int],
+    BeforeValidator(parse_comma_list),
+]
+
+CommaSeparatedList = Annotated[
+    List[str],
+    BeforeValidator(parse_comma_list),
+]
+
+ChatID = Annotated[
+    Union[int, str],
+    BeforeValidator(normalize_chat_id),
+]
 
 
 class Settings(BaseSettings):

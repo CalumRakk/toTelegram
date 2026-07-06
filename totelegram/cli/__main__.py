@@ -12,7 +12,8 @@ from totelegram.cli.state import CLIState
 from totelegram.cli.ui import console
 from totelegram.identity import SettingsManager
 from totelegram.logging_config import setup_logging
-from totelegram.utils import APP_NAME, get_user_config_dir
+from totelegram.schemas import APP_NAME
+from totelegram.utils import get_user_config_dir
 
 logging.getLogger("dotenv").setLevel(logging.CRITICAL)
 

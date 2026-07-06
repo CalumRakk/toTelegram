@@ -70,7 +70,7 @@ class TestCliProfile(unittest.TestCase):
         )
 
         self.assertEqual(result.exit_code, 0)
-        self.assertIn(f"Creando perfil", result.stdout)
+        self.assertIn("Creando perfil", result.stdout)
 
         # Verificamos que se guardó la configuración en el .env
         settings = self.manager._load_and_sanitize(profile_name)
@@ -128,7 +128,7 @@ class TestCliProfile(unittest.TestCase):
         self.assertEqual(result.exit_code, 0)
         self.assertFalse(env_path.exists())
         self.assertFalse(session_path.exists())
-        self.assertIn(f"eliminado correctamente", result.stdout)
+        self.assertIn("eliminado correctamente", result.stdout)
 
 
 if __name__ == "__main__":
