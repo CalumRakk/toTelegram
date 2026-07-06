@@ -269,6 +269,18 @@ class SettingsManager:
         self.inventories_dir = self.worktable / "inventories"
         self.database_path = self.worktable / f"{self.worktable.name}.sqlite"
 
+    @property
+    def node_id(self) -> str:
+        """Retorna el identificador único persistente para este nodo de ejecución."""
+        node_id_file = self.worktable / "node_id"
+        if not node_id_file.exists():
+            import uuid
+
+            node_id = str(uuid.uuid4())
+            node_id_file.write_text(node_id)
+            return node_id
+        return node_id_file.read_text().strip()
+
     def get_lock_for_path(self, path: Path):
         """Obtiene un FileLock específico para un archivo dado, basado en su ruta.
 

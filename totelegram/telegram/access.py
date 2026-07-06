@@ -4,7 +4,7 @@ import logging
 from typing import TYPE_CHECKING, Optional, Union, cast
 
 from totelegram.telegram.types import AccessReport, AccessStatus, ChatMatch
-from totelegram.utils import normalize_chat_id
+from totelegram.telegram.utils import normalize_chat_id
 
 if TYPE_CHECKING:
     from pyrogram.client import Client

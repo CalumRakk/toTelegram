@@ -10,14 +10,14 @@ from tartape.exceptions import PathConstraintReportError, TarIntegrityError
 
 from totelegram.cli.state import CLIState
 from totelegram.cli.ui import UI, console
-from totelegram.concurrency import LeaseManager
+from totelegram.concurrency import LeaseManager, PeeweeLeaseStore
 from totelegram.database import db_transaction
 from totelegram.discovery import DiscoveryService
 from totelegram.identity import Settings
 from totelegram.models import Job, Source, TelegramChat, TelegramUser
 from totelegram.schemas import ScanReport
 from totelegram.types import UploadContext
-from totelegram.utils import delete_snapshot, get_node_id, has_snapshot, is_excluded
+from totelegram.utils import delete_snapshot, has_snapshot, is_excluded
 
 if TYPE_CHECKING:
     from pyrogram.client import Client
@@ -142,17 +142,11 @@ def prepare_upload_context(
             owner = TelegramUser.get_or_create_from_tg(me)
 
             if settings.telegram_account_id is None:
-                # Obtenemos el nombre real del perfil en uso
                 profile_name = cast(
                     str, state.manager.resolve_profile_name(state.profile_name)
                 )
-
-                # Lo guardamos físicamente en el archivo .env
                 state.manager.set_setting(profile_name, "telegram_account_id", owner.id)
-
-                # Lo actualizamos en memoria para el flujo actual
                 settings.telegram_account_id = owner.id
-
                 logger.info(
                     f"Auto-healed: telegram_account_id ({owner.id}) agregado al perfil '{profile_name}'."
                 )
@@ -163,9 +157,8 @@ def prepare_upload_context(
 
     discovery = DiscoveryService(client, db)
 
-    node_id = get_node_id(state.manager.worktable)
-    lease_manager = LeaseManager(db, node_id)
-
+    lease_store = PeeweeLeaseStore(db)
+    lease_manager = LeaseManager(lease_store, state.manager.node_id)
     return UploadContext(
         client=client,
         db=db,
