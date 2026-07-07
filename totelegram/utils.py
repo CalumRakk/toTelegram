@@ -1,25 +1,8 @@
-import json
 import keyword
 import logging
 import uuid
 from pathlib import Path
-from typing import Any, List
-
-from totelegram.common.files import (
-    create_md5sum_by_hashlib,
-    get_mimetype,
-    get_user_config_dir,
-    normalize_windows_name,
-)
-from totelegram.common.helpers import batched
-from totelegram.common.streams import ThrottledFile
-from totelegram.telegram.utils import (
-    SELF_CHAT_ALIASES,
-    VALUE_NOT_SET,
-    is_direct_identifier,
-    is_potential_username,
-    normalize_chat_id,
-)
+from typing import List
 
 logger = logging.getLogger(__name__)
 
@@ -32,32 +15,6 @@ def get_node_id(worktable: Path) -> str:
         node_id_file.write_text(node_id)
         return node_id
     return node_id_file.read_text().strip()
-
-
-def get_type_annotation(field: Any) -> str:
-    from typing import get_origin
-
-    type_annotation = field.annotation
-    if get_origin(type_annotation) is None:
-        type_name = type_annotation.__name__
-    else:
-        type_name = str(type_annotation).replace("typing.", "")
-    return type_name
-
-
-def parse_comma_list(value: Any) -> List[str]:
-    """Convierte un string separado por comas o representación JSON en una lista."""
-    if isinstance(value, list):
-        return value
-
-    value = value.strip()
-    if value.startswith("[") and value.endswith("]"):
-        try:
-            return json.loads(value)
-        except json.JSONDecodeError:
-            raise ValueError("Formato JSON invalido para la lista.")
-
-    return [item.strip() for item in value.split(",") if item.strip()]
 
 
 def is_excluded(path: Path, patterns: List[str]) -> bool:
@@ -100,7 +57,7 @@ def delete_snapshot(file_path: Path):
             logger.debug(f"Snapshot eliminado físicamente: {target.name}")
 
 
-def is_valid_profile_name(profile_name: str):
+def is_valid_profile_name(profile_name: str) -> bool:
     return profile_name.isidentifier() and not keyword.iskeyword(profile_name)
 
 

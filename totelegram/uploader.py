@@ -19,6 +19,7 @@ from rich.progress import (
 )
 
 from totelegram.cli.ui import UI, console
+from totelegram.common.streams import ThrottledFile
 from totelegram.concurrency import LeaseKeeper
 from totelegram.database import db_transaction
 from totelegram.models import Job, Payload, RemotePayload
@@ -31,7 +32,6 @@ from totelegram.schemas import (
 )
 from totelegram.stream import FileVolume
 from totelegram.types import AvailabilityReport, UploadContext
-from totelegram.utils import ThrottledFile
 
 if TYPE_CHECKING:
     from pyrogram.types import Message

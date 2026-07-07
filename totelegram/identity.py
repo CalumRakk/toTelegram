@@ -28,8 +28,9 @@ from pydantic import (
 from pydantic.fields import FieldInfo
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from totelegram.common.helpers import get_type_annotation, parse_comma_list
 from totelegram.schemas import VALUE_NOT_SET, AccessLevel, InfoField
-from totelegram.utils import get_type_annotation, normalize_chat_id, parse_comma_list
+from totelegram.telegram.utils import normalize_chat_id
 
 logger = logging.getLogger(__name__)
 

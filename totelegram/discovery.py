@@ -5,11 +5,11 @@ from typing import TYPE_CHECKING, List, Union, cast
 
 import peewee
 
+from totelegram.common.helpers import batched
 from totelegram.database import db_transaction
 from totelegram.models import Job, Payload, RemotePayload
 from totelegram.schemas import AvailabilityState, JobStatus
 from totelegram.types import AvailabilityReport
-from totelegram.utils import batched
 
 if TYPE_CHECKING:
     from pyrogram.client import Client
@@ -59,7 +59,7 @@ class DiscoveryService:
             remotes = list(
                 RemotePayload.select(RemotePayload, Payload)
                 .join(Payload)
-                .where((Payload.job == hist_job) & (RemotePayload.is_orphaned == False)) # noqa: E712
+                .where((Payload.job == hist_job) & (RemotePayload.is_orphaned == False))  # noqa: E712
                 .order_by(Payload.sequence_index)
             )
 
@@ -77,7 +77,7 @@ class DiscoveryService:
         local_remotes = list(
             RemotePayload.select()
             .join(Payload)
-            .where((Payload.job == job) & (RemotePayload.is_orphaned == False)) # noqa: E712
+            .where((Payload.job == job) & (RemotePayload.is_orphaned == False))  # noqa: E712
             .order_by(Payload.sequence_index)
         )
 
@@ -110,7 +110,10 @@ class DiscoveryService:
 
         with db_transaction(self.db):
             for batch_ids in batched(msg_ids, 200):
-                messages = cast(Union[Message, List[Message]], self.client.get_messages(chat_id, batch_ids))
+                messages = cast(
+                    Union[Message, List[Message]],
+                    self.client.get_messages(chat_id, batch_ids),
+                )
                 if isinstance(messages, Message):
                     messages = [messages]
 
@@ -122,11 +125,7 @@ class DiscoveryService:
                         continue
 
                     # Si un solo mensaje del set falló, el espejo no es íntegro
-                    if (
-                        msg is None
-                        or getattr(msg, "empty", True)
-                        or not msg.document
-                    ):
+                    if msg is None or getattr(msg, "empty", True) or not msg.document:
                         remote.mark_orphaned()
                         is_integral = False
                         logger.warning(
@@ -143,7 +142,6 @@ class DiscoveryService:
 
                 time.sleep(0.5)
             return is_integral
-
 
     def _get_expected_count(self, job: Job) -> int:
         # BUG: comprobar si matematicamente esta comprobacion funciona para las cintas.

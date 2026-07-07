@@ -11,11 +11,13 @@ from totelegram.identity import ConfigService
 from totelegram.schemas import VALUE_NOT_SET, Commands
 from totelegram.telegram.access import ChatAccessService
 from totelegram.telegram.search import ChatSearchService
-from totelegram.utils import (
+from totelegram.telegram.utils import (
     is_direct_identifier,
     is_potential_username,
-    is_suspected_glob_expansion,
     normalize_chat_id,
+)
+from totelegram.utils import (
+    is_suspected_glob_expansion,
     validate_item,
 )
 

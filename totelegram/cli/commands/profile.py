@@ -15,12 +15,12 @@ if TYPE_CHECKING:
 from totelegram.cli.ui import UI, DisplayGeneric, DisplayProfile, console
 from totelegram.telegram.access import ChatAccessService
 from totelegram.telegram.auth import AuthLogic
-from totelegram.utils import (
+from totelegram.telegram.utils import (
     VALUE_NOT_SET,
     is_direct_identifier,
-    is_valid_profile_name,
     normalize_chat_id,
 )
+from totelegram.utils import is_valid_profile_name
 
 app = typer.Typer(help="Gestión de perfiles de configuración.")
 
