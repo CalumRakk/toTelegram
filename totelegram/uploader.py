@@ -22,7 +22,6 @@ from totelegram.cli.ui import UI, console
 from totelegram.concurrency import LeaseKeeper
 from totelegram.database import db_transaction
 from totelegram.models import Job, Payload, RemotePayload
-from totelegram.packaging import prepare_chunks
 from totelegram.packaging.snapshot import SnapshotService
 from totelegram.schemas import (
     AvailabilityState,
@@ -202,7 +201,7 @@ class UploadService:
             f"Iniciando subida física de {path.name}. Estrategia: {job.strategy}"
         )
         with db_transaction(self.db):
-            prepare_chunks(job, path, self.settings)
+            job.prepare_chunks(path, self.settings)
 
         md5sum = job.source.md5sum
         while True:
@@ -263,8 +262,8 @@ class UploadService:
         with db_transaction(self.db):
             job_adopted = job.adopt_job(report.remotes[0].payload.job)
             md5sum = job_adopted.source.md5sum
-            payloads = prepare_chunks(
-                job_adopted, job_adopted.source.path, self.settings
+            payloads = job_adopted.prepare_chunks(
+                job_adopted.source.path, self.settings
             )
 
         for payload_adopted in payloads:

@@ -11,6 +11,9 @@ from playhouse.sqlite_ext import JSONField
 from tartape.schemas import EntryState, ManifestEntry
 
 from totelegram import __VERSION__
+from totelegram.database import db_transaction
+from totelegram.packaging.partitioner import StatelessPartitioner
+from totelegram.packaging.schemas import VirtualChunk, VirtualTapeMember
 from totelegram.schemas import JobStatus, ResourceType, SourceType, Strategy
 from totelegram.telegram.client import parse_message_json_data
 
@@ -126,7 +129,7 @@ class Source(BaseModel):
     # mtime : Unix timestamp. Es util para la identificar archivo
     mtime = cast(float, peewee.FloatField())
     mimetype = cast(str, peewee.CharField())
-    type = cast(SourceType, EnumField(SourceType, default=SourceType.FILE))
+    type = cast(SourceType, EnumField(SourceType, default=SourceType.FILE))  # type: ignore
 
     tape_catalog = cast(
         Optional[TapeCatalog], PydanticJSONField(TapeCatalog, null=True)
@@ -218,7 +221,7 @@ class Source(BaseModel):
             fingerprint=tape.fingerprint,
             total_size=tape.total_size,
             total_files=tape.count_files,
-            tartape_version=tartape.__VERSION__,
+            tartape_version=tartape.__version__,
             created_at=tape.created_at,
             exclude_patterns=exclude_patterns,
         )
@@ -252,9 +255,9 @@ class Job(BaseModel):
     source = cast(Source, peewee.ForeignKeyField(Source, backref="jobs"))
     chat = peewee.ForeignKeyField(TelegramChat, backref="jobs")
 
-    strategy = cast(Strategy, EnumField(Strategy))
+    strategy = cast(Strategy, EnumField(Strategy))  # type: ignore
     config = cast(StrategyConfig, PydanticJSONField(StrategyConfig))
-    status = cast(JobStatus, EnumField(JobStatus))
+    status = cast(JobStatus, EnumField(JobStatus))  # type: ignore
 
     deleted_at = cast(float, peewee.FloatField(default=0))
 
@@ -317,6 +320,133 @@ class Job(BaseModel):
         self.save(only=[Job.deleted_at, Job.status, Job.updated_at])
 
         logger.debug(f"Job {self.id} invalidado y remotos orfanados.")
+
+    def prepare_chunks(self, path: Path, settings) -> List["Payload"]:
+        """
+        Orquesta el particionado físico delegando en StatelessPartitioner
+        y persiste los resultados en la base de datos de manera atómica.
+        """
+        if self.payloads.count() > 0:
+            return cast(
+                List["Payload"], list(self.payloads.order_by(Payload.sequence_index))
+            )
+
+        if self.source.type == SourceType.FOLDER:
+            # Ejecutar motor físico
+            catalog, chunks, members = StatelessPartitioner.partition_folder(
+                path, self.config.tg_max_size, settings.exclude_files
+            )
+            # Guardar en base de datos local
+            return self._persist_folder_chunks(chunks, members)
+        else:
+            # Ejecutar motor físico
+            chunks = StatelessPartitioner.partition_file(
+                path, self.config.tg_max_size, self.source.md5sum
+            )
+            # Guardar en base de datos local
+            return self._persist_chunks(chunks)
+
+    def _persist_chunks(self, virtual_chunks: List[VirtualChunk]) -> List["Payload"]:
+        """Guarda la estructura de payloads del archivo en la base de datos."""
+
+        payloads_data = [
+            {
+                "job": self,
+                "sequence_index": vc.sequence_index,
+                "start_offset": vc.start_offset,
+                "end_offset": vc.end_offset,
+                "size": vc.size,
+                "filename": vc.filename,
+                "filename_short": vc.filename_short,
+                "md5sum": vc.md5sum,
+            }
+            for vc in virtual_chunks
+        ]
+
+        with db_transaction(self._meta.database):
+            Payload.insert_many(payloads_data).execute()
+
+        return cast(List[Payload], list(self.payloads.order_by(Payload.sequence_index)))
+
+    def _persist_folder_chunks(
+        self,
+        virtual_chunks: List[VirtualChunk],
+        virtual_members: List[VirtualTapeMember],
+    ) -> List["Payload"]:
+        """Guarda la estructura de volúmenes y el índice interno de la carpeta (TapeMembers)."""
+
+        database = self._meta.database
+
+        with db_transaction(database):
+            payloads_data = [
+                {
+                    "job": self,
+                    "sequence_index": vc.sequence_index,
+                    "start_offset": vc.start_offset,
+                    "end_offset": vc.end_offset,
+                    "size": vc.size,
+                    "filename": vc.filename,
+                    "filename_short": vc.filename_short,
+                }
+                for vc in virtual_chunks
+            ]
+            Payload.insert_many(payloads_data).execute()
+
+            # Recuperar mapeo id <-> index de los payloads recién guardados
+            payload_map = {
+                p.sequence_index: p
+                for p in cast(
+                    list[Payload], self.payloads.order_by(Payload.sequence_index)
+                )
+            }
+
+            member_inserts = [
+                {
+                    "source": self.source,
+                    "relative_path": vm.relative_path,
+                    "size": vm.size,
+                    "md5sum": vm.md5sum,
+                }
+                for vm in virtual_members
+            ]
+
+            for batch in batched(member_inserts, 100):
+                TapeMember.insert_many(batch).on_conflict_ignore().execute()
+
+            # Obtener mapeo de ruta -> id para asociar los fragmentos (GPS)
+            paths = [vm.relative_path for vm in virtual_members]
+            db_members = TapeMember.select(
+                TapeMember.id, TapeMember.relative_path
+            ).where(
+                (TapeMember.source == self.source) & (TapeMember.relative_path << paths)  # type: ignore
+            )
+            member_path_to_id = {m.relative_path: m.id for m in db_members}
+
+            gps_inserts = []
+            for vm in virtual_members:
+                member_id = member_path_to_id.get(vm.relative_path)
+                if not member_id:
+                    continue
+
+                for frag in vm.fragments:
+                    payload_obj = payload_map.get(frag.vol_idx)
+                    if not payload_obj:
+                        continue
+
+                    gps_inserts.append(
+                        {
+                            "member": member_id,
+                            "payload": payload_obj,
+                            "state": frag.state,
+                            "offset_in_volume": frag.offset_in_vol,
+                            "bytes_in_volume": frag.bytes_in_volume,
+                        }
+                    )
+
+            for batch in batched(gps_inserts, 200):
+                TapeMemberGPS.insert_many(batch).execute()
+
+        return cast(List[Payload], list(self.payloads.order_by(Payload.sequence_index)))
 
 
 Job.add_index(Job.source, Job.chat, Job.deleted_at, unique=True)
@@ -464,7 +594,7 @@ class TapeMember(BaseModel):
         """
         BATCH_SIZE = 100
 
-        for batch in batched(entries, BATCH_SIZE):
+        for batch in batched(entries, BATCH_SIZE):  # type: ignore
             batch: List[ManifestEntry]
             member_data = [
                 {
@@ -479,7 +609,7 @@ class TapeMember(BaseModel):
             cls.insert_many(member_data).on_conflict_ignore().execute()
 
         path_to_id = {}
-        for batch in batched(entries, BATCH_SIZE):
+        for batch in batched(entries, BATCH_SIZE):  # type: ignore
             paths = [e.info.arc_path for e in batch]
 
             # `<<` (operador IN de Peewee)
@@ -491,7 +621,7 @@ class TapeMember(BaseModel):
                 path_to_id[member.relative_path] = member.id
 
         # Registra el GPS de cada archivo en el volumen
-        for batch in batched(entries, BATCH_SIZE):
+        for batch in batched(entries, BATCH_SIZE):  # type: ignore
             gps_data = [
                 {
                     "member": path_to_id[e.info.arc_path],
@@ -510,7 +640,7 @@ class TapeMemberGPS(BaseModel):
     member = cast(TapeMember, peewee.ForeignKeyField(TapeMember, backref="fragments"))
     payload = cast("Payload", peewee.ForeignKeyField(Payload, backref="fragments"))
 
-    state = cast(EntryState, EnumField(EntryState))
+    state = cast(EntryState, EnumField(EntryState))  # type: ignore
     offset_in_volume = cast(int, peewee.BigIntegerField())
     bytes_in_volume = cast(int, peewee.BigIntegerField())
 
@@ -518,7 +648,7 @@ class TapeMemberGPS(BaseModel):
 class Claim(BaseModel):
     # 'account:123456789' o 'job:543'
     resource_id = peewee.CharField(primary_key=True)
-    resource_type = EnumField(ResourceType)
+    resource_type = EnumField(ResourceType)  # type: ignore
     node_id = cast(str, peewee.CharField())
     expires_at = cast(datetime, peewee.DateTimeField())
 
