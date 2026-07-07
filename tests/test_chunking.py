@@ -1,6 +1,6 @@
 import unittest
 
-from totelegram.packaging import chunk_ranges
+from totelegram.packaging.partitioner import chunk_ranges
 
 
 class TestChunkingMath(unittest.TestCase):
