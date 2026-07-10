@@ -53,3 +53,5 @@ docs/
 README.md
 .venv
 totelegram/telegram/patches.py
+totelegram/migration.py
+totelegram/telegram

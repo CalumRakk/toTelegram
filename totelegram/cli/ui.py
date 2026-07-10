@@ -419,6 +419,7 @@ class DisplayConfig:
 
     @classmethod
     def _mark_sensitive(cls, value: int | str) -> str:
+        """Ofusca un valor de tipo int o str."""
         if not isinstance(value, (str, int)):
             raise ValueError(
                 "mark_sensitive solo admite valores de tipo str o int para enmascarar."
@@ -462,7 +463,7 @@ class DisplayConfig:
                 value = get_friendly_chat_name(value, str(maneger.database_path))
 
             # Oculta value sencille
-            if info.is_sensitive:
+            if info.is_sensitive and value is not None:
                 display_val = cls._mark_sensitive(value)
             else:
                 display_val = str(value)

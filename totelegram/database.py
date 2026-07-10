@@ -4,7 +4,7 @@ import logging
 import threading
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Literal, Union
+from typing import Literal, Optional, Union
 
 import peewee
 from peewee import Field
@@ -12,6 +12,44 @@ from peewee import Field
 from totelegram.migration import run_migrations
 
 logger = logging.getLogger(__name__)
+
+
+def normalize_database_url(
+    url_or_path: Optional[str], default_sqlite_path: Path
+) -> str:
+    """
+    Normaliza la configuración de entrada convirtiéndola en una URL de base de datos válida.
+    Si recibe una ruta local, la transforma a una URL de conexión de SQLite.
+    """
+    if not url_or_path:
+        # Si no se define nada, usamos la ruta por defecto en formato URL
+        abs_default = default_sqlite_path.resolve()
+        return f"sqlite:///{abs_default.as_posix()}"
+
+    url_or_path = url_or_path.strip()
+
+    # Si ya tiene formato de esquema de conexión conocido, lo dejamos pasar sin cambios
+    if (
+        url_or_path.startswith("sqlite://")
+        or url_or_path.startswith("postgresql://")
+        or url_or_path.startswith("postgres://")
+    ):
+        return url_or_path
+
+    if url_or_path == ":memory:":
+        return "sqlite:///:memory:"
+
+    # Se asume que es una ruta de archivo local para SQLite
+    path = Path(url_or_path)
+    if not path.is_absolute():
+        # Si es relativa, la resolvemos respecto al directorio de trabajo por defecto
+        path = (default_sqlite_path.parent / path).resolve()
+    else:
+        path = path.resolve()
+
+    return f"sqlite:///{path.as_posix()}"
+
+
 db_proxy = peewee.Proxy()
 
 # Semáforo global para sincronizar hilos cuando se usa SQLite

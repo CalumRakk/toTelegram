@@ -25,6 +25,7 @@ setup(
         "typer>=0.21.1",
         "filelock>=3.20.3",
         "tartape>=2.2.0",
+        "psycopg[binary]>=3.3.4",
     ],
     packages=find_packages(),
     entry_points={

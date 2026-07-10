@@ -119,6 +119,11 @@ class Settings(BaseSettings):
         description="Trunca automáticamente los nombres largos al empaquetar carpetas en TAR.",
         json_schema_extra={"is_sensitive": False, "access": AccessLevel.EDITABLE},
     )
+    database_url: Optional[str] = Field(
+        default=None,
+        description="URL de conexión a la base de datos (ej: postgresql://user:pass@host/db). Si se omite, se usará SQLite local.",
+        json_schema_extra={"is_sensitive": True, "access": AccessLevel.EDITABLE},
+    )
 
     # exclude_files_default: CommaSeparatedList = ["*.json", "*.json.xz"]
 
