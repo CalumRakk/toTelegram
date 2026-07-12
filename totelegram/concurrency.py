@@ -1,7 +1,7 @@
 import logging
 import threading
 from abc import ABC, abstractmethod
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import cast
 
 import peewee
@@ -51,15 +51,13 @@ class LeaseManager:
         self.node_id = node_id
 
     def try_acquire_account_lease(self, account_id: int, ttl_minutes: int = 5) -> bool:
-        """Intenta adquirir el arrendamiento exclusivo para una cuenta de Telegram."""
-        expires = datetime.now() + timedelta(minutes=ttl_minutes)
+        expires = datetime.now(timezone.utc) + timedelta(minutes=ttl_minutes)
         return self.store.acquire(
             f"account:{account_id}", ResourceType.ACCOUNT, self.node_id, expires
         )
 
     def try_acquire_job_lease(self, job_id: int, ttl_minutes: int = 5) -> bool:
-        """Intenta adquirir el arrendamiento exclusivo para un Job específico."""
-        expires = datetime.now() + timedelta(minutes=ttl_minutes)
+        expires = datetime.now(timezone.utc) + timedelta(minutes=ttl_minutes)
         return self.store.acquire(
             f"job:{job_id}", ResourceType.JOB, self.node_id, expires
         )
@@ -73,8 +71,7 @@ class LeaseManager:
         self.store.release(f"job:{job_id}")
 
     def renew(self, resource_id: str, ttl_minutes: int = 5) -> bool:
-        """Renueva el tiempo de expiración de un lease si aún nos pertenece."""
-        expires = datetime.now() + timedelta(minutes=ttl_minutes)
+        expires = datetime.now(timezone.utc) + timedelta(minutes=ttl_minutes)
         return self.store.renew(resource_id, self.node_id, expires)
 
 
@@ -111,7 +108,7 @@ class PeeweeLeaseStore(LeaseStore):
                     claim.save(only=[Claim.expires_at, Claim.updated_at])
                     return True
 
-                if datetime.now() > claim.expires_at:
+                if datetime.now(timezone.utc) > claim.expires_at:
                     claim.node_id = node_id
                     claim.expires_at = expires_at
                     claim.save(only=[Claim.node_id, Claim.expires_at, Claim.updated_at])

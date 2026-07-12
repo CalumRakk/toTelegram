@@ -2,7 +2,7 @@ import unittest
 
 import peewee
 
-from totelegram.database import DatabaseSession  # type: ignore
+from totelegram.database import DatabaseSession, normalize_database_url  # type: ignore
 from totelegram.models import (
     Job,
     Source,
@@ -13,7 +13,8 @@ from totelegram.schemas import Strategy
 
 class TestModelsArchitecture(unittest.TestCase):
     def setUp(self):
-        self.db_manager = DatabaseSession(":memory:")
+        url = "sqlite:///:memory:"
+        self.db_manager = DatabaseSession(url)
         self.db_manager.start()
         self.chat = TelegramChat.create(
             id=-100123456, title="Test Chat", type="channel"

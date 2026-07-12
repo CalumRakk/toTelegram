@@ -1,57 +1,38 @@
 
-.env
-__pycache__
-.venv
-/.vscode
-/documentos
-/setting
-/toTelegram_old
-/exiftool_.py
-/main.py
-/me.session
-*.txt
-/mkdocs.yml
-!toTelgram/
-/.toTelegram_old
-/.ELIMINAR
-!/split
-!/requirements.txt
-site/
-!config.yaml
-*.json.xz
-!video.mp4
-/dist
-/toTelegram.egg-info
+# CARPETAS
+
+tests/manual
+tests/manual_real.py
+.env/
+env/
+.venv/
+__pycache__/
+.vscode/
 build/
+.project_context/
+
+# PATRONES
+
 *.db
-env
 *.log
-!tests\test_real.py
-!tests\medias
 *.egg-info
-validate.py
-validate2.py
+
+# ARCHIVOS
+
+delete_source.py
 script.py
 NOTES.md
-plan-comando.md
 .contextignore
-requirements.txt
-setup.py
-test_report.py
-
-upload_state.json
-manual/
-build/
 prompt.md
-delete_source.py
 
-.project_context
-tests/
-.github/
-.pre-commit-config.yaml
-docs/
-README.md
-.venv
-totelegram/telegram/patches.py
-totelegram/migration.py
-totelegram/telegram
+# EXCLUSIONES TEMPORALES DE PROJECT_CONTEXT
+
+# totelegram/telegram/patches.py
+# totelegram/telegram
+# setup.py
+# tests/
+# github/
+# .pre-commit-config.yaml
+# README.md
+# docs/
+# .github/

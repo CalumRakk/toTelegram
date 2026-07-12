@@ -1,12 +1,8 @@
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import (
-    TYPE_CHECKING,
-    Optional,
-    cast,
-)
+from typing import TYPE_CHECKING, Optional, cast
 
-from totelegram.database import DatabaseSession
+from totelegram.database import DatabaseSession, normalize_database_url
 from totelegram.telegram.client import TelegramSession
 
 if TYPE_CHECKING:
@@ -20,7 +16,6 @@ class CLIState:
     is_debug: bool = False
 
     def get_telegram_session(self, profile_name: str) -> TelegramSession:
-        """Instancia la sesión de Telegram usando tipos primitivos desde la configuración."""
         settings = self.manager.get_settings(profile_name)
         return TelegramSession(
             session_name=profile_name,
@@ -31,9 +26,15 @@ class CLIState:
 
     @contextmanager
     def scope(self):
-        """Unifica el ciclo de vida de la DB y la Sesión."""
+        """Unifica el ciclo de vida de la DB y la Sesión resolviendo la URL del perfil."""
         profile_name = cast(str, self.manager.resolve_profile_name(self.profile_name))
+        settings = self.manager.get_settings(profile_name)
 
-        with DatabaseSession(self.manager.database_path) as db:
+        # Resolver la URL del backend activo
+        db_url = normalize_database_url(
+            settings.database_url, self.manager.database_path
+        )
+
+        with DatabaseSession(db_url) as db:
             with self.get_telegram_session(profile_name) as client:
                 yield client, db

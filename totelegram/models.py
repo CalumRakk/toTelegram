@@ -1,13 +1,12 @@
 import json
 import logging
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Generator, List, Optional, Tuple, cast
 
 import peewee
 import tartape
-from playhouse.sqlite_ext import JSONField
 from tartape.schemas import EntryState, ManifestEntry
 
 from totelegram import __VERSION__
@@ -30,12 +29,38 @@ from totelegram.schemas import StrategyConfig, TapeCatalog
 logger = logging.getLogger(__name__)
 
 
+class PortableJSONField(peewee.TextField):
+    """
+    Campo JSON que persiste como texto estándar en cualquier base de datos.
+    Esto permite compatibilidad nativa entre SQLite y Postgres sin usar extensiones de drivers.
+    """
+
+    def db_value(self, value):
+        if value is None:
+            return None
+        if isinstance(value, (dict, list)):
+            return json.dumps(value)
+        return str(value)
+
+    def python_value(self, value):
+        if value is None:
+            return None
+        try:
+            return json.loads(value)
+        except (ValueError, TypeError):
+            return value
+
+
 class BaseModel(peewee.Model):
-    created_at = cast(datetime, peewee.DateTimeField(default=datetime.now))
-    updated_at = cast(datetime, peewee.DateTimeField(default=datetime.now))
+    created_at = cast(
+        datetime, peewee.DateTimeField(default=lambda: datetime.now(timezone.utc))
+    )
+    updated_at = cast(
+        datetime, peewee.DateTimeField(default=lambda: datetime.now(timezone.utc))
+    )
 
     def save(self, *args, **kwargs):
-        self.updated_at = datetime.now()
+        self.updated_at = datetime.now(timezone.utc)
         return super().save(*args, **kwargs)
 
     class Meta:
@@ -494,8 +519,6 @@ class Payload(BaseModel):
 
 
 class RemotePayload(BaseModel):
-    """Representa el Acceso Efectivo: El vínculo entre el Payload y el mensaje en Telegram."""
-
     id: int
     payload_id: int
     chat_id: int
@@ -506,23 +529,21 @@ class RemotePayload(BaseModel):
     owner = cast(
         TelegramUser, peewee.ForeignKeyField(TelegramUser, backref="remote_contents")
     )
-    # Backup completo del objeto Message de Pyrogram
-    json_metadata = cast(dict, JSONField())
+    json_metadata = cast(dict, PortableJSONField())
+
     last_verified_at = cast(Optional[datetime], peewee.DateTimeField(null=True))
     is_orphaned = cast(bool, peewee.BooleanField(default=False))
 
     def mark_orphaned(self):
-        """Marca el registro como huérfano (no disponible en Telegram)."""
         self.is_orphaned = True
         self.save(only=[RemotePayload.is_orphaned, RemotePayload.updated_at])
 
     def mark_verified(self, message: "Message"):
-        """Actualiza el timestamp y asegura que no sea huérfano."""
         if message is None or getattr(message, "empty", True):
             return self.mark_orphaned()
 
-        self.last_verified_at = datetime.now()
-        self.is_orphaned = False  # Por si acaso se recuperó o se marcó erróneamente
+        self.last_verified_at = datetime.now(timezone.utc)
+        self.is_orphaned = False
         self.json_metadata = json.loads(str(message))
         self.save(
             only=[

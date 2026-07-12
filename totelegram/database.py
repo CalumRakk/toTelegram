@@ -4,10 +4,12 @@ import logging
 import threading
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Literal, Optional, Union
+from typing import Optional
 
 import peewee
 from peewee import Field
+from playhouse.db_url import connect as db_connect
+from playhouse.db_url import parse as db_parse
 
 from totelegram.migration import run_migrations
 
@@ -59,9 +61,9 @@ _sqlite_write_lock = threading.RLock()
 @contextmanager
 def db_transaction(db: peewee.Database):
     """
-    Gestor de transacciones seguro para hilos.
-    Aplica un semáforo (RLock) si el motor subyacente es SQLite para evitar 'database is locked'.
-    Delega de forma nativa si es otro motor (Postgres/MySQL).
+    Gestor de transacciones seguro para múltiples motores.
+    - SQLite: Aplica semáforo en memoria e inicia con 'IMMEDIATE' para evitar bloqueos concurrentes.
+    - PostgreSQL/Otros: Delegación nativa y limpia mediante 'BEGIN' estándar (sin parámetros).
     """
     is_sqlite = isinstance(db, peewee.SqliteDatabase)
 
@@ -69,9 +71,9 @@ def db_transaction(db: peewee.Database):
         _sqlite_write_lock.acquire()
 
     try:
-        # IMMEDIATE fuerza a SQLite a tomar el lock de escritura inmediatamente,
-        # evitando deadlocks cuando dos hilos solo-lectura intentan volverse de escritura.
-        transaction_type = "IMMEDIATE" if is_sqlite else "DEFERRED"
+        # SQLite requiere IMMEDIATE para concurrencia en disco.
+        # Postgres requiere None para que Peewee ejecute un "BEGIN" limpio y estándar.
+        transaction_type = "IMMEDIATE" if is_sqlite else None
 
         with db.atomic(transaction_type):
             yield
@@ -81,44 +83,51 @@ def db_transaction(db: peewee.Database):
 
 
 class DatabaseSession:
-    """Administrador de contexto para la base de datos. Encapsula la inicializacion, creacion de tablas y su cierre."""
+    """
+    Administrador de contexto para la base de datos basado en URLs.
+    Detecta automáticamente SQLite o PostgreSQL y aplica configuraciones específicas.
+    """
 
-    def __init__(self, db_path: Union[Union[str, Path], Literal[":memory:"]]):
-        self.db_path = Path(db_path) if db_path != ":memory:" else db_path
+    def __init__(self, db_url: str):
+        self.db_url = db_url
         self.db = None
 
-    def __enter__(self) -> peewee.SqliteDatabase:
+    def __enter__(self) -> peewee.Database:
         if db_proxy.obj is not None:
-            current_db_path = getattr(db_proxy.obj, "database", None)
+            current_db_url = getattr(db_proxy.obj, "database", None)
 
-            # Si pedimmos la misma DB y sigue viva, la reutilizamos.
-            if current_db_path == str(self.db_path) and not db_proxy.is_closed():
+            # Si la base de datos ya coincide y está abierta, la reutilizamos
+            if current_db_url == self.db_url and not db_proxy.is_closed():
                 return db_proxy.obj
 
-            # Si llegamos aquí, es una DB distinta o una de ':memory:' que ya fue cerrada.
             if not db_proxy.obj.is_closed():
                 db_proxy.obj.close()
 
-        logger.debug(f"Iniciando base de datos en {self.db_path}")
+        logger.debug("Conectando a base de datos mediante URL...")
 
-        if isinstance(self.db_path, Path):
-            self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        # Analizar si es una ruta local de SQLite para asegurar que el directorio exista
+        parsed = db_parse(self.db_url)
+        if parsed.get("engine") == "peewee.SqliteDatabase":
+            db_file_path = parsed.get("database")
+            if db_file_path and db_file_path != ":memory:":
+                Path(db_file_path).parent.mkdir(parents=True, exist_ok=True)
 
-        self.db = peewee.SqliteDatabase(
-            str(self.db_path),
-            pragmas={
-                "journal_mode": "wal",  # Permite leer mientras otro escribe
-                "cache_size": -1024 * 64,
-                "synchronous": "NORMAL",
-                "busy_timeout": 30000,  # Esperar 30s si está bloqueada
-                "foreign_keys": 1,  # Asegurar integridad referencial
-            },
-            timeout=10,
-        )
+        # Conectar dinámicamente usando playhouse.db_url
+        self.db = db_connect(self.db_url)
+
+        # Configuración específica según el motor
+        if isinstance(self.db, peewee.SqliteDatabase):
+            # Optimización de rendimiento para SQLite local
+            self.db.pragma("journal_mode", "wal")
+            self.db.pragma("cache_size", -1024 * 64)
+            self.db.pragma("synchronous", "NORMAL")
+            self.db.pragma("busy_timeout", 30000)
+            self.db.pragma("foreign_keys", 1)
 
         db_proxy.initialize(self.db)
-        self.db.connect()
+        self.db.connect(reuse_if_open=True)
 
+        # Importaciones tardías para registrar los modelos
         from totelegram.models import (
             Claim,
             Job,
@@ -146,7 +155,7 @@ class DatabaseSession:
             safe=True,
         )
 
-        run_migrations(self.db, self.db_path)
+        run_migrations(self.db, self.db_url)
         return self.db
 
     def __exit__(self, exc_type, exc_val, exc_tb):
