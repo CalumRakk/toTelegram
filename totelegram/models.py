@@ -494,6 +494,7 @@ class Job(BaseModel):
         return cast(List[Payload], list(self.payloads.order_by(Payload.sequence_index)))
 
 
+# El índice compuesto único impide que existan dos jobs activos (deleted_at == 0) para el mismo archivo en el mismo chat.
 Job.add_index(Job.source, Job.chat, Job.deleted_at, unique=True)
 
 

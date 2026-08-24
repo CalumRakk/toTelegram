@@ -17,7 +17,8 @@ setup(
     long_description_content_type="text/markdown",
     install_requires=[
         "filetype==1.2.0",
-        "peewee[psycopg3]>=3.17.9",
+        "peewee>=3.17.9",
+        "psycopg[binary]>=3.1.18",
         "pydantic>=2.11.7",
         "pydantic-settings>=2.10.1",
         "pyrogram==2.0.106",
