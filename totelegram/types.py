@@ -24,7 +24,7 @@ class UploadContext:
     tg_chat: "Chat"
     owner: "TelegramUser"
     client: "Client"
-    db: peewee.SqliteDatabase
+    db: peewee.Database
     discovery: "DiscoveryService"
     settings: "Settings"
     state: "CLIState"

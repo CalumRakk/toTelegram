@@ -13,11 +13,6 @@ logger = logging.getLogger(__name__)
 
 
 class LeaseStore(ABC):
-    """
-    Interfaz abstracta (contrato) para la persistencia de los bloqueos.
-    Permite desacoplar el LeaseManager del ORM o motor de base de datos específico.
-    """
-
     @abstractmethod
     def acquire(
         self,
@@ -26,26 +21,18 @@ class LeaseStore(ABC):
         node_id: str,
         expires_at: datetime,
     ) -> bool:
-        """Intenta adquirir o heredar un lease de forma atómica."""
         pass
 
     @abstractmethod
     def renew(self, resource_id: str, node_id: str, expires_at: datetime) -> bool:
-        """Renueva un lease si aún pertenece al nodo indicado."""
         pass
 
     @abstractmethod
     def release(self, resource_id: str) -> None:
-        """Elimina o libera el lease."""
         pass
 
 
 class LeaseManager:
-    """
-    Gestor de nivel de dominio para controlar los arrendamientos de recursos.
-    No contiene lógica de acceso directo a base de datos.
-    """
-
     def __init__(self, store: LeaseStore, node_id: str):
         self.store = store
         self.node_id = node_id
@@ -63,11 +50,9 @@ class LeaseManager:
         )
 
     def release_account_lease(self, account_id: int):
-        """Libera el arrendamiento de una cuenta de Telegram."""
         self.store.release(f"account:{account_id}")
 
     def release_job_lease(self, job_id: int):
-        """Libera el arrendamiento de un Job."""
         self.store.release(f"job:{job_id}")
 
     def renew(self, resource_id: str, ttl_minutes: int = 5) -> bool:
@@ -77,8 +62,8 @@ class LeaseManager:
 
 class PeeweeLeaseStore(LeaseStore):
     """
-    Implementación de LeaseStore utilizando Peewee ORM.
-    Mantiene la compatibilidad actual con SQLite y PostgreSQL a través de transacciones.
+    Implementación atómica de LeaseStore para SQLite y PostgreSQL.
+    No arroja excepciones de integridad que invaliden transacciones en Postgres.
     """
 
     def __init__(self, db: peewee.Database):
@@ -91,69 +76,85 @@ class PeeweeLeaseStore(LeaseStore):
         node_id: str,
         expires_at: datetime,
     ) -> bool:
-        try:
-            with db_transaction(self.db):
-                Claim.create(
-                    resource_id=resource_id,
-                    resource_type=resource_type,
-                    node_id=node_id,
-                    expires_at=expires_at,
-                )
-                return True
-        except peewee.IntegrityError:
-            claim = cast(Claim, Claim.get_or_none(Claim.resource_id == resource_id))
-            if claim:
-                if claim.node_id == node_id:
-                    claim.expires_at = expires_at
-                    claim.save(only=[Claim.expires_at, Claim.updated_at])
-                    return True
-
-                if datetime.now(timezone.utc) > claim.expires_at:
-                    claim.node_id = node_id
-                    claim.expires_at = expires_at
-                    claim.save(only=[Claim.node_id, Claim.expires_at, Claim.updated_at])
-                    logger.info(f"Lease recuperado (expirado) para {resource_id}")
-                    return True
-
-            logger.warning(
-                f"Recurso {resource_id} bloqueado por otro nodo: {claim.node_id if claim else 'unknown'}"
-            )
-            return False
-
-    def renew(self, resource_id: str, node_id: str, expires_at: datetime) -> bool:
+        now = datetime.now(timezone.utc)
         try:
             with self.db.connection_context():
                 with db_transaction(self.db):
-                    claim = cast(
-                        Claim, Claim.get_or_none(Claim.resource_id == resource_id)
+                    # 1. Intentar reclamar de forma atómica si ya expiró o si pertenece al mismo nodo
+                    updated = (
+                        Claim.update(
+                            node_id=node_id,
+                            expires_at=expires_at,
+                            updated_at=now,
+                        )
+                        .where(
+                            (Claim.resource_id == resource_id)
+                            & ((Claim.expires_at < now) | (Claim.node_id == node_id))
+                        )
+                        .execute()
                     )
-                    if claim and claim.node_id == node_id:
-                        claim.expires_at = expires_at
-                        claim.save(only=[Claim.expires_at, Claim.updated_at])
+                    if updated > 0:
                         return True
+
+                    # 2. Si no existía registro previo, insertar atómicamente ignorando duplicados
+                    inserted = (
+                        Claim.insert(
+                            resource_id=resource_id,
+                            resource_type=resource_type,
+                            node_id=node_id,
+                            expires_at=expires_at,
+                            created_at=now,
+                            updated_at=now,
+                        )
+                        .on_conflict_ignore()
+                        .execute()
+                    )
+                    if inserted > 0:
+                        return True
+
+            # Si no se actualizó ni insertó, el recurso está tomado por otro nodo activo
+            claim = cast(Claim, Claim.get_or_none(Claim.resource_id == resource_id))
+            logger.warning(
+                f"Recurso {resource_id} bloqueado por otro nodo: {claim.node_id if claim else 'desconocido'}"
+            )
             return False
+        except Exception as e:
+            logger.error(f"Error adquiriendo lease para {resource_id}: {e}")
+            return False
+
+    def renew(self, resource_id: str, node_id: str, expires_at: datetime) -> bool:
+        now = datetime.now(timezone.utc)
+        try:
+            with self.db.connection_context():
+                with db_transaction(self.db):
+                    rows = (
+                        Claim.update(expires_at=expires_at, updated_at=now)
+                        .where(
+                            (Claim.resource_id == resource_id)
+                            & (Claim.node_id == node_id)
+                        )
+                        .execute()
+                    )
+                    return rows > 0
         except Exception as e:
             logger.error(f"Error renovando lease de {resource_id}: {e}")
             return False
 
     def release(self, resource_id: str) -> None:
-        Claim.delete().where(Claim.resource_id == resource_id).execute()
+        try:
+            with self.db.connection_context():
+                with db_transaction(self.db):
+                    Claim.delete().where(Claim.resource_id == resource_id).execute()
+        except Exception as e:
+            logger.error(f"Error liberando lease de {resource_id}: {e}")
 
 
 class LeaseKeeper:
-    """
-    Context Manager que lanza un hilo en segundo plano para mantener vivo
-    un Lease (lock) renovándolo periódicamente.
-    """
-
     def __init__(self, manager: LeaseManager, resource_id: str, ttl_minutes: int = 5):
         self.manager = manager
         self.resource_id = resource_id
         self.ttl_minutes = ttl_minutes
-
-        # Renovamos el lock cuando haya transcurrido la mitad del tiempo de vida
         self.interval_seconds = (ttl_minutes * 60) / 2.0
-
         self._stop_event = threading.Event()
         self._thread = None
 
@@ -163,8 +164,7 @@ class LeaseKeeper:
             success = self.manager.renew(self.resource_id, self.ttl_minutes)
             if not success:
                 logger.warning(
-                    f"Peligro: No se pudo renovar el lease para {self.resource_id}. "
-                    "¿Fue robado por otro nodo o eliminado?"
+                    f"Peligro: No se pudo renovar el lease para {self.resource_id}."
                 )
 
     def __enter__(self):

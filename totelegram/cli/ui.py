@@ -41,25 +41,22 @@ def strip_markup(text: str) -> str:
     return Text.from_markup(text).plain
 
 
-def get_friendly_chat_name(chat_id: str, database_path: str) -> str:
+def get_friendly_chat_name(chat_id: str, db_url: str) -> str:
     """
     Aplica las reglas heurísticas para devolver un nombre amigable
-    sin necesariamente golpear la red o la DB.
+    usando la URL de conexión a la base de datos activa.
     """
     val = str(chat_id).lower().strip()
 
     if val.lower() in ["me", "self"]:
         return "Mensajes Guardados"
 
-    # Usernames
     if val.startswith("@"):
-        # TODO: analizar si vale la pena consultar el la db el `title`
         return val
 
-    # IDs Numéricos
     if val.replace("-", "").isdigit():
         try:
-            with DatabaseSession(database_path):
+            with DatabaseSession(db_url):
                 chat = TelegramChat.get_or_none(TelegramChat.id == int(val))
                 if chat:
                     return f"{chat.title}"
@@ -441,6 +438,10 @@ class DisplayConfig:
         is_debug: bool,
         settings: Settings,
     ):
+        from totelegram.database import normalize_database_url
+
+        db_url = normalize_database_url(settings.database_url, maneger.database_path)
+
         UI.info(f"Configuración del perfil: [green]{profile_name}[/green]")
         table = Table(show_header=True, title_style=COLORS.TABLE_TITLE)
         table.add_column("Opción (Key)")
@@ -458,11 +459,11 @@ class DisplayConfig:
             is_value_default = value != default_value
             value_style = "bold green" if is_value_default else "dim white"
 
-            # Si es CHAT_ID, lo hace amigable.
+            # Si es CHAT_ID, lo hace amigable usando la URL real
             if field_name.lower() == "chat_id":
-                value = get_friendly_chat_name(value, str(maneger.database_path))
+                value = get_friendly_chat_name(value, db_url)
 
-            # Oculta value sencille
+            # Oculta value sensible
             if info.is_sensitive and value is not None:
                 display_val = cls._mark_sensitive(value)
             else:

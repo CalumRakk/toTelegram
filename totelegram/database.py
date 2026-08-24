@@ -10,10 +10,18 @@ import peewee
 from peewee import Field
 from playhouse.db_url import connect as db_connect
 from playhouse.db_url import parse as db_parse
+from playhouse.db_url import register_database
+from playhouse.postgres_ext import Psycopg3Database
 
 from totelegram.migration import run_migrations
 
 logger = logging.getLogger(__name__)
+
+# Sobrescribimos el registro para que URLs estándar (postgresql://, postgres://)
+# utilicen el driver moderno psycopg (v3)
+register_database(
+    Psycopg3Database, "postgresql", "postgres", "psycopg3", "postgresql+psycopg"
+)
 
 
 def normalize_database_url(
@@ -24,27 +32,26 @@ def normalize_database_url(
     Si recibe una ruta local, la transforma a una URL de conexión de SQLite.
     """
     if not url_or_path:
-        # Si no se define nada, usamos la ruta por defecto en formato URL
         abs_default = default_sqlite_path.resolve()
         return f"sqlite:///{abs_default.as_posix()}"
 
     url_or_path = url_or_path.strip()
 
-    # Si ya tiene formato de esquema de conexión conocido, lo dejamos pasar sin cambios
-    if (
-        url_or_path.startswith("sqlite://")
-        or url_or_path.startswith("postgresql://")
-        or url_or_path.startswith("postgres://")
-    ):
+    valid_schemes = (
+        "sqlite://",
+        "postgresql://",
+        "postgres://",
+        "psycopg3://",
+        "postgresql+psycopg://",
+    )
+    if any(url_or_path.startswith(scheme) for scheme in valid_schemes):
         return url_or_path
 
     if url_or_path == ":memory:":
         return "sqlite:///:memory:"
 
-    # Se asume que es una ruta de archivo local para SQLite
     path = Path(url_or_path)
     if not path.is_absolute():
-        # Si es relativa, la resolvemos respecto al directorio de trabajo por defecto
         path = (default_sqlite_path.parent / path).resolve()
     else:
         path = path.resolve()
@@ -54,7 +61,7 @@ def normalize_database_url(
 
 db_proxy = peewee.Proxy()
 
-# Semáforo global para sincronizar hilos cuando se usa SQLite
+# Semáforo global para sincronizar hilos cuando se usa SQLite en disco/memoria
 _sqlite_write_lock = threading.RLock()
 
 
@@ -62,8 +69,8 @@ _sqlite_write_lock = threading.RLock()
 def db_transaction(db: peewee.Database):
     """
     Gestor de transacciones seguro para múltiples motores.
-    - SQLite: Aplica semáforo en memoria e inicia con 'IMMEDIATE' para evitar bloqueos concurrentes.
-    - PostgreSQL/Otros: Delegación nativa y limpia mediante 'BEGIN' estándar (sin parámetros).
+    - SQLite: Aplica semáforo en memoria e inicia con 'IMMEDIATE'.
+    - PostgreSQL: Utiliza el manejador atómico estándar.
     """
     is_sqlite = isinstance(db, peewee.SqliteDatabase)
 
@@ -71,10 +78,7 @@ def db_transaction(db: peewee.Database):
         _sqlite_write_lock.acquire()
 
     try:
-        # SQLite requiere IMMEDIATE para concurrencia en disco.
-        # Postgres requiere None para que Peewee ejecute un "BEGIN" limpio y estándar.
         transaction_type = "IMMEDIATE" if is_sqlite else None
-
         with db.atomic(transaction_type):
             yield
     finally:
@@ -84,40 +88,39 @@ def db_transaction(db: peewee.Database):
 
 class DatabaseSession:
     """
-    Administrador de contexto para la base de datos basado en URLs.
+    Administrador de contexto para la base de datos basado exclusivamente en URLs.
     Detecta automáticamente SQLite o PostgreSQL y aplica configuraciones específicas.
     """
 
+    active_db_url: Optional[str] = None
+
     def __init__(self, db_url: str):
         self.db_url = db_url
-        self.db = None
+        self.db: Optional[peewee.Database] = None
 
     def __enter__(self) -> peewee.Database:
-        if db_proxy.obj is not None:
-            current_db_url = getattr(db_proxy.obj, "database", None)
+        # Si la conexión activa coincide exactamente con la URL y sigue abierta, se reutiliza
+        if (
+            DatabaseSession.active_db_url == self.db_url
+            and db_proxy.obj is not None
+            and not db_proxy.is_closed()
+        ):
+            return db_proxy.obj
 
-            # Si la base de datos ya coincide y está abierta, la reutilizamos
-            if current_db_url == self.db_url and not db_proxy.is_closed():
-                return db_proxy.obj
+        if db_proxy.obj is not None and not db_proxy.is_closed():
+            db_proxy.obj.close()
 
-            if not db_proxy.obj.is_closed():
-                db_proxy.obj.close()
+        logger.debug(f"Conectando a base de datos: {self.db_url.split('@')[-1]}")
 
-        logger.debug("Conectando a base de datos mediante URL...")
-
-        # Analizar si es una ruta local de SQLite para asegurar que el directorio exista
         parsed = db_parse(self.db_url)
         if parsed.get("engine") == "peewee.SqliteDatabase":
             db_file_path = parsed.get("database")
             if db_file_path and db_file_path != ":memory:":
                 Path(db_file_path).parent.mkdir(parents=True, exist_ok=True)
 
-        # Conectar dinámicamente usando playhouse.db_url
         self.db = db_connect(self.db_url)
 
-        # Configuración específica según el motor
         if isinstance(self.db, peewee.SqliteDatabase):
-            # Optimización de rendimiento para SQLite local
             self.db.pragma("journal_mode", "wal")
             self.db.pragma("cache_size", -1024 * 64)
             self.db.pragma("synchronous", "NORMAL")
@@ -125,9 +128,12 @@ class DatabaseSession:
             self.db.pragma("foreign_keys", 1)
 
         db_proxy.initialize(self.db)
-        self.db.connect(reuse_if_open=True)
 
-        # Importaciones tardías para registrar los modelos
+        assert self.db is not None, "Base de datos es None"
+
+        self.db.connect(reuse_if_open=True)
+        DatabaseSession.active_db_url = self.db_url
+
         from totelegram.models import (
             Claim,
             Job,
@@ -165,6 +171,8 @@ class DatabaseSession:
         if db_proxy.obj and not db_proxy.obj.is_closed():
             db_proxy.obj.close()
 
+        DatabaseSession.active_db_url = None
+
     def start(self):
         return self.__enter__()
 
@@ -173,12 +181,6 @@ class DatabaseSession:
 
 
 class PydanticJSONField(Field):
-    """
-    Campo personalizado de Peewee.
-    DB: Guarda JSON String (TEXT).
-    Python: Usa objetos Pydantic validados.
-    """
-
     field_type = "TEXT"
 
     def __init__(self, schema_model, *args, **kwargs):
@@ -186,7 +188,6 @@ class PydanticJSONField(Field):
         super().__init__(*args, **kwargs)
 
     def db_value(self, value):
-        """Python -> DB"""
         if hasattr(value, "model_dump_json"):
             return value.model_dump_json()
         if value is None:
@@ -196,17 +197,12 @@ class PydanticJSONField(Field):
     def python_value(self, value):
         if value is None:
             return None
-
         if isinstance(value, str):
             return self.schema_model.model_validate_json(value)
         return self.schema_model.model_validate(value)
 
 
 class EnumField(peewee.CharField):
-    """
-    Enum-like field for Peewee
-    """
-
     def __init__(self, enum: type[enum.Enum], *args, **kwargs):
         self.enum = enum
         kwargs.setdefault("max_length", max(len(e.value) for e in enum))

@@ -129,7 +129,7 @@ def get_or_create_job(
 
 
 def prepare_upload_context(
-    state: CLIState, client: "Client", db: peewee.SqliteDatabase, settings: Settings
+    state: CLIState, client: "Client", db: peewee.Database, settings: Settings
 ) -> UploadContext:
     """
     Centraliza la inicialización de servicios y validación de red.
