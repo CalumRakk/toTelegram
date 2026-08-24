@@ -6,7 +6,6 @@ from typing import cast
 
 import peewee
 
-from totelegram.database import db_transaction
 from totelegram.models import Claim, ResourceType
 
 logger = logging.getLogger(__name__)
@@ -76,77 +75,57 @@ class PeeweeLeaseStore(LeaseStore):
         node_id: str,
         expires_at: datetime,
     ) -> bool:
-        now = datetime.now(timezone.utc)
         try:
-            with self.db.connection_context():
-                with db_transaction(self.db):
-                    # 1. Intentar reclamar de forma atómica si ya expiró o si pertenece al mismo nodo
-                    updated = (
-                        Claim.update(
-                            node_id=node_id,
-                            expires_at=expires_at,
-                            updated_at=now,
-                        )
-                        .where(
-                            (Claim.resource_id == resource_id)
-                            & ((Claim.expires_at < now) | (Claim.node_id == node_id))
-                        )
-                        .execute()
-                    )
-                    if updated > 0:
-                        return True
-
-                    # 2. Si no existía registro previo, insertar atómicamente ignorando duplicados
-                    inserted = (
-                        Claim.insert(
-                            resource_id=resource_id,
-                            resource_type=resource_type,
-                            node_id=node_id,
-                            expires_at=expires_at,
-                            created_at=now,
-                            updated_at=now,
-                        )
-                        .on_conflict_ignore()
-                        .execute()
-                    )
-                    if inserted > 0:
-                        return True
-
-            # Si no se actualizó ni insertó, el recurso está tomado por otro nodo activo
+            with self.db.atomic():
+                Claim.create(
+                    resource_id=resource_id,
+                    resource_type=resource_type,
+                    node_id=node_id,
+                    expires_at=expires_at,
+                )
+                return True
+        except peewee.IntegrityError:
             claim = cast(Claim, Claim.get_or_none(Claim.resource_id == resource_id))
+            if claim:
+                if claim.node_id == node_id:
+                    claim.expires_at = expires_at
+                    claim.save(only=[Claim.expires_at, Claim.updated_at])
+                    return True
+
+                exp = claim.expires_at
+                if exp.tzinfo is None:
+                    exp = exp.replace(tzinfo=timezone.utc)
+
+                if datetime.now(timezone.utc) > exp:
+                    claim.node_id = node_id
+                    claim.expires_at = expires_at
+                    claim.save(only=[Claim.node_id, Claim.expires_at, Claim.updated_at])
+                    logger.info(f"Lease recuperado (expirado) para {resource_id}")
+                    return True
+
             logger.warning(
-                f"Recurso {resource_id} bloqueado por otro nodo: {claim.node_id if claim else 'desconocido'}"
+                f"Recurso {resource_id} bloqueado por otro nodo: {claim.node_id if claim else 'unknown'}"
             )
-            return False
-        except Exception as e:
-            logger.error(f"Error adquiriendo lease para {resource_id}: {e}")
             return False
 
     def renew(self, resource_id: str, node_id: str, expires_at: datetime) -> bool:
-        now = datetime.now(timezone.utc)
         try:
             with self.db.connection_context():
-                with db_transaction(self.db):
-                    rows = (
-                        Claim.update(expires_at=expires_at, updated_at=now)
-                        .where(
-                            (Claim.resource_id == resource_id)
-                            & (Claim.node_id == node_id)
-                        )
-                        .execute()
+                with self.db.atomic():
+                    claim = cast(
+                        Claim, Claim.get_or_none(Claim.resource_id == resource_id)
                     )
-                    return rows > 0
+                    if claim and claim.node_id == node_id:
+                        claim.expires_at = expires_at
+                        claim.save(only=[Claim.expires_at, Claim.updated_at])
+                        return True
+            return False
         except Exception as e:
             logger.error(f"Error renovando lease de {resource_id}: {e}")
             return False
 
     def release(self, resource_id: str) -> None:
-        try:
-            with self.db.connection_context():
-                with db_transaction(self.db):
-                    Claim.delete().where(Claim.resource_id == resource_id).execute()
-        except Exception as e:
-            logger.error(f"Error liberando lease de {resource_id}: {e}")
+        Claim.delete().where(Claim.resource_id == resource_id).execute()
 
 
 class LeaseKeeper:

@@ -2,7 +2,9 @@ import re
 from typing import Union
 
 SELF_CHAT_ALIASES = ["me", "mensajes guardados", "saved messages", "self"]
-VALUE_NOT_SET = "NOT-SET"
+VALUE_NOT_SET = (
+    "NOT-SET"  # TODO: VALUE_NOT_SET esta ubicado tambien en schemas. corregir esto.
+)
 
 
 def is_potential_username(value: str) -> bool:

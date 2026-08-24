@@ -68,45 +68,35 @@ class BaseModel(peewee.Model):
 
 
 class TelegramChat(BaseModel):
-    """
-    Representa un destino en Telegram (Canal, Grupo o Mensajes Guardados).
-    El 'id' es el BigInteger que provee Telegram directamente.
-    """
-
     id = cast(int, peewee.BigIntegerField(primary_key=True))
     title = cast(str, peewee.CharField(null=True))
     username = cast(Optional[str], peewee.CharField(null=True))
-    type = cast(str, peewee.CharField())  # 'private', 'group', 'channel', etc.
-
+    type = cast(str, peewee.CharField())
     is_public = cast(bool, peewee.BooleanField(default=False))
-    last_verified = cast(datetime, peewee.DateTimeField(null=True))
+    last_verified = cast(Optional[datetime], peewee.DateTimeField(null=True))
 
     @staticmethod
     def get_or_create_from_chat(tg_chat: "TgChat") -> Tuple["TelegramChat", bool]:
-        """
-        tg_chat puede ser un objeto Chat de Pyrogram.
-        """
-        chat, created = TelegramChat.get_or_create(
-            id=tg_chat.id,
-            defaults={
-                "title": tg_chat.title,
-                "username": tg_chat.username,
-                "type": str(tg_chat.type.value),
-                "is_public": True if tg_chat.username else False,
-                "last_verified": datetime.now(),
-            },
-        )
-        return chat, created
+        defaults = {
+            "title": tg_chat.title,
+            "username": tg_chat.username,
+            "type": str(tg_chat.type.value),
+            "is_public": True if tg_chat.username else False,
+            "last_verified": datetime.now(timezone.utc),
+        }
+        try:
+            with db_proxy.atomic():
+                return TelegramChat.get_or_create(id=tg_chat.id, defaults=defaults)
+        except peewee.IntegrityError:
+            # Rescate concurrente si otro nodo lo creó en el mismo milisegundo
+            return TelegramChat.get_by_id(tg_chat.id), False
 
-    def update_from_tg(
-        self,
-        tg_chat: "TgChat",
-    ):
+    def update_from_tg(self, tg_chat: "TgChat"):
         self.title = tg_chat.title
         self.username = tg_chat.username
         self.type = str(tg_chat.type.value)
         self.is_public = True if tg_chat.username else False
-        self.last_verified = datetime.now()
+        self.last_verified = datetime.now(timezone.utc)
         self.save(
             only=[
                 TelegramChat.title,
@@ -122,27 +112,41 @@ class TelegramChat(BaseModel):
 class TelegramUser(BaseModel):
     id = cast(int, peewee.BigIntegerField(primary_key=True))
     first_name = cast(str, peewee.CharField())
-    username = cast(str, peewee.CharField(null=True))
+    username = cast(Optional[str], peewee.CharField(null=True))
     is_premium = cast(bool, peewee.BooleanField(default=False))
-
-    last_seen = peewee.DateTimeField(default=datetime.now)
+    last_seen = peewee.DateTimeField(default=lambda: datetime.now(timezone.utc))
 
     @staticmethod
     def get_or_create_from_tg(tg_user) -> "TelegramUser":
-        user, created = TelegramUser.get_or_create(
-            id=tg_user.id,
-            defaults={
-                "first_name": tg_user.first_name,
-                "username": tg_user.username,
-                "is_premium": tg_user.is_premium or False,
-            },
-        )
+        defaults = {
+            "first_name": tg_user.first_name,
+            "username": tg_user.username,
+            "is_premium": tg_user.is_premium or False,
+            "last_seen": datetime.now(timezone.utc),
+        }
+        try:
+            with db_proxy.atomic():
+                user, created = TelegramUser.get_or_create(
+                    id=tg_user.id, defaults=defaults
+                )
+        except peewee.IntegrityError:
+            user = TelegramUser.get_by_id(tg_user.id)
+            created = False
+
         if not created:
             user.first_name = tg_user.first_name
             user.username = tg_user.username
             user.is_premium = tg_user.is_premium or False
-            user.last_seen = datetime.now()
-            user.save()
+            user.last_seen = datetime.now(timezone.utc)
+            user.save(
+                only=[
+                    TelegramUser.first_name,
+                    TelegramUser.username,
+                    TelegramUser.is_premium,
+                    TelegramUser.last_seen,
+                    TelegramUser.updated_at,
+                ]
+            )
         return user
 
 
@@ -168,6 +172,86 @@ class Source(BaseModel):
     @property
     def is_folder(self) -> bool:
         return self.type == SourceType.FOLDER
+
+    @staticmethod
+    def get_or_create_from_filepath(path: Path) -> "Source":
+        stat = path.stat()
+        current_size = stat.st_size
+        current_mtime = stat.st_mtime
+        path_str = str(path)
+
+        cached = Source.get_or_none(
+            (Source.path_str == path_str)
+            & (Source.size == current_size)
+            & (Source.mtime == current_mtime)
+        )
+        if cached:
+            return cached
+
+        md5sum = create_md5sum_by_hashlib(path)
+        source = cast(Optional[Source], Source.get_or_none(Source.md5sum == md5sum))
+        if source:
+            source.update_if_needed(path)
+            return source
+
+        try:
+            with db_proxy.atomic():
+                return Source.create(
+                    md5sum=md5sum,
+                    path_str=path_str,
+                    size=current_size,
+                    mtime=current_mtime,
+                    mimetype=get_mimetype(path),
+                )
+        except peewee.IntegrityError:
+            # Rescate si otro proceso/nodo insertó el mismo MD5
+            source = cast(Source, Source.get(Source.md5sum == md5sum))
+            source.update_if_needed(path)
+            return source
+
+    @classmethod
+    def get_or_create_from_tape(cls, tape: tartape.Tape) -> "Source":
+        try:
+            source = Source.get(Source.md5sum == tape.fingerprint)
+            tape.verify(raise_exception=True)
+            return source
+        except peewee.DoesNotExist:
+            logger.info(f"Re-indexando cinta encontrada en: {tape.directory}")
+            try:
+                with db_proxy.atomic():
+                    return cls.create_from_tape(tape, tape.exclude_patterns)
+            except peewee.IntegrityError:
+                return Source.get(Source.md5sum == tape.fingerprint)
+
+    @classmethod
+    def create_from_tape(
+        cls, tape: tartape.Tape, exclusion_patterns: List[str] | str
+    ) -> "Source":
+        exclude_patterns = (
+            json.dumps(exclusion_patterns)
+            if isinstance(exclusion_patterns, list)
+            else exclusion_patterns
+        )
+
+        catalog = TapeCatalog(
+            fingerprint=tape.fingerprint,
+            total_size=tape.total_size,
+            total_files=tape.count_files,
+            tartape_version=tartape.__version__,
+            created_at=tape.created_at,
+            exclude_patterns=exclude_patterns,
+        )
+
+        source = Source.create(
+            path_str=str(tape.directory),
+            md5sum=catalog.fingerprint,
+            size=catalog.total_size,
+            mtime=tape.created_at,
+            mimetype="application/x-tar",
+            tape_catalog=catalog,
+            type=SourceType.FOLDER,
+        )
+        return source
 
     def update_if_needed(self, path: Path) -> bool:
         if self.is_folder:
@@ -200,78 +284,6 @@ class Source(BaseModel):
                 ]
             )
         return changed
-
-    @staticmethod
-    def get_or_create_from_filepath(path: Path) -> "Source":
-        stat = path.stat()
-        current_size = stat.st_size
-        current_mtime = stat.st_mtime
-        path_str = str(path)
-
-        # Intento rápido por ruta y metadatos
-        cached = Source.get_or_none(
-            (Source.path_str == path_str)
-            & (Source.size == current_size)
-            & (Source.mtime == current_mtime)
-        )
-        if cached:
-            return cached
-
-        # Si falló el rápido, calculamos MD5
-        md5sum = create_md5sum_by_hashlib(path)
-
-        source = cast(Optional[Source], Source.get_or_none(Source.md5sum == md5sum))
-        if source:
-            source.update_if_needed(path)
-            return source
-
-        return Source.create(
-            md5sum=md5sum,
-            path_str=path_str,
-            size=current_size,
-            mtime=current_mtime,
-            mimetype=get_mimetype(path),
-        )
-
-    @classmethod
-    def create_from_tape(
-        cls, tape: tartape.Tape, exclusion_patterns: List[str] | str
-    ) -> "Source":
-        exclude_patterns = (
-            json.dumps(exclusion_patterns)
-            if isinstance(exclusion_patterns, list)
-            else exclusion_patterns
-        )
-
-        catalog = TapeCatalog(
-            fingerprint=tape.fingerprint,
-            total_size=tape.total_size,
-            total_files=tape.count_files,
-            tartape_version=tartape.__version__,
-            created_at=tape.created_at,
-            exclude_patterns=exclude_patterns,
-        )
-
-        source = Source.create(
-            path_str=str(tape.directory),
-            md5sum=catalog.fingerprint,
-            size=catalog.total_size,
-            mtime=tape.created_at,
-            mimetype="application/x-tar",
-            tape_catalog=catalog,
-            type=SourceType.FOLDER,
-        )
-        return source
-
-    @classmethod
-    def get_or_create_from_tape(cls, tape: tartape.Tape) -> "Source":
-        try:
-            source = Source.get(Source.md5sum == tape.fingerprint)
-            tape.verify(raise_exception=True)
-            return source
-        except peewee.DoesNotExist:
-            logger.info(f"Re-indexando cinta huérfana encontrada en: {tape.directory}")
-            return cls.create_from_tape(tape, tape.exclude_patterns)
 
 
 class Job(BaseModel):
@@ -310,13 +322,20 @@ class Job(BaseModel):
         config = StrategyConfig(
             tg_max_size=tg_limit, user_is_premium=is_premium, app_version=__VERSION__
         )
-        return Job.create(
-            source=source,
-            chat=chat,
-            strategy=strategy,
-            status=JobStatus.PENDING,
-            config=config,
-        )
+        try:
+            with db_proxy.atomic():
+                return Job.create(
+                    source=source,
+                    chat=chat,
+                    strategy=strategy,
+                    status=JobStatus.PENDING,
+                    config=config,
+                )
+        except peewee.IntegrityError:
+            existing = Job.get_for_source_in_chat(source, chat)
+            if existing:
+                return existing
+            raise
 
     @staticmethod
     def get_for_source_in_chat(
@@ -561,13 +580,15 @@ class RemotePayload(BaseModel):
     @property
     def is_fresh(self) -> bool:
         """Determina si la validación aún es confiable (15 minutos)."""
-        if self.is_orphaned is False:
+        if self.is_orphaned or not self.last_verified_at:
             return False
 
-        if not self.last_verified_at:
-            return False
-        delta = datetime.now() - self.last_verified_at
-        return delta.total_seconds() < 900  # 15 minutos
+        last_v = self.last_verified_at
+        if last_v.tzinfo is None:
+            last_v = last_v.replace(tzinfo=timezone.utc)
+
+        delta = datetime.now(timezone.utc) - last_v
+        return delta.total_seconds() < 900
 
     @staticmethod
     def register_upload(
@@ -676,4 +697,8 @@ class Claim(BaseModel):
 
     @classmethod
     def is_expired(cls, claim: "Claim") -> bool:
-        return datetime.now() > claim.expires_at
+        now = datetime.now(timezone.utc)
+        exp = claim.expires_at
+        if exp.tzinfo is None:
+            exp = exp.replace(tzinfo=timezone.utc)
+        return now > exp

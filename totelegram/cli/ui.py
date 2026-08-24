@@ -14,7 +14,7 @@ from rich.table import Table
 from rich.text import Text
 from rich.theme import Theme
 
-from totelegram.database import DatabaseSession
+from totelegram.database import DatabaseSession, normalize_database_url
 from totelegram.identity import Profile, Settings, SettingsManager
 from totelegram.models import TelegramChat
 from totelegram.schemas import COLORS, AccessLevel, Commands, ScanReport
@@ -434,20 +434,18 @@ class DisplayConfig:
     def show_config_table(
         cls,
         profile_name: str,
-        maneger: SettingsManager,
+        manager: SettingsManager,
         is_debug: bool,
         settings: Settings,
     ):
-        from totelegram.database import normalize_database_url
-
-        db_url = normalize_database_url(settings.database_url, maneger.database_path)
-
         UI.info(f"Configuración del perfil: [green]{profile_name}[/green]")
         table = Table(show_header=True, title_style=COLORS.TABLE_TITLE)
         table.add_column("Opción (Key)")
         table.add_column("Tipo")
         table.add_column("Valor Actual")
         table.add_column("Descripción")
+
+        db_url = normalize_database_url(settings.database_url, manager.database_path)
 
         default_settings = Settings.get_default_settings()
         for field_name, default_value in default_settings.model_dump().items():
@@ -459,7 +457,7 @@ class DisplayConfig:
             is_value_default = value != default_value
             value_style = "bold green" if is_value_default else "dim white"
 
-            # Si es CHAT_ID, lo hace amigable usando la URL real
+            # Si es CHAT_ID, lo resuelve usando la URL de BD configurada
             if field_name.lower() == "chat_id":
                 value = get_friendly_chat_name(value, db_url)
 
@@ -526,7 +524,7 @@ class DisplayProfile:
         profiles: List[Profile],
         quiet: bool = False,
     ):
-        from totelegram.utils import VALUE_NOT_SET
+        from totelegram.schemas import VALUE_NOT_SET
 
         console.print()
         if quiet:
