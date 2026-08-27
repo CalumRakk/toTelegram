@@ -86,92 +86,119 @@ def db_transaction(db: peewee.Database):
             _sqlite_write_lock.release()
 
 
-class DatabaseSession:
+def init_database_schema(db: peewee.Database, db_url: str):
     """
-    Administrador de contexto para la base de datos basado exclusivamente en URLs.
-    Detecta automáticamente SQLite o PostgreSQL y aplica configuraciones específicas.
+    Inicializa el esquema de tablas y ejecuta migraciones pendientes.
+    Debe invocarse una sola vez al inicio de los flujos de trabajo principales.
     """
+    from totelegram.models import (
+        Claim,
+        Job,
+        Payload,
+        RemotePayload,
+        Source,
+        TapeMember,
+        TapeMemberGPS,
+        TelegramChat,
+        TelegramUser,
+    )
 
-    active_db_url: Optional[str] = None
-
-    def __init__(self, db_url: str):
-        self.db_url = db_url
-        self.db: Optional[peewee.Database] = None
-
-    def __enter__(self) -> peewee.Database:
-        # Si la conexión activa coincide exactamente con la URL y sigue abierta, se reutiliza
-        if (
-            DatabaseSession.active_db_url == self.db_url
-            and db_proxy.obj is not None
-            and not db_proxy.is_closed()
-        ):
-            return db_proxy.obj
-
-        if db_proxy.obj is not None and not db_proxy.is_closed():
-            db_proxy.obj.close()
-
-        logger.debug(f"Conectando a base de datos: {self.db_url.split('@')[-1]}")
-
-        parsed = db_parse(self.db_url)
-        if parsed.get("engine") == "peewee.SqliteDatabase":
-            db_file_path = parsed.get("database")
-            if db_file_path and db_file_path != ":memory:":
-                Path(db_file_path).parent.mkdir(parents=True, exist_ok=True)
-
-        self.db = db_connect(self.db_url)
-
-        if isinstance(self.db, peewee.SqliteDatabase):
-            self.db.pragma("journal_mode", "wal")
-            self.db.pragma("cache_size", -1024 * 64)
-            self.db.pragma("synchronous", "NORMAL")
-            self.db.pragma("busy_timeout", 30000)
-            self.db.pragma("foreign_keys", 1)
-
-        db_proxy.initialize(self.db)
-
-        assert self.db is not None, "Base de datos es None"
-
-        self.db.connect(reuse_if_open=True)
-        DatabaseSession.active_db_url = self.db_url
-
-        from totelegram.models import (
-            Claim,
+    db_proxy.create_tables(
+        [
+            Source,
             Job,
             Payload,
             RemotePayload,
-            Source,
-            TapeMember,
-            TapeMemberGPS,
             TelegramChat,
             TelegramUser,
-        )
+            TapeMember,
+            TapeMemberGPS,
+            Claim,
+        ],
+        safe=True,
+    )
 
-        db_proxy.create_tables(
-            [
-                Source,
-                Job,
-                Payload,
-                RemotePayload,
-                TelegramChat,
-                TelegramUser,
-                TapeMember,
-                TapeMemberGPS,
-                Claim,
-            ],
-            safe=True,
-        )
+    run_migrations(db, db_url)
 
-        run_migrations(self.db, self.db_url)
-        return self.db
+
+class DatabaseSession:
+    """
+    Administrador de contexto reentrante para la base de datos basado en URLs.
+    Controla el conteo de referencias para evitar cierres prematuros en llamadas anidadas.
+    """
+
+    active_db_url: Optional[str] = None
+    _ref_count: int = 0
+    _lock: threading.Lock = threading.Lock()
+
+    def __init__(self, db_url: str, auto_init_schema: bool = False):
+        self.db_url = db_url
+        self.auto_init_schema = auto_init_schema
+        self.db: Optional[peewee.Database] = None
+
+    def __enter__(self) -> peewee.Database:
+        with DatabaseSession._lock:
+            # Reutilizar conexión activa si coincide con la URL solicitada y sigue abierta
+            if (
+                DatabaseSession.active_db_url == self.db_url
+                and db_proxy.obj is not None
+                and not db_proxy.is_closed()
+            ):
+                DatabaseSession._ref_count += 1
+                if self.auto_init_schema:
+                    init_database_schema(db_proxy.obj, self.db_url)
+                return db_proxy.obj
+
+            # Si había otra conexión abierta distinta, se cierra
+            if db_proxy.obj is not None and not db_proxy.is_closed():
+                db_proxy.obj.close()
+                DatabaseSession._ref_count = 0
+
+            logger.debug(f"Conectando a base de datos: {self.db_url.split('@')[-1]}")
+
+            parsed = db_parse(self.db_url)
+            if parsed.get("engine") == "peewee.SqliteDatabase":
+                db_file_path = parsed.get("database")
+                if db_file_path and db_file_path != ":memory:":
+                    Path(db_file_path).parent.mkdir(parents=True, exist_ok=True)
+
+            self.db = db_connect(self.db_url)
+
+            if isinstance(self.db, peewee.SqliteDatabase):
+                self.db.pragma("journal_mode", "wal")
+                self.db.pragma("cache_size", -1024 * 64)
+                self.db.pragma("synchronous", "NORMAL")
+                self.db.pragma("busy_timeout", 30000)
+                self.db.pragma("foreign_keys", 1)
+
+            db_proxy.initialize(self.db)
+
+            assert self.db is not None, "Base de datos no inicializada"
+
+            self.db.connect(reuse_if_open=True)
+
+            DatabaseSession.active_db_url = self.db_url
+            DatabaseSession._ref_count = 1
+
+            if self.auto_init_schema:
+                init_database_schema(self.db, self.db_url)
+
+            return self.db
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        if self.db and not self.db.is_closed():
-            self.db.close()
+        with DatabaseSession._lock:
+            DatabaseSession._ref_count -= 1
 
-        if db_proxy.obj and not db_proxy.obj.is_closed():
-            db_proxy.obj.close()
+            # Solo cerrar físicamente la conexión cuando el último contexto termine
+            if DatabaseSession._ref_count <= 0:
+                DatabaseSession._ref_count = 0
+                if self.db and not self.db.is_closed():
+                    self.db.close()
 
-        DatabaseSession.active_db_url = None
+                if db_proxy.obj and not db_proxy.obj.is_closed():
+                    db_proxy.obj.close()
+
+                DatabaseSession.active_db_url = None
 
     def start(self):
         return self.__enter__()

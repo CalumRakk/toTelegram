@@ -14,7 +14,7 @@ from rich.table import Table
 from rich.text import Text
 from rich.theme import Theme
 
-from totelegram.database import DatabaseSession, normalize_database_url
+from totelegram.database import DatabaseSession, db_proxy, normalize_database_url
 from totelegram.identity import Profile, Settings, SettingsManager
 from totelegram.models import TelegramChat
 from totelegram.schemas import COLORS, AccessLevel, Commands, ScanReport
@@ -43,25 +43,38 @@ def strip_markup(text: str) -> str:
 
 def get_friendly_chat_name(chat_id: str, db_url: str) -> str:
     """
-    Aplica las reglas heurísticas para devolver un nombre amigable
-    usando la URL de conexión a la base de datos activa.
+    Aplica las reglas heurísticas para devolver un nombre amigable de chat.
+    Aprovecha la conexión activa si existe sin forzar conexiones de red pesadas.
     """
     val = str(chat_id).lower().strip()
 
-    if val.lower() in ["me", "self"]:
+    if val in ("me", "self"):
         return "Mensajes Guardados"
 
     if val.startswith("@"):
         return val
 
     if val.replace("-", "").isdigit():
-        try:
-            with DatabaseSession(db_url):
-                chat = TelegramChat.get_or_none(TelegramChat.id == int(val))
-                if chat:
+        chat_int_id = int(val)
+        # 1. Si la base de datos ya está conectada globalmente, la usamos directamente
+        if db_proxy.obj is not None and not db_proxy.is_closed():
+            try:
+                chat = TelegramChat.get_or_none(TelegramChat.id == chat_int_id)
+                if chat and chat.title:
                     return f"{chat.title}"
-        except Exception:
-            return chat_id
+            except Exception:
+                pass
+        else:
+            # 2. Si está desconectada y es SQLite local, hacemos una lectura rápida sin DDL
+            if db_url.startswith("sqlite://"):
+                try:
+                    with DatabaseSession(db_url, auto_init_schema=False):
+                        chat = TelegramChat.get_or_none(TelegramChat.id == chat_int_id)
+                        if chat and chat.title:
+                            return f"{chat.title}"
+                except Exception:
+                    pass
+
     return chat_id
 
 

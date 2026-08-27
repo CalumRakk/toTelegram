@@ -35,6 +35,7 @@ class CLIState:
             settings.database_url, self.manager.database_path
         )
 
-        with DatabaseSession(db_url) as db:
+        # auto_init_schema=True asegura que las tablas existan antes de operar
+        with DatabaseSession(db_url, auto_init_schema=True) as db:
             with self.get_telegram_session(profile_name) as client:
                 yield client, db

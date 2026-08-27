@@ -14,7 +14,7 @@ from totelegram.schemas import Strategy
 class TestModelsArchitecture(unittest.TestCase):
     def setUp(self):
         url = "sqlite:///:memory:"
-        self.db_manager = DatabaseSession(url)
+        self.db_manager = DatabaseSession(url, auto_init_schema=True)
         self.db_manager.start()
         self.chat = TelegramChat.create(
             id=-100123456, title="Test Chat", type="channel"
