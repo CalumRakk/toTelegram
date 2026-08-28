@@ -94,12 +94,12 @@ class TestCliProfile(unittest.TestCase):
         """Cambio exitoso de perfil cuando existen .env y .session."""
         profile_name = "active_user"
 
-        # 1. Crear .env
+        # Crear .env
         env_path = self.manager.get_settings_path(profile_name)
         env_path.parent.mkdir(parents=True, exist_ok=True)
         env_path.write_text("profile_name=active_user\nchat_id=12345")
 
-        # 2. Crear .session (archivo vacío para simular existencia)
+        # Crear .session (archivo vacío para simular existencia)
         session_path = self.manager.get_session_path(profile_name)
         session_path.write_text("fake session data")
 

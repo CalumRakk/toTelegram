@@ -14,7 +14,12 @@ from rich.table import Table
 from rich.text import Text
 from rich.theme import Theme
 
-from totelegram.database import DatabaseSession, db_proxy, normalize_database_url
+from totelegram.database import (
+    DatabaseSession,
+    db_proxy,
+    normalize_database_url,
+    sanitize_database_url,
+)
 from totelegram.identity import Profile, Settings, SettingsManager
 from totelegram.models import TelegramChat
 from totelegram.schemas import COLORS, AccessLevel, Commands, ScanReport
@@ -56,7 +61,7 @@ def get_friendly_chat_name(chat_id: str, db_url: str) -> str:
 
     if val.replace("-", "").isdigit():
         chat_int_id = int(val)
-        # 1. Si la base de datos ya está conectada globalmente, la usamos directamente
+        # Si la base de datos ya está conectada globalmente, la usamos directamente
         if db_proxy.obj is not None and not db_proxy.is_closed():
             try:
                 chat = TelegramChat.get_or_none(TelegramChat.id == chat_int_id)
@@ -65,7 +70,7 @@ def get_friendly_chat_name(chat_id: str, db_url: str) -> str:
             except Exception:
                 pass
         else:
-            # 2. Si está desconectada y es SQLite local, hacemos una lectura rápida sin DDL
+            # Si está desconectada y es SQLite local, hacemos una lectura rápida sin DDL
             if db_url.startswith("sqlite://"):
                 try:
                     with DatabaseSession(db_url, auto_init_schema=False):
@@ -474,8 +479,14 @@ class DisplayConfig:
             if field_name.lower() == "chat_id":
                 value = get_friendly_chat_name(value, db_url)
 
-            # Oculta value sensible
-            if info.is_sensitive and value is not None:
+            # Sanitización de campos sensibles
+            if field_name.lower() == "database_url":
+                display_val = (
+                    sanitize_database_url(value)
+                    if value
+                    else "[dim]SQLite local por defecto[/dim]"
+                )
+            elif info.is_sensitive and value is not None:
                 display_val = cls._mark_sensitive(value)
             else:
                 display_val = str(value)

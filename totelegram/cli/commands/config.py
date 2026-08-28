@@ -7,7 +7,9 @@ import typer
 
 from totelegram.cli.state import CLIState
 from totelegram.cli.ui import UI, DisplayConfig, DisplayGeneric, DisplayProfile
+from totelegram.database import DatabaseSession, normalize_database_url
 from totelegram.identity import ConfigService
+from totelegram.migration import DatabaseState, inspect_database
 from totelegram.schemas import VALUE_NOT_SET, Commands
 from totelegram.telegram.access import ChatAccessService
 from totelegram.telegram.search import ChatSearchService
@@ -189,6 +191,7 @@ def check_config(ctx: typer.Context):
         UI.error("No hay un perfil activo o el perfil especificado no existe.")
         raise typer.Exit(1)
 
+    # Verificación de archivos locales (.env y .session)
     with UI.loading(
         f"Comprobando integridad local del perfil: [bold]{profile_name}[/]"
     ):
@@ -216,6 +219,53 @@ def check_config(ctx: typer.Context):
 
     settings = manager.get_settings(profile_name)
 
+    # Verificación de la Base de Datos (SQLite o PostgreSQL)
+    db_url = normalize_database_url(settings.database_url, manager.database_path)
+    with UI.loading("Verificando conexión y esquema de base de datos..."):
+        try:
+            # Conexión pasiva sin DDL automático para diagnóstico
+            with DatabaseSession(db_url, auto_init_schema=False) as db:
+                report = inspect_database(db)
+
+                if report.state == DatabaseState.UP_TO_DATE:
+                    UI.success(
+                        f"Base de datos: [bold]{report.engine_name.upper()}[/] al día (v{report.current_version})."
+                    )
+                elif report.state == DatabaseState.OUTDATED:
+                    UI.warn(
+                        f"Base de datos: [bold]{report.engine_name.upper()}[/] requiere actualización "
+                        f"(v{report.current_version} -> v{report.target_version}). Se aplicará automáticamente."
+                    )
+                elif report.state == DatabaseState.FRESH:
+                    UI.info(
+                        f"Base de datos: [bold]{report.engine_name.upper()}[/] nueva (se inicializará en v{report.target_version})."
+                    )
+                elif report.state == DatabaseState.LEGACY_SQLITE:
+                    UI.warn(
+                        f"Base de datos SQLite detectada en formato legacy (v{report.current_version}). Se migrará automáticamente."
+                    )
+                elif report.state == DatabaseState.AHEAD:
+                    UI.error(
+                        f"Base de datos incompatible: versión v{report.current_version} en base de datos, "
+                        f"pero el cliente solo soporta hasta v{report.target_version}."
+                    )
+                    UI.info(
+                        "Acción requerida: Actualiza toTelegram (`pip install --upgrade totelegram`)."
+                    )
+                    raise typer.Exit(1)
+                elif report.state == DatabaseState.CORRUPTED:
+                    UI.error(
+                        f"Base de datos corrupta o inconsistente: {report.details}"
+                    )
+                    raise typer.Exit(1)
+
+        except typer.Exit:
+            raise
+        except Exception as e:
+            UI.error(f"Error conectando a la base de datos: {e}")
+            raise typer.Exit(1)
+
+    # Verificación del destino (chat_id)
     if settings.chat_id == VALUE_NOT_SET:
         UI.warn("El destino (chat_id) no está configurado.")
         UI.tip(
@@ -227,6 +277,7 @@ def check_config(ctx: typer.Context):
         )
         raise typer.Exit(code=1)
 
+    # Verificación de Telegram y Permisos
     with state.get_telegram_session(profile_name) as client:
         with UI.loading("Verificando conexión y permisos en Telegram..."):
             validator = ChatAccessService(client)

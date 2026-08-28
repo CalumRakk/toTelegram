@@ -5,6 +5,7 @@ import threading
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Optional
+from urllib.parse import urlparse, urlunparse
 
 import peewee
 from peewee import Field
@@ -13,7 +14,7 @@ from playhouse.db_url import parse as db_parse
 from playhouse.db_url import register_database
 from playhouse.postgres_ext import Psycopg3Database
 
-from totelegram.migration import run_migrations
+from totelegram.migration import setup_database_schema
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +66,38 @@ db_proxy = peewee.Proxy()
 _sqlite_write_lock = threading.RLock()
 
 
+def sanitize_database_url(url: Optional[str]) -> str:
+    """
+    Enmascara la contraseña de una URL de base de datos para mostrarla en logs y UI.
+    Ej: postgresql://admin:secreto123@db.host.com:5432/mibase
+        -> postgresql://admin:***@db.host.com:5432/mibase
+    """
+    if not url:
+        return "None"
+
+    url = url.strip()
+    if not (
+        url.startswith("postgresql://")
+        or url.startswith("postgres://")
+        or url.startswith("psycopg3://")
+    ):
+        return url
+
+    try:
+        parsed = urlparse(url)
+        if parsed.password:
+            # Reconstruir netloc con la contraseña enmascarada
+            user = parsed.username or ""
+            host = parsed.hostname or ""
+            port = f":{parsed.port}" if parsed.port else ""
+            netloc = f"{user}:***@{host}{port}"
+            sanitized = parsed._replace(netloc=netloc)
+            return urlunparse(sanitized)
+        return url
+    except Exception:
+        return url
+
+
 @contextmanager
 def db_transaction(db: peewee.Database):
     """
@@ -88,37 +121,9 @@ def db_transaction(db: peewee.Database):
 
 def init_database_schema(db: peewee.Database, db_url: str):
     """
-    Inicializa el esquema de tablas y ejecuta migraciones pendientes.
-    Debe invocarse una sola vez al inicio de los flujos de trabajo principales.
+    Inicializa el esquema y ejecuta migraciones pendientes usando el nuevo orquestador.
     """
-    from totelegram.models import (
-        Claim,
-        Job,
-        Payload,
-        RemotePayload,
-        Source,
-        TapeMember,
-        TapeMemberGPS,
-        TelegramChat,
-        TelegramUser,
-    )
-
-    db_proxy.create_tables(
-        [
-            Source,
-            Job,
-            Payload,
-            RemotePayload,
-            TelegramChat,
-            TelegramUser,
-            TapeMember,
-            TapeMemberGPS,
-            Claim,
-        ],
-        safe=True,
-    )
-
-    run_migrations(db, db_url)
+    setup_database_schema(db)
 
 
 class DatabaseSession:

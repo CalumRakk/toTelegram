@@ -2,7 +2,7 @@ import unittest
 
 import peewee
 
-from totelegram.database import DatabaseSession, normalize_database_url  # type: ignore
+from totelegram.database import DatabaseSession
 from totelegram.models import (
     Job,
     Source,
