@@ -10,6 +10,7 @@ import tartape
 from tartape.schemas import EntryState, ManifestEntry
 
 from totelegram import __VERSION__
+from totelegram.common.helpers import is_expired as helpers_is_expired
 from totelegram.database import db_transaction
 from totelegram.packaging.partitioner import StatelessPartitioner
 from totelegram.packaging.schemas import VirtualChunk, VirtualTapeMember
@@ -581,12 +582,8 @@ class RemotePayload(BaseModel):
         if self.is_orphaned or not self.last_verified_at:
             return False
 
-        last_v = self.last_verified_at
-        if last_v.tzinfo is None:
-            last_v = last_v.replace(tzinfo=timezone.utc)
-
-        delta = datetime.now(timezone.utc) - last_v
-        return delta.total_seconds() < 900
+        # Si last_verified_at + 900 segundos ya expiró, entonces no está "fresh"
+        return not helpers_is_expired(self.last_verified_at, grace_period_seconds=900)
 
     @staticmethod
     def register_upload(
@@ -695,8 +692,4 @@ class Claim(BaseModel):
 
     @classmethod
     def is_expired(cls, claim: "Claim") -> bool:
-        now = datetime.now(timezone.utc)
-        exp = claim.expires_at
-        if exp.tzinfo is None:
-            exp = exp.replace(tzinfo=timezone.utc)
-        return now > exp
+        return helpers_is_expired(claim.expires_at)

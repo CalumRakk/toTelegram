@@ -6,6 +6,7 @@ from typing import cast
 
 import peewee
 
+from totelegram.common.helpers import is_expired
 from totelegram.models import Claim, ResourceType
 
 logger = logging.getLogger(__name__)
@@ -92,11 +93,7 @@ class PeeweeLeaseStore(LeaseStore):
                     claim.save(only=[Claim.expires_at, Claim.updated_at])
                     return True
 
-                exp = claim.expires_at
-                if exp.tzinfo is None:
-                    exp = exp.replace(tzinfo=timezone.utc)
-
-                if datetime.now(timezone.utc) > exp:
+                if is_expired(claim.expires_at):
                     claim.node_id = node_id
                     claim.expires_at = expires_at
                     claim.save(only=[Claim.node_id, Claim.expires_at, Claim.updated_at])
