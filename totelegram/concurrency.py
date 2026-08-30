@@ -126,34 +126,3 @@ class PeeweeLeaseStore(LeaseStore):
 
     def release(self, resource_id: str) -> None:
         Claim.delete().where(Claim.resource_id == resource_id).execute()
-
-
-class LeaseKeeper:
-    def __init__(self, manager: LeaseManager, resource_id: str, ttl_minutes: int = 5):
-        self.manager = manager
-        self.resource_id = resource_id
-        self.ttl_minutes = ttl_minutes
-        self.interval_seconds = (ttl_minutes * 60) / 2.0
-        self._stop_event = threading.Event()
-        self._thread = None
-
-    def _heartbeat(self):
-        while not self._stop_event.wait(self.interval_seconds):
-            logger.debug(f"Heartbeat: Renovando lease para {self.resource_id}...")
-            success = self.manager.renew(self.resource_id, self.ttl_minutes)
-            if not success:
-                logger.warning(
-                    f"Peligro: No se pudo renovar el lease para {self.resource_id}."
-                )
-
-    def __enter__(self):
-        self._thread = threading.Thread(
-            target=self._heartbeat, daemon=True, name=f"Heartbeat-{self.resource_id}"
-        )
-        self._thread.start()
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self._stop_event.set()
-        if self._thread:
-            self._thread.join(timeout=2.0)

@@ -20,7 +20,6 @@ from rich.progress import (
 
 from totelegram.cli.ui import UI, console
 from totelegram.common.streams import ThrottledFile
-from totelegram.concurrency import LeaseKeeper
 from totelegram.database import db_transaction
 from totelegram.models import Job, Payload, RemotePayload
 from totelegram.packaging.snapshot import SnapshotService
@@ -62,6 +61,17 @@ class UploadService:
         self.lease_manager = u_ctx.lease_manager
         self.account_id = u_ctx.settings.telegram_account_id
 
+        self._active_leases = []  # Almacena strings como 'account:123' o 'job:456'
+
+    def _renew_active_leases(self):
+        """Renueva todos los bloqueos registrados actualmente en el servicio."""
+        for resource_id in self._active_leases:
+            success = self.lease_manager.renew(resource_id)
+            if success:
+                logger.debug(f"Lease {resource_id} renovado con éxito.")
+            else:
+                logger.warning(f"No se pudo renovar el lease {resource_id}.")
+
     def _ensure_account_lease(self):
         """Bloquea el uso de la cuenta de Telegram a nivel de base de datos."""
         if not self.account_id:
@@ -86,37 +96,53 @@ class UploadService:
         """
         Orquesta el ciclo de vida de un Job: Investigación, Ejecución y Cierre.
         """
-        self._ensure_account_lease()
 
+        # Adquirir lease de cuenta (si aplica)
+        self._ensure_account_lease()
+        account_resource_id = f"account:{self.account_id}"
+        if self.account_id:
+            self._active_leases.append(account_resource_id)
+
+        # Adquirir lease de trabajo
         if not self.lease_manager.try_acquire_job_lease(job.id):
             UI.info(f"El Job {job.id} está siendo procesado por otro nodo.")
+            # Limpiar lease de cuenta si no pudimos tomar el trabajo
+            if account_resource_id in self._active_leases:
+                self._active_leases.remove(account_resource_id)
+                self._release_account_lease()
             return False
 
-        account_resource_id = f"account:{self.account_id}"
         job_resource_id = f"job:{job.id}"
+        self._active_leases.append(job_resource_id)
 
         logger.info(f"Iniciando procesamiento de Job {job.id} para: {path.name}")
         report = self.u_ctx.discovery.investigate(job)
 
         try:
-            with (
-                LeaseKeeper(self.lease_manager, account_resource_id),
-                LeaseKeeper(self.lease_manager, job_resource_id),
-            ):
-                if report.state == AvailabilityState.FULFILLED:
-                    UI.info(f"[dim]{path.name}[/] ya está disponible en el destino.")
-                    if job.status != JobStatus.UPLOADED:
-                        job.set_uploaded()
+            if report.state == AvailabilityState.FULFILLED:
+                UI.info(f"[dim]{path.name}[/] ya está disponible en el destino.")
+                if job.status != JobStatus.UPLOADED:
+                    job.set_uploaded()
 
-                elif report.state == AvailabilityState.NEEDS_UPLOAD:
-                    self.execute_physical_upload(job, path, is_last_job)
+            elif report.state == AvailabilityState.NEEDS_UPLOAD:
+                self.execute_physical_upload(job, path, is_last_job)
 
-                elif report.state == AvailabilityState.CAN_FORWARD:
-                    UI.info("Iniciando [bold]Smart Forward[/]...")
-                    self.execute_smart_forward(job, report)
+            elif report.state == AvailabilityState.CAN_FORWARD:
+                UI.info("Iniciando [bold]Smart Forward[/]...")
+                self.execute_smart_forward(job, report)
 
         finally:
+            # Asegurar la liberación de recursos en cualquier escenario de salida o fallo
             self.lease_manager.release_job_lease(job.id)
+            if job_resource_id in self._active_leases:
+                self._active_leases.remove(job_resource_id)
+
+            if is_last_job:
+                self._release_account_lease()
+                if account_resource_id in self._active_leases:
+                    self._active_leases.remove(account_resource_id)
+
+        # Logica de procesamiento y generacion de snapshot
 
         job = Job.get_by_id(job.id)
         logger.info(
@@ -190,11 +216,38 @@ class UploadService:
     def _smart_pause(self):
         """Calcula y ejecuta una pausa aleatoria basada en la configuración."""
         r = self.settings.upload_pause_range
-
         minutes = random.randint(min(r), max(r))
 
         if minutes > 0:
-            UI.sleep_progress(minutes * 60)
+            self._sleep_with_renewal(minutes * 60)
+
+    def _sleep_with_renewal(self, seconds: int):
+        """Realiza una pausa visual en el hilo principal mientras renueva los leases periódicamente."""
+        if seconds <= 0:
+            return
+
+        UI.info(f"Iniciando pausa ({seconds // 60} min)...")
+        last_renew = time.monotonic()
+        RENEW_INTERVAL = 60
+
+        with console.status("[bold blue]Pausa activa...", spinner="line") as status:
+            for i in range(seconds, 0, -1):
+                time.sleep(1)
+
+                # Actualizar la interfaz cada minuto o en la cuenta regresiva final
+                if i % 60 == 0 or i <= 10:
+                    mins = i // 60
+                    secs = i % 60
+                    status.update(
+                        f"[bold blue]Pausa activa: Siguiente parte en {mins}m {secs}s..."
+                    )
+
+                # Renovar leases de forma síncrona en el bucle de espera
+                if time.monotonic() - last_renew > RENEW_INTERVAL:
+                    self._renew_active_leases()
+                    last_renew = time.monotonic()
+
+        UI.success("Pausa finalizada. Reanudando subida.")
 
     def execute_physical_upload(self, job: Job, path: Path, is_last_job: bool):
         logger.info(
@@ -293,6 +346,7 @@ class UploadService:
     ):
 
         state_control = ProgressState()
+
         progress = Progress(
             TextColumn("[bold blue]{task.fields[filename]}", justify="left"),
             BarColumn(bar_width=20, pulse_style="white"),
@@ -306,8 +360,20 @@ class UploadService:
             expand=False,
         )
 
+        last_renew = time.monotonic()
+        RENEW_INTERVAL = 60  # Intervalo de renovación en segundos (ej. 1 minuto)
+
         def update_rich_progress(current, total, state: ProgressState):
+            nonlocal last_renew
             progress.update(task_id, completed=current, status=state.status)
+
+            # Evaluar si corresponde renovar los leases en este ciclo de progreso
+            if time.monotonic() - last_renew > RENEW_INTERVAL:
+                try:
+                    self._renew_active_leases()
+                    last_renew = time.monotonic()
+                except Exception as e:
+                    logger.error(f"Error durante la renovación inline de leases: {e}")
 
         logger.debug(f"Preparando stream de datos para pieza {payload.sequence_index}")
         if source_type == SourceType.FOLDER:
