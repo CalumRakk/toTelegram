@@ -1,6 +1,7 @@
 import enum
 import re
-from dataclasses import dataclass
+import time
+from dataclasses import dataclass, field
 from enum import Enum, IntEnum
 from pathlib import Path
 from typing import (
@@ -200,9 +201,13 @@ class ScanReport(BaseModel):
 
 @dataclass
 class ProgressState:
-    """Objeto para comunicar estados extra desde los parches a la UI."""
+    """Objeto para comunicar estados extra desde los parches a la UI y controlar el throttling de renovación."""
 
     status: str = "[blue]Subiendo...[/]"
+    # Registra el tiempo de inicio
+    last_renew: float = field(default_factory=time.monotonic)
+    # Intervalo de renovación de lease (2 minutos por defecto)
+    renew_interval_seconds: int = 120
 
 
 class ResourceType(str, Enum):

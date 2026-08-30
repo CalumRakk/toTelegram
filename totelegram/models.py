@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 
 
 from totelegram.common.files import create_md5sum_by_hashlib, get_mimetype
-from totelegram.common.helpers import batched
+from totelegram.common.helpers import batched, get_utc_now
 from totelegram.database import EnumField, PydanticJSONField, db_proxy
 from totelegram.schemas import StrategyConfig, TapeCatalog
 
@@ -52,15 +52,11 @@ class PortableJSONField(peewee.TextField):
 
 
 class BaseModel(peewee.Model):
-    created_at = cast(
-        datetime, peewee.DateTimeField(default=lambda: datetime.now(timezone.utc))
-    )
-    updated_at = cast(
-        datetime, peewee.DateTimeField(default=lambda: datetime.now(timezone.utc))
-    )
+    created_at = peewee.DateTimeField(default=get_utc_now)
+    updated_at = peewee.DateTimeField(default=get_utc_now)
 
     def save(self, *args, **kwargs):
-        self.updated_at = datetime.now(timezone.utc)
+        self.updated_at = get_utc_now()
         return super().save(*args, **kwargs)
 
     class Meta:
@@ -503,6 +499,7 @@ class Payload(BaseModel):
 
     id: int
     payloads: Generator["Payload", None, None]
+    job_id: int
 
     job = cast(Job, peewee.ForeignKeyField(Job, backref="payloads"))
     md5sum = cast(Optional[str], peewee.CharField(null=True))

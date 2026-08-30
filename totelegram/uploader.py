@@ -345,7 +345,12 @@ class UploadService:
         self, source_type: SourceType, md5sum: str, path: Path, payload: Payload
     ):
 
-        state_control = ProgressState()
+        # Inicializamos el estado del progreso con el temporizador actual
+        state_control = ProgressState(
+            status="[blue]Subiendo...[/]",
+            last_renew=time.monotonic(),
+            renew_interval_seconds=120,  # Renovamos el lease cada 2 minutos
+        )
 
         progress = Progress(
             TextColumn("[bold blue]{task.fields[filename]}", justify="left"),
@@ -360,22 +365,28 @@ class UploadService:
             expand=False,
         )
 
-        last_renew = time.monotonic()
-        RENEW_INTERVAL = 60  # Intervalo de renovación en segundos (ej. 1 minuto)
+        # Preparamos las claves de los recursos que necesitamos mantener bloqueados
+        # Accedemos a payload.job_id directamente para evitar consultas adicionales a la DB
+        job_resource_id = f"job:{payload.job_id}"
+        account_resource_id = f"account:{self.account_id}" if self.account_id else None
 
         def update_rich_progress(current, total, state: ProgressState):
-            nonlocal last_renew
+
             progress.update(task_id, completed=current, status=state.status)
 
-            # Evaluar si corresponde renovar los leases en este ciclo de progreso
-            if time.monotonic() - last_renew > RENEW_INTERVAL:
-                try:
-                    self._renew_active_leases()
-                    last_renew = time.monotonic()
-                except Exception as e:
-                    logger.error(f"Error durante la renovación inline de leases: {e}")
+            now = time.monotonic()
+            if now - state.last_renew > state.renew_interval_seconds:
+                logger.debug(f"Renovando leases para {job_resource_id}...")
+
+                self.lease_manager.renew(job_resource_id)
+
+                if account_resource_id:
+                    self.lease_manager.renew(account_resource_id)
+
+                state.last_renew = now
 
         logger.debug(f"Preparando stream de datos para pieza {payload.sequence_index}")
+
         if source_type == SourceType.FOLDER:
             tape = tartape.Tape(path)
             volumen = tape.get_volume(
