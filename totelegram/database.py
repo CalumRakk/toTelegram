@@ -14,8 +14,6 @@ from playhouse.db_url import parse as db_parse
 from playhouse.db_url import register_database
 from playhouse.postgres_ext import Psycopg3Database
 
-from totelegram.migration import setup_database_schema
-
 logger = logging.getLogger(__name__)
 
 # Sobrescribimos el registro para que URLs estándar (postgresql://, postgres://)
@@ -68,7 +66,7 @@ _sqlite_write_lock = threading.RLock()
 
 def sanitize_database_url(url: Optional[str]) -> str:
     """
-    Enmascara la contraseña de una URL de base de datos para mostrarla en logs y UI.
+    Enmascara la contraseña de una URL de base de datos para mostrarla de forma segura en logs y UI.
     Ej: postgresql://admin:secreto123@db.host.com:5432/mibase
         -> postgresql://admin:***@db.host.com:5432/mibase
     """
@@ -86,7 +84,6 @@ def sanitize_database_url(url: Optional[str]) -> str:
     try:
         parsed = urlparse(url)
         if parsed.password:
-            # Reconstruir netloc con la contraseña enmascarada
             user = parsed.username or ""
             host = parsed.hostname or ""
             port = f":{parsed.port}" if parsed.port else ""
@@ -123,6 +120,8 @@ def init_database_schema(db: peewee.Database, db_url: str):
     """
     Inicializa el esquema y ejecuta migraciones pendientes usando el nuevo orquestador.
     """
+    from totelegram.migration import setup_database_schema
+
     setup_database_schema(db)
 
 

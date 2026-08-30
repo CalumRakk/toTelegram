@@ -64,6 +64,9 @@ class SchemaVersion(peewee.Model):
     applied_at = peewee.DateTimeField(default=lambda: datetime.now(timezone.utc))
 
     class Meta:
+        from totelegram.database import db_proxy
+
+        database = db_proxy
         table_name = "schema_version"
 
 
@@ -75,7 +78,11 @@ def inspect_database(db: peewee.Database) -> DatabaseInspectionReport:
     Inspecciona la base de datos de manera estrictamente de SOLO LECTURA.
     No ejecuta DDL ni transacciones de escritura.
     """
-    SchemaVersion._meta.database = db
+    from totelegram.database import db_proxy
+
+    if db_proxy.obj != db:
+        db_proxy.initialize(db)
+
     engine_name = "sqlite" if isinstance(db, peewee.SqliteDatabase) else "postgresql"
     target_version = __CURRENT_DB_VERSION__
 
@@ -102,7 +109,6 @@ def inspect_database(db: peewee.Database) -> DatabaseInspectionReport:
 
     # Caso con Tabla `schema_version` existente
     if has_schema_version_table:
-        SchemaVersion._meta.database = db
         try:
             latest = (
                 SchemaVersion.select().order_by(SchemaVersion.version.desc()).first()
@@ -136,13 +142,14 @@ def inspect_database(db: peewee.Database) -> DatabaseInspectionReport:
         try:
             cursor = db.execute_sql("PRAGMA user_version")
             pragma_version = cursor.fetchone()[0]
-            return DatabaseInspectionReport(
-                state=DatabaseState.LEGACY_SQLITE,
-                current_version=pragma_version,
-                target_version=target_version,
-                engine_name=engine_name,
-                details=f"SQLite legacy detectada vía PRAGMA user_version={pragma_version}",
-            )
+            if pragma_version > 0:
+                return DatabaseInspectionReport(
+                    state=DatabaseState.LEGACY_SQLITE,
+                    current_version=pragma_version,
+                    target_version=target_version,
+                    engine_name=engine_name,
+                    details=f"SQLite legacy detectada vía PRAGMA user_version={pragma_version}",
+                )
         except Exception as e:
             return DatabaseInspectionReport(
                 state=DatabaseState.CORRUPTED,
@@ -247,6 +254,7 @@ def _backup_sqlite_db_if_needed(db: peewee.SqliteDatabase, current_version: int)
 
 def _initialize_fresh_database(db: peewee.Database, target_version: int):
     """Crea todas las tablas del modelo actual y registra la versión máxima."""
+    from totelegram.database import db_proxy
     from totelegram.models import (
         Claim,
         Job,
@@ -258,6 +266,9 @@ def _initialize_fresh_database(db: peewee.Database, target_version: int):
         TelegramChat,
         TelegramUser,
     )
+
+    if db_proxy.obj != db:
+        db_proxy.initialize(db)
 
     models: List[type[peewee.Model]] = [
         SchemaVersion,
@@ -273,7 +284,6 @@ def _initialize_fresh_database(db: peewee.Database, target_version: int):
     ]
 
     with db.atomic():
-        SchemaVersion._meta.database = db
         db.create_tables(models, safe=True)
         SchemaVersion.create(version=target_version)
 
@@ -282,7 +292,11 @@ def _initialize_fresh_database(db: peewee.Database, target_version: int):
 
 def _migrate_legacy_sqlite_bridge(db: peewee.SqliteDatabase, legacy_version: int):
     """Transfiere la versión de PRAGMA user_version a la tabla `schema_version`."""
-    SchemaVersion._meta.database = db
+    from totelegram.database import db_proxy
+
+    if db_proxy.obj != db:
+        db_proxy.initialize(db)
+
     with db.atomic():
         db.create_tables([SchemaVersion], safe=True)
         SchemaVersion.create(version=legacy_version)
@@ -292,7 +306,10 @@ def _migrate_legacy_sqlite_bridge(db: peewee.SqliteDatabase, legacy_version: int
 
 def _apply_pending_migrations(db: peewee.Database, from_version: int, to_version: int):
     """Ejecuta secuencialmente los pasos registrados entre la versión actual y el objetivo."""
-    SchemaVersion._meta.database = db
+    from totelegram.database import db_proxy
+
+    if db_proxy.obj != db:
+        db_proxy.initialize(db)
 
     for v in range(from_version, to_version):
         next_v = v + 1
