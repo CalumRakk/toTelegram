@@ -211,5 +211,6 @@ class ProgressState:
 
 
 class ResourceType(str, Enum):
-    ACCOUNT = "account"  # Telegram account (account:12345)
-    JOB = "job"  # Work unit (job:123)
+    ACCOUNT = "account"  # Exclusividad de cuenta de Telegram (account:12345)
+    PAYLOAD = "payload"  # Exclusividad de la pieza física en subida (payload:67890)
+    JOB = "job"  # (Opcional / Retrocompatibilidad)

@@ -79,14 +79,30 @@ def apply_pyrogram_patches():
                                     progress_args[0].status = "[blue]Subiendo...[/]"
                             break
                         except FloodWait as e:
+                            total_wait = int(e.value) + 1  # type: ignore
+                            logger.warning(
+                                f"FloodWait detectado en worker: esperando {total_wait} segundos..."
+                            )
 
-                            if progress_args and hasattr(progress_args[0], "status"):
-                                progress_args[0].status = (
-                                    f"[bold magenta]Limitado ({e.value}s)[/]"
-                                )
+                            # Bucle de espera segmentada (Late cada 10 segundos)
+                            PULSE_INTERVAL = 10
+                            remaining_wait = total_wait
 
+                            while remaining_wait > 0:
+                                sleep_chunk = min(remaining_wait, PULSE_INTERVAL)
+
+                                # Actualizar el estado visual con la cuenta regresiva
+                                if progress_args and hasattr(
+                                    progress_args[0], "status"
+                                ):
+                                    progress_args[
+                                        0
+                                    ].status = (
+                                        f"[bold magenta]Limitado ({remaining_wait}s)[/]"
+                                    )
+
+                                # Notificar al callback de progreso
                                 if progress:
-                                    # Calculamos el progreso actual para el callback
                                     current_progress = file_part * part_size
                                     if inspect.iscoroutinefunction(progress):
                                         await progress(
@@ -101,13 +117,13 @@ def apply_pyrogram_patches():
                                             *progress_args,
                                         )
 
-                            logger.warning(
-                                f"FloodWait detectado en worker: esperando {e.value} segundos..."
-                            )
-                            await asyncio.sleep(int(e.value) + 1)  # type: ignore
-                        except Exception as e:
-                            logger.error(f"Error crítico en worker de subida: {e}")
-                            raise e
+                                # Dormir solo un pequeño intervalo
+                                await asyncio.sleep(sleep_chunk)
+                                remaining_wait -= sleep_chunk
+
+                            # Al terminar la espera, restauramos el estado
+                            if progress_args and hasattr(progress_args[0], "status"):
+                                progress_args[0].status = "[blue]Subiendo...[/]"
 
                     queue.task_done()
 
@@ -404,7 +420,9 @@ def get_patch_status() -> dict:
         from pyrogram.session.session import Session
 
         is_patched = getattr(pyrogram.client.Client, "_patched_by_totelegram", False)
-        is_save_file_custom = pyrogram.client.Client.save_file.__name__ == "save_file_patched"
+        is_save_file_custom = (
+            pyrogram.client.Client.save_file.__name__ == "save_file_patched"
+        )
 
         return {
             "applied": is_patched,
