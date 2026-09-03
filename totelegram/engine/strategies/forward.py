@@ -51,7 +51,6 @@ class SmartForwardStrategy(JobStrategy):
                 payload, ctx.settings.max_filename_length
             )
 
-            # Reenvío de documento mediante file_id
             tg_message = cast(
                 Message,
                 ctx.client.send_document(
@@ -66,10 +65,12 @@ class SmartForwardStrategy(JobStrategy):
                 RemotePayload.register_upload(payload, tg_message, ctx.owner)
 
             pieces_forwarded += 1
-            time.sleep(0.5)  # Pausa breve anti-flood
+            time.sleep(0.5)
 
         with db_transaction(ctx.db):
             job_adopted.set_uploaded()
+
+        ctx.observer.on_forward_success(job_adopted, pieces_forwarded)
 
         return StrategyResult(
             strategy_name="SmartForwardStrategy",

@@ -4,6 +4,8 @@ from typing import TYPE_CHECKING, List, Optional
 
 import peewee
 
+from totelegram.engine.events import NullObserver, UploadObserver
+
 if TYPE_CHECKING:
     from pyrogram.client import Client
     from pyrogram.types import Chat
@@ -32,6 +34,7 @@ class UploadContext:
     settings: "Settings"
     state: "CLIState"
     coordinator: "ConcurrencyCoordinator"
+    observer: UploadObserver = field(default_factory=NullObserver)
 
     @property
     def account_id(self) -> Optional[int]:

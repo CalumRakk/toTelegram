@@ -6,6 +6,7 @@ import peewee
 import tartape
 import typer
 
+from totelegram.cli.observer import RichUploadObserver
 from totelegram.cli.state import CLIState
 from totelegram.cli.ui import UI
 from totelegram.concurrency import ConcurrencyCoordinator
@@ -48,6 +49,7 @@ def prepare_upload_context(
 
     discovery = DiscoveryService(client, db)
     coordinator = ConcurrencyCoordinator(db, node_id=state.manager.node_id)
+    observer = RichUploadObserver()
 
     return UploadContext(
         client=client,
@@ -58,6 +60,7 @@ def prepare_upload_context(
         settings=settings,
         state=state,
         coordinator=coordinator,
+        observer=observer,
     )
 
 

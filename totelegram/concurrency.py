@@ -98,7 +98,7 @@ class PayloadClaim:
 class ConcurrencyCoordinator:
     """
     Fuente de verdad centralizada para la exclusión mutua y leases en toTelegram.
-    Compatible tanto con SQLite local como con PostgreSQL concurrente.
+    Compatible tanto con SQLite y PostgreSQL.
     """
 
     def __init__(self, db: peewee.Database, node_id: str):
