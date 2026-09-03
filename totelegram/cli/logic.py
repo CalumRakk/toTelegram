@@ -1,131 +1,26 @@
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, List, Optional, cast
+from typing import TYPE_CHECKING, List, cast
 
 import peewee
 import tartape
 import typer
-from filelock import Timeout
-from tartape.exceptions import PathConstraintReportError, TarIntegrityError
 
 from totelegram.cli.state import CLIState
-from totelegram.cli.ui import UI, console
+from totelegram.cli.ui import UI
 from totelegram.concurrency import ConcurrencyCoordinator
-from totelegram.database import db_transaction
 from totelegram.discovery import DiscoveryService
 from totelegram.identity import Settings
-from totelegram.models import Job, Source, TelegramChat, TelegramUser
+from totelegram.models import TelegramUser
 from totelegram.schemas import ScanReport
 from totelegram.types import UploadContext
-from totelegram.utils import delete_snapshot, has_snapshot, is_excluded
+from totelegram.utils import has_snapshot, is_excluded
 
 if TYPE_CHECKING:
     from pyrogram.client import Client
     from pyrogram.types import Chat, User
 
 logger = logging.getLogger(__name__)
-
-
-def get_or_create_tape(
-    path: Path,
-    u_ctx: UploadContext,
-    force: bool,
-    auto_truncate: bool = False,
-) -> Source:
-    if tartape.exists(path) and not force:
-        try:
-            tape = tartape.Tape(path)
-            with UI.loading("Verificando integridad de cinta..."):
-                tape.verify(raise_exception=True)
-            return Source.get_or_create_from_tape(tape)
-
-        except (peewee.DoesNotExist, TarIntegrityError):
-            # Si no está en DB o la cinta está corrupta,
-            # caemos en la creación/regeneración de abajo
-            pass
-
-    exclusion_patterns = u_ctx.settings.exclude_files
-    with UI.loading("Generando índice de cinta..."):
-        try:
-            tape = tartape.create(
-                path,
-                exclude=exclusion_patterns,
-                calculate_hashes=True,
-                overwrite=force,
-                auto_truncate=auto_truncate,
-            )
-            return Source.create_from_tape(tape, exclusion_patterns)
-
-        except PathConstraintReportError:
-            UI.error(f"Error al empaquetar la carpeta: [bold]{path.name}[/]")
-            UI.print(
-                "[dim]El formato TAR tiene un límite estricto para la longitud de los nombres y rutas de archivos.[/dim]"
-            )
-            UI.print(
-                "[dim]Algunos archivos dentro de esta carpeta superan este límite.[/dim]"
-            )
-            # TODO ¿deberia mostrar las lista de archivos? por si el usuario quiere renombrarlos manualmente
-
-            UI.educational_tip(
-                title="Nombres de archivo demasiado largos",
-                message="Tienes dos opciones para resolver esto:\n"
-                "1. Renombrar manualmente los archivos con rutas largas.\n"
-                "2. Dejar que toTelegram trunque (recorte) los nombres automáticamente al subirlos.",
-                commands=[
-                    f'totelegram backup "{path}" --auto-truncate',
-                    "totelegram config set auto_truncate true",
-                ],
-                spacing="block",
-                border_style="yellow",
-            )
-            raise typer.Exit(1)
-
-
-def get_or_create_job(
-    path: Path,
-    u_ctx: UploadContext,
-    force: bool,
-    wait_if_busy: bool = False,
-    auto_truncate: bool = False,
-) -> Optional[Job]:
-    """
-    Obtiene el job asociado a un path. Si no existe, lo crea en base de datos.
-    """
-    source_path_lock = u_ctx.state.manager.get_lock_for_path(path)
-    timeout = None if wait_if_busy else 0.01
-
-    try:
-        with source_path_lock.acquire(timeout=timeout):
-            chat_db, _ = TelegramChat.get_or_create_from_chat(u_ctx.tg_chat)
-            if path.is_dir():
-                source = get_or_create_tape(path, u_ctx, force, auto_truncate)
-            else:
-                with console.status(f"[dim]Procesando {path}...[/dim]"):
-                    source = Source.get_or_create_from_filepath(path)
-    except Timeout:
-        UI.info("Otro proceso local está trabajando actualmente con este archivo.")
-        return
-
-    job = Job.get_for_source_in_chat(source, chat_db)
-    if job and not force:
-        UI.info(f"Subida previa recuperada: [bold]{path.name}[/]")
-        return job
-
-    if job and force:
-        UI.info(f"Forzando subida de nuevo: [bold]{path.name}[/]")
-        delete_snapshot(path)
-        with db_transaction(u_ctx.db):
-            job.mark_deleted()
-            job = None
-
-    tg_limit = (
-        u_ctx.settings.tg_max_size_premium
-        if u_ctx.owner.is_premium
-        else u_ctx.settings.tg_max_size_normal
-    )
-    job = Job.formalize_intent(source, chat_db, u_ctx.owner.is_premium, tg_limit)
-    UI.success("Preparando subida.")
-    return job
 
 
 def prepare_upload_context(

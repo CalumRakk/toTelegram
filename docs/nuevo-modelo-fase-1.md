@@ -1,4 +1,4 @@
-# ADR 001: Modelo de Concurrencia Declarativa y Leases Distribuidos
+# ADR: Modelo de Concurrencia Declarativa y Leases Distribuidos
 
 
 ## Contexto
