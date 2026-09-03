@@ -4,18 +4,12 @@ from typing import List
 import typer
 
 from totelegram.cli.commands.config import _get_config_tools, handle_config_errors
-from totelegram.cli.logic import (
-    InventoryEngine,
-    get_or_create_job,
-    prepare_upload_context,
-)
+from totelegram.cli.logic import InventoryEngine, prepare_upload_context
 from totelegram.cli.state import CLIState
 from totelegram.cli.ui import UI, DisplayUpload, console
-from totelegram.schemas import (
-    VALUE_NOT_SET,
-    Commands,
-)
-from totelegram.uploader import UploadService
+from totelegram.concurrency import AccountBusyError
+from totelegram.engine.pipeline import JobPipeline
+from totelegram.schemas import VALUE_NOT_SET, Commands
 
 
 @handle_config_errors
@@ -47,28 +41,25 @@ def send_files(
             f"{Commands.CONFIG_SET} chat_id <ID>",
             f"{Commands.CONFIG_SEARCH} <QUERY>",
         ]
-        UI.tip("puedes configurarlo usando uno de estos comandos:", commands)
+        UI.tip("Puedes configurarlo usando uno de estos comandos:", commands)
         raise typer.Exit(1)
 
     if force:
-        UI.warn("Forzando la subida de carpetas sin comprobar el estado del archivo.")
+        UI.warn("Forzando la subida de archivos sin comprobar el estado previo.")
 
-    with console.status(f"[dim]Scaneando {len(paths)} archivos[/dim]"):
+    with console.status(f"[dim]Escaneando {len(paths)} archivos[/dim]"):
         scan_report = InventoryEngine(settings, force).scan_granular(paths)
 
     DisplayUpload.show_skip_report(scan_report, "archivo")
 
     candidates = scan_report.found
-    if not scan_report.found:
+    if not candidates:
         UI.warn("No se encontraron archivos para enviar.")
-        UI.print(
-            "[dim]Asegúrate de que las rutas existan y no estén excluidas por tus patrones de configuración.[/]"
-        )
         raise typer.Exit(0)
 
     with state.scope() as (client, db):
         u_ctx = prepare_upload_context(state, client, db, settings)
-        uploader = UploadService(u_ctx)
+        pipeline = JobPipeline(u_ctx)
 
         from totelegram.telegram.patches import get_patch_status
 
@@ -88,9 +79,22 @@ def send_files(
             is_last = idx == len(candidates)
             UI.separator()
 
-            job = get_or_create_job(path, u_ctx, force, is_last)
-            if job is None:
-                continue
+            try:
+                result = pipeline.process(
+                    path=path,
+                    is_last_in_batch=is_last,
+                    force=force,
+                )
+                if result.is_completed:
+                    UI.success(f"Archivo [bold]{path.name}[/] procesado exitosamente.")
+                else:
+                    UI.info(
+                        f"Procesamiento parcial de [bold]{path.name}[/]: {result.message}"
+                    )
 
-            if uploader.process_job(job, path, is_last):
-                UI.success(f"Archivo [bold]{path.name}[/] enviado exitosamente.")
+            except AccountBusyError as e:
+                UI.error(str(e))
+                raise typer.Exit(1)
+            except Exception as e:
+                UI.error(f"Error procesando {path.name}: {e}")
+                raise typer.Exit(1)

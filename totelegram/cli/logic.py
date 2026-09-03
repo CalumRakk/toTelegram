@@ -10,7 +10,7 @@ from tartape.exceptions import PathConstraintReportError, TarIntegrityError
 
 from totelegram.cli.state import CLIState
 from totelegram.cli.ui import UI, console
-from totelegram.concurrency import LeaseManager, PeeweeLeaseStore
+from totelegram.concurrency import ConcurrencyCoordinator
 from totelegram.database import db_transaction
 from totelegram.discovery import DiscoveryService
 from totelegram.identity import Settings
@@ -131,10 +131,6 @@ def get_or_create_job(
 def prepare_upload_context(
     state: CLIState, client: "Client", db: peewee.Database, settings: Settings
 ) -> UploadContext:
-    """
-    Centraliza la inicialización de servicios y validación de red.
-    Lanza typer.Exit si algo falla, limpiando el comando principal.
-    """
     with UI.loading("Sincronizando con Telegram..."):
         try:
             tg_chat = cast("Chat", client.get_chat(settings.chat_id))
@@ -156,9 +152,8 @@ def prepare_upload_context(
             raise typer.Exit(1)
 
     discovery = DiscoveryService(client, db)
+    coordinator = ConcurrencyCoordinator(db, node_id=state.manager.node_id)
 
-    lease_store = PeeweeLeaseStore(db)
-    lease_manager = LeaseManager(lease_store, state.manager.node_id)
     return UploadContext(
         client=client,
         db=db,
@@ -167,7 +162,7 @@ def prepare_upload_context(
         owner=owner,
         settings=settings,
         state=state,
-        lease_manager=lease_manager,
+        coordinator=coordinator,
     )
 
 
