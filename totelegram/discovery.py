@@ -144,5 +144,13 @@ class DiscoveryService:
             return is_integral
 
     def _get_expected_count(self, job: Job) -> int:
-        # BUG: comprobar si matematicamente esta comprobacion funciona para las cintas.
-        return math.ceil(job.source.size / job.config.tg_max_size)
+        """
+        Determina la cantidad de piezas esperadas para un Job.
+        Prioriza el conteo real persistido en la BD sobre cálculos aritméticos teóricos.
+        """
+        db_count = job.payloads.count()
+        if db_count > 0:
+            return db_count
+
+        # Fallback si el Job fue planificado en memoria pero sus payloads aún no se han persistido
+        return max(1, math.ceil(job.source.size / job.config.tg_max_size))

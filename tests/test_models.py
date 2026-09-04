@@ -1,27 +1,36 @@
+import json
 import unittest
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from tempfile import NamedTemporaryFile
+from unittest.mock import MagicMock
 
 import peewee
 
 from totelegram.database import DatabaseSession
 from totelegram.models import (
     Job,
+    Payload,
+    RemotePayload,
     Source,
     TelegramChat,
+    TelegramUser,
 )
-from totelegram.schemas import Strategy
+from totelegram.schemas import JobStatus, SourceType, Strategy, StrategyConfig
 
 
 class TestModelsArchitecture(unittest.TestCase):
     def setUp(self):
-        url = "sqlite:///:memory:"
-        self.db_manager = DatabaseSession(url, auto_init_schema=True)
+        self.db_manager = DatabaseSession("sqlite:///:memory:", auto_init_schema=True)
         self.db_manager.start()
+
         self.chat = TelegramChat.create(
             id=-100123456, title="Test Chat", type="channel"
         )
         self.chat_alternate = TelegramChat.create(
-            id=-100123801, title="Test Chat", type="channel"
+            id=-100123801, title="Alternate Chat", type="channel"
         )
+        self.user = TelegramUser.create(id=12345, first_name="Tester", is_premium=False)
 
     def tearDown(self):
         self.db_manager.close()
@@ -30,7 +39,7 @@ class TestModelsArchitecture(unittest.TestCase):
         """Prueba la unicidad de Source por MD5."""
         Source.create(
             path_str="video.mp4",
-            md5sum="abc123",
+            md5sum="abc123unique",
             size=500,
             mtime=1.0,
             mimetype="video/mp4",
@@ -38,17 +47,14 @@ class TestModelsArchitecture(unittest.TestCase):
         with self.assertRaises(peewee.IntegrityError):
             Source.create(
                 path_str="otra_ruta/video.mp4",
-                md5sum="abc123",
+                md5sum="abc123unique",
                 size=500,
                 mtime=1.0,
                 mimetype="video/mp4",
             )
 
     def test_job_contract_strategy_assignment(self):
-        """
-        Prueba la lógica de ADR-002:
-        El Job determina la estrategia al nacer basado en el límite de bytes.
-        """
+        """ADR-002: El Job determina la estrategia al nacer según los límites."""
         source = Source.create(
             path_str="data.bin",
             md5sum="hash1",
@@ -57,15 +63,14 @@ class TestModelsArchitecture(unittest.TestCase):
             mimetype="application/octet-stream",
         )
 
-        # CASO : El archivo (150b) es mayor que el limite (100b) -> CHUNKED
-
+        # CASO 1: Archivo (150b) > Límite (100b) -> CHUNKED
         job_chunked = Job.formalize_intent(
             source, self.chat, is_premium=False, tg_limit=100
         )
         self.assertEqual(job_chunked.strategy, Strategy.CHUNKED)
         self.assertEqual(job_chunked.config.tg_max_size, 100)
 
-        # CASO : El archivo (150b) es menor que el limite (200b) -> SINGLE
+        # CASO 2: Archivo (150b) < Límite (200b) -> SINGLE
         job_single = Job.formalize_intent(
             source, self.chat_alternate, is_premium=True, tg_limit=200
         )
@@ -73,10 +78,7 @@ class TestModelsArchitecture(unittest.TestCase):
         self.assertEqual(job_single.config.tg_max_size, 200)
 
     def test_job_immutability_integrity(self):
-        """
-        Verifica que una vez creado el Job, su config queda persistida en JSON
-        y no cambia aunque cambien los parámetros externos (ADR-002).
-        """
+        """Verifica que la configuración del Job queda persistida en JSON (ADR-002)."""
         source = Source.create(
             path_str="test.zip",
             md5sum="hash_imm",
@@ -87,56 +89,132 @@ class TestModelsArchitecture(unittest.TestCase):
 
         job = Job.formalize_intent(source, self.chat, is_premium=False, tg_limit=100)
 
-        # Recuperamos de la DB para asegurar que el JSONField funcionó
         job_from_db = Job.get_by_id(job.id)
         self.assertEqual(job_from_db.config.tg_max_size, 100)
 
-    # def test_payload_relation_and_status(self):
-    #     """Valida que los payloads se vinculen correctamente y el Job cambie de estado."""
-    #     source = Source.create(
-    #         path_str="doc.pdf", md5sum="h_pdf", size=10, mtime=1.0, mimetype="app/pdf"
-    #     )
+    def test_job_prepare_chunks_and_payload_pending_count(self):
+        """Valida que prepare_chunks particione y calcule piezas pendientes."""
+        with NamedTemporaryFile(delete=False) as tmp:
+            tmp.write(b"x" * 250)
+            tmp_path = Path(tmp.name)
 
-    #     job = Job.formalize_intent(source, self.chat, is_premium=False, tg_limit=100)
+        try:
+            source = Source.create(
+                path_str=str(tmp_path),
+                md5sum="hash_file_250",
+                size=250,
+                mtime=1.0,
+                mimetype="application/octet-stream",
+                type=SourceType.FILE,
+            )
 
-    #     self.assertEqual(job.status, JobStatus.PENDING)
+            job = Job.create(
+                source=source,
+                chat=self.chat,
+                strategy=Strategy.CHUNKED,
+                status=JobStatus.PENDING,
+                config=StrategyConfig(
+                    tg_max_size=100, user_is_premium=False, app_version="0.9.15"
+                ),
+            )
 
-    #     # Simular creación de un payload (SINGLE)
-    #     Payload.create_payloads(job, [Path("doc.pdf")])
-    #     self.assertEqual(job.payloads.count(), 1)
+            mock_settings = MagicMock(exclude_files=[])
+            payloads = job.prepare_chunks(tmp_path, mock_settings)
 
-    #     job.set_uploaded()
-    #     self.assertEqual(job.status, JobStatus.UPLOADED)
+            # 250 bytes / 100 bytes = 3 partes (100, 100, 50)
+            self.assertEqual(len(payloads), 3)
+            self.assertEqual(Payload.total_pending_for_job(job), 3)
+            self.assertFalse(payloads[0].has_remote)
 
-    # def test_remote_payload_register_upload(self):
-    #     """Valida el registro del 'Vínculo de Acceso' (RemotePayload)."""
-    #     source = Source.create(
-    #         path_str="a.txt", md5sum="h1", size=10, mtime=1, mimetype="t"
-    #     )
+            # Subir la primera parte
+            mock_msg = MagicMock(id=999, chat=MagicMock(id=self.chat.id))
+            mock_msg.__str__.return_value = json.dumps(  # type: ignore
+                {"id": 999, "chat": {"id": self.chat.id}}
+            )
 
-    #     job = Job.formalize_intent(source, self.chat, False, 100)
-    #     payload = Payload.create(job=job, sequence_index=0, md5sum="hp1", size=10)
+            RemotePayload.register_upload(payloads[0], mock_msg, self.user)
 
-    #     user = TelegramUser.create(id=123, first_name="Tester")
+            self.assertEqual(Payload.total_pending_for_job(job), 2)
+            self.assertTrue(Payload.get_by_id(payloads[0].id).has_remote)
 
-    #     # Mock de objeto Message de Pyrogram que cumpla con json.loads(str(msg))
-    #     class MockTgMessage:
-    #         def __init__(self):
-    #             self.id = 999
-    #             self.chat = type("obj", (object,), {"id": -100123456})
+        finally:
+            if tmp_path.exists():
+                tmp_path.unlink()
 
-    #         def __str__(self):
-    #             return json.dumps(
-    #                 {
-    #                     "message_id": self.id,
-    #                     "chat": {"id": self.chat.id, "type": "channel"},  # type: ignore
-    #                 }
-    #             )
+    def test_remote_payload_lifecycle_and_freshness(self):
+        """Valida el ciclo de vida de RemotePayload (verificado, orfanado, frescura)."""
+        source = Source.create(
+            path_str="doc.pdf", md5sum="h_pdf", size=100, mtime=1.0, mimetype="app/pdf"
+        )
+        job = Job.formalize_intent(source, self.chat, False, 1000)
+        payload = Payload.create(
+            job=job,
+            sequence_index=0,
+            start_offset=0,
+            end_offset=100,
+            size=100,
+            filename="doc.pdf",
+            filename_short="doc.pdf",
+        )
 
-    #     remote = RemotePayload.register_upload(
-    #         payload=payload, tg_message=MockTgMessage(), owner=user
-    #     )
+        # FIX: Declarar empty=False explícitamente en el mock
+        mock_msg = MagicMock(id=505, chat=MagicMock(id=self.chat.id), empty=False)
+        mock_msg.__str__.return_value = json.dumps(  # type: ignore
+            {"id": 505, "chat": {"id": self.chat.id}}
+        )
 
-    #     self.assertEqual(remote.message_id, 999)
-    #     self.assertEqual(remote.chat_id, -100123456)
-    #     self.assertEqual(remote.owner.id, 123)
+        remote = RemotePayload.register_upload(payload, mock_msg, self.user)
+
+        # 1. Recién creado sin verificar -> No es fresh
+        self.assertFalse(remote.is_fresh)
+
+        # 2. Marcado como verificado ahora -> Es fresh
+        remote.mark_verified(mock_msg)
+        self.assertTrue(remote.is_fresh)
+        self.assertFalse(remote.is_orphaned)
+
+        # 3. Marcado como huérfano
+        remote.mark_orphaned()
+        self.assertTrue(remote.is_orphaned)
+        self.assertFalse(remote.is_fresh)
+
+        # 4. Verificación de expiración temporal (más de 15 minutos)
+        remote.is_orphaned = False
+        remote.last_verified_at = datetime.now(timezone.utc) - timedelta(minutes=20)
+        remote.save()
+        self.assertFalse(remote.is_fresh)
+
+    def test_job_mark_deleted_orphans_remotes(self):
+        """Al marcar un Job como borrado, todos sus RemotePayload deben quedar huérfanos."""
+        source = Source.create(
+            path_str="del.bin", md5sum="h_del", size=10, mtime=1.0, mimetype="bin"
+        )
+        job = Job.formalize_intent(source, self.chat, False, 1000)
+        payload = Payload.create(
+            job=job,
+            sequence_index=0,
+            start_offset=0,
+            end_offset=10,
+            size=10,
+            filename="del.bin",
+            filename_short="del.bin",
+        )
+
+        mock_msg = MagicMock(id=777, chat=MagicMock(id=self.chat.id))
+        mock_msg.__str__.return_value = json.dumps(  # type: ignore
+            {"id": 777, "chat": {"id": self.chat.id}}
+        )
+        remote = RemotePayload.register_upload(payload, mock_msg, self.user)
+
+        job.mark_deleted()
+
+        job_refreshed = Job.get_by_id(job.id)
+        self.assertEqual(job_refreshed.status, JobStatus.DELETED)
+        self.assertGreater(job_refreshed.deleted_at, 0)
+
+        remote_refreshed = RemotePayload.get_by_id(remote.id)
+        self.assertTrue(remote_refreshed.is_orphaned)
+
+
+if __name__ == "__main__":
+    unittest.main()

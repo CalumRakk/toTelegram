@@ -4,7 +4,7 @@ import lzma
 from pathlib import Path
 from typing import List, Optional
 
-from totelegram.models import Job, RemotePayload, TapeMember, TapeMemberGPS
+from totelegram.models import Job, Payload, RemotePayload, TapeMember, TapeMemberGPS
 from totelegram.packaging.schemas import (
     FileFragment,
     RemotePart,
@@ -23,18 +23,17 @@ class SnapshotService:
         source = job.source
         original_file_path = Path(source.path_str)
 
-        # Recuperar remotos existentes y activos
-        remotes_db = (
-            RemotePayload.select(RemotePayload, RemotePayload.payload)
-            .join(RemotePayload.payload)
+        # 1. Recuperar remotos existentes y activos uniendo con Payload
+        remotes_db = list(
+            RemotePayload.select(RemotePayload, Payload)
+            .join(Payload)
             .where(
-                (RemotePayload.payload.job == job)
-                & (RemotePayload.is_orphaned == False)  # noqa: E712
+                (Payload.job == job) & (RemotePayload.is_orphaned == False)  # noqa: E712
             )
-            .order_by(RemotePayload.payload.sequence_index)
+            .order_by(Payload.sequence_index)
         )
 
-        if not remotes_db.exists():
+        if not remotes_db:
             raise ValueError(
                 f"No hay registros remotos para el Job {job.id}. Imposible crear snapshot."
             )
@@ -57,10 +56,11 @@ class SnapshotService:
         inventory: Optional[List[TapeMemberSnapshot]] = None
         if source.type == SourceType.FOLDER:
             inventory = []
+            # 2. Prefetch correcto usando el modelo Payload
             members = (
                 TapeMember.select()
                 .where(TapeMember.source == source)
-                .prefetch(TapeMemberGPS, RemotePayload.payload)
+                .prefetch(TapeMemberGPS, Payload)
             )
 
             for m in members:

@@ -557,7 +557,8 @@ class RemotePayload(BaseModel):
         self.save(only=[RemotePayload.is_orphaned, RemotePayload.updated_at])
 
     def mark_verified(self, message: "Message"):
-        if message is None or getattr(message, "empty", True):
+        # Solo orfana si el mensaje es None o si Pyrogram explícitamente marcó empty como True
+        if message is None or getattr(message, "empty", False) is True:
             return self.mark_orphaned()
 
         self.last_verified_at = datetime.now(timezone.utc)
