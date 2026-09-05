@@ -2,7 +2,7 @@ import unittest
 from datetime import datetime, timezone
 
 from totelegram import __CURRENT_DB_VERSION__
-from totelegram.database import DatabaseSession, db_proxy, sanitize_database_url
+from totelegram.database import DatabaseSession, sanitize_database_url
 from totelegram.migration import (
     DatabaseState,
     IncompatibleDatabaseError,
