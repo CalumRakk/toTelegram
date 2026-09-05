@@ -110,7 +110,7 @@ class TestSnapshotService(unittest.TestCase):
             )
             manifest = SnapshotService.generate_snapshot(job)
 
-        # 1. Validar retorno en memoria
+        # Validar retorno en memoria
         self.assertEqual(manifest.manifest_version, MANIFEST_VERSION)
         self.assertEqual(manifest.source.filename, "documento.pdf")
         self.assertEqual(manifest.source.md5sum, "hash_pdf_12345")
@@ -118,7 +118,7 @@ class TestSnapshotService(unittest.TestCase):
         self.assertEqual(manifest.parts[0].message_id, 101)
         self.assertEqual(manifest.parts[0].link, "https://t.me/c/123456789/101")
 
-        # 2. Validar archivo físico comprimido en disco
+        # Validar archivo físico comprimido en disco
         snapshot_file = file_path.with_name(f"{file_path.name}.json.xz")
         self.assertTrue(
             snapshot_file.exists(), "El archivo .json.xz no fue creado en disco"

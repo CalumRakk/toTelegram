@@ -26,18 +26,18 @@ class TestDatabaseMigrationAndInspection(unittest.TestCase):
         Base de datos recién creada (vacía).
         Debe detectarse como FRESH e inicializarse directamente en la versión objetivo.
         """
-        # 1. Inspección en blanco usando nuestra conexión
+        # Inspección en blanco usando nuestra conexión
         report = inspect_database(self.db)
         self.assertEqual(report.state, DatabaseState.FRESH)
         self.assertEqual(report.current_version, 0)
         self.assertEqual(report.target_version, __CURRENT_DB_VERSION__)
 
-        # 2. Inicialización mediante el orquestador
+        # Inicialización mediante el orquestador
         final_report = setup_database_schema(self.db)
         self.assertEqual(final_report.state, DatabaseState.UP_TO_DATE)
         self.assertEqual(final_report.current_version, __CURRENT_DB_VERSION__)
 
-        # 3. Validar que la tabla schema_version tiene el registro correcto
+        # Validar que la tabla schema_version tiene el registro correcto
         latest_version = (
             SchemaVersion.select().order_by(SchemaVersion.version.desc()).first()
         )
@@ -50,7 +50,7 @@ class TestDatabaseMigrationAndInspection(unittest.TestCase):
         Debe detectarse como LEGACY_SQLITE, migrar al sistema schema_version y
         actualizarse automáticamente a la versión actual.
         """
-        # 1. Simular base de datos legacy v1 con tablas existentes y PRAGMA
+        # Simular base de datos legacy v1 con tablas existentes y PRAGMA
         self.db.create_tables([TelegramUser])
         self.db.execute_sql("PRAGMA user_version = 1;")
 
@@ -58,16 +58,16 @@ class TestDatabaseMigrationAndInspection(unittest.TestCase):
         self.assertEqual(report.state, DatabaseState.LEGACY_SQLITE)
         self.assertEqual(report.current_version, 1)
 
-        # 2. Ejecutar orquestador
+        # Ejecutar orquestador
         final_report = setup_database_schema(self.db)
         self.assertEqual(final_report.state, DatabaseState.UP_TO_DATE)
         self.assertEqual(final_report.current_version, __CURRENT_DB_VERSION__)
 
-        # 3. El PRAGMA user_version debe haberse reseteado a 0 (deprecado)
+        # El PRAGMA user_version debe haberse reseteado a 0 (deprecado)
         cursor = self.db.execute_sql("PRAGMA user_version;")
         self.assertEqual(cursor.fetchone()[0], 0)
 
-        # 4. Deben existir los registros de versión en schema_version
+        # Deben existir los registros de versión en schema_version
         versions = [
             row.version
             for row in SchemaVersion.select().order_by(SchemaVersion.version.asc())
@@ -80,7 +80,7 @@ class TestDatabaseMigrationAndInspection(unittest.TestCase):
         Base de datos con schema_version en v1 cuando la app requiere v2+.
         Debe detectarse como OUTDATED y aplicar secuencialmente los pasos pendientes.
         """
-        # 1. Crear schema_version con v1
+        # Crear schema_version con v1
         self.db.create_tables([SchemaVersion, TelegramUser])
         SchemaVersion.create(version=1, applied_at=datetime.now(timezone.utc))
 
@@ -88,7 +88,7 @@ class TestDatabaseMigrationAndInspection(unittest.TestCase):
         self.assertEqual(report.state, DatabaseState.OUTDATED)
         self.assertEqual(report.current_version, 1)
 
-        # 2. Aplicar migraciones
+        # Aplicar migraciones
         final_report = setup_database_schema(self.db)
         self.assertEqual(final_report.state, DatabaseState.UP_TO_DATE)
         self.assertEqual(final_report.current_version, __CURRENT_DB_VERSION__)

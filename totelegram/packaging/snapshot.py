@@ -23,7 +23,7 @@ class SnapshotService:
         source = job.source
         original_file_path = Path(source.path_str)
 
-        # 1. Recuperar remotos existentes y activos uniendo con Payload
+        # Recuperar remotos existentes y activos uniendo con Payload
         remotes_db = list(
             RemotePayload.select(RemotePayload, Payload)
             .join(Payload)
@@ -56,7 +56,7 @@ class SnapshotService:
         inventory: Optional[List[TapeMemberSnapshot]] = None
         if source.type == SourceType.FOLDER:
             inventory = []
-            # 2. Prefetch correcto usando el modelo Payload
+            # Prefetch correcto usando el modelo Payload
             members = (
                 TapeMember.select()
                 .where(TapeMember.source == source)

@@ -165,20 +165,20 @@ class TestModelsArchitecture(unittest.TestCase):
 
         remote = RemotePayload.register_upload(payload, mock_msg, self.user)
 
-        # 1. Recién creado sin verificar -> No es fresh
+        # Recién creado sin verificar -> No es fresh
         self.assertFalse(remote.is_fresh)
 
-        # 2. Marcado como verificado ahora -> Es fresh
+        # Marcado como verificado ahora -> Es fresh
         remote.mark_verified(mock_msg)
         self.assertTrue(remote.is_fresh)
         self.assertFalse(remote.is_orphaned)
 
-        # 3. Marcado como huérfano
+        # Marcado como huérfano
         remote.mark_orphaned()
         self.assertTrue(remote.is_orphaned)
         self.assertFalse(remote.is_fresh)
 
-        # 4. Verificación de expiración temporal (más de 15 minutos)
+        # Verificación de expiración temporal (más de 15 minutos)
         remote.is_orphaned = False
         remote.last_verified_at = datetime.now(timezone.utc) - timedelta(minutes=20)
         remote.save()
