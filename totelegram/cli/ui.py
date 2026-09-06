@@ -65,13 +65,13 @@ def get_friendly_chat_name(chat_id: str | int, db_url: str) -> str:
 
     try:
         chat_int_id = int(val)
-        # 1. Si la DB ya está conectada en memoria
+        # Si la DB ya está conectada en memoria
         if db_proxy.obj is not None and not db_proxy.is_closed():
             chat = TelegramChat.get_or_none(TelegramChat.id == chat_int_id)
             if chat and chat.title:
                 return f"[bold cyan]{chat.title}[/] [dim]({chat.id})[/]"
         else:
-            # 2. Lectura rápida si es SQLite
+            # Lectura rápida si es SQLite
             if db_url.startswith("sqlite://"):
                 with DatabaseSession(db_url, auto_init_schema=False):
                     chat = TelegramChat.get_or_none(TelegramChat.id == chat_int_id)

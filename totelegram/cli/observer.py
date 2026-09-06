@@ -48,7 +48,7 @@ class RichUploadObserver:
                 "•",
                 TimeRemainingColumn(),
                 console=console,
-                transient=True,  # Limpia la barra al completarse para dejar espacio al log de éxito
+                transient=True,
             )
             self._progress.start()
 
@@ -100,7 +100,7 @@ class RichUploadObserver:
 
     def on_pause_end(self) -> None:
         """Limpia el mensaje de pausa."""
-        console.print(" " * 80, end="\r")  # Limpia la línea
+        console.print(" " * 80, end="\r")
         UI.success("Pausa finalizada. Reanudando operaciones.")
 
     def on_forward_success(self, job: "Job", pieces_count: int) -> None:
@@ -113,3 +113,116 @@ class RichUploadObserver:
         """Notifica el cierre de un Job."""
         if snapshot_created:
             UI.info("Snapshot local generado e indexado.")
+
+
+class RichDownloadObserver:
+    """
+    Implementación visual de DownloadObserver utilizando Rich.
+    Maneja barras de progreso para descarga de piezas de Telegram y extracción de archivos.
+    """
+
+    def __init__(self):
+        self._dl_progress: Optional[Progress] = None
+        self._extract_progress: Optional[Progress] = None
+        self._dl_task_id = None
+        self._extract_task_id = None
+
+    def on_part_download_start(
+        self, part_index: int, total_parts: int, filename: str, total_bytes: int
+    ):
+        if self._dl_progress is None:
+            self._dl_progress = Progress(
+                SpinnerColumn(),
+                TextColumn("[bold cyan]{task.fields[label]}[/]"),
+                TextColumn("[white]{task.fields[filename]}[/]"),
+                BarColumn(bar_width=None),
+                "[progress.percentage]{task.percentage:>3.0f}%",
+                "•",
+                DownloadColumn(),
+                "•",
+                TransferSpeedColumn(),
+                "•",
+                TimeRemainingColumn(),
+                console=console,
+                transient=True,
+            )
+            self._dl_progress.start()
+
+        label = f"[{part_index}/{total_parts}]" if total_parts > 1 else "[1/1]"
+        self._dl_task_id = self._dl_progress.add_task(
+            description="download",
+            total=total_bytes,
+            filename=filename,
+            label=label,
+        )
+
+    def on_part_download_progress(self, current_bytes: int, total_bytes: int):
+        if self._dl_progress is not None and self._dl_task_id is not None:
+            self._dl_progress.update(
+                self._dl_task_id,
+                completed=current_bytes,
+                total=total_bytes,
+            )
+
+    def on_part_download_complete(self, part_index: int, filename: str):
+        if self._dl_progress is not None:
+            if self._dl_task_id is not None:
+                self._dl_progress.remove_task(self._dl_task_id)
+                self._dl_task_id = None
+            self._dl_progress.stop()
+            self._dl_progress = None
+
+        UI.success(f"Pieza [bold]{filename}[/] descargada y verificada (MD5 OK).")
+
+    def on_extraction_start(self, total_files: int):
+        console.print()
+        UI.info(
+            f"Iniciando extracción y verificación de [bold]{total_files}[/] archivos..."
+        )
+        if self._extract_progress is None:
+            self._extract_progress = Progress(
+                SpinnerColumn(),
+                TextColumn("[bold green]Extrayendo:[/]"),
+                TextColumn("[white]{task.fields[filename]}[/]"),
+                BarColumn(bar_width=None),
+                "[progress.percentage]{task.percentage:>3.0f}%",
+                "•",
+                TextColumn("[dim]({task.completed}/{task.total})[/]"),
+                console=console,
+                transient=True,
+            )
+            self._extract_progress.start()
+
+        self._extract_task_id = self._extract_progress.add_task(
+            description="extract",
+            total=total_files,
+            filename="Iniciando...",
+        )
+
+    def on_file_extracted(
+        self, relative_path: str, size: int, current_file_idx: int, total_files: int
+    ):
+        if self._extract_progress is not None and self._extract_task_id is not None:
+            # Acortar nombre si es muy largo para que no rompa la barra
+            display_name = (
+                relative_path
+                if len(relative_path) <= 40
+                else "..." + relative_path[-37:]
+            )
+            self._extract_progress.update(
+                self._extract_task_id,
+                completed=current_file_idx,
+                filename=display_name,
+            )
+
+    def on_extraction_complete(self, total_files: int):
+        if self._extract_progress is not None:
+            if self._extract_task_id is not None:
+                self._extract_progress.remove_task(self._extract_task_id)
+                self._extract_task_id = None
+            self._extract_progress.stop()
+            self._extract_progress = None
+
+        UI.success(
+            f"Extracción completada: [bold]{total_files}[/] archivos validados al 100%."
+        )

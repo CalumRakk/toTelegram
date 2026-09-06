@@ -19,6 +19,30 @@ logger = logging.getLogger(__name__)
 
 class SnapshotService:
     @staticmethod
+    def load_snapshot(snapshot_path: Path) -> UploadManifest:
+        """
+        Carga, descomprime y valida un archivo snapshot (.json.xz).
+        Lanza FileNotFoundError o ValueError si el archivo no existe o está corrupto.
+        """
+        if not snapshot_path.exists():
+            raise FileNotFoundError(f"El archivo snapshot no existe: {snapshot_path}")
+
+        try:
+            with lzma.open(snapshot_path, "rt", encoding="utf-8") as f:
+                raw_json = f.read()
+            manifest = UploadManifest.model_validate_json(raw_json)
+            logger.info(
+                f"Snapshot cargado correctamente: {manifest.source.filename} "
+                f"(Estrategia: {manifest.strategy}, Partes: {len(manifest.parts)})"
+            )
+            return manifest
+        except Exception as e:
+            logger.error(f"Error al deserializar snapshot {snapshot_path.name}: {e}")
+            raise ValueError(
+                f"El archivo snapshot '{snapshot_path.name}' es inválido o está corrupto: {e}"
+            ) from e
+
+    @staticmethod
     def generate_snapshot(job: Job) -> UploadManifest:
         source = job.source
         original_file_path = Path(source.path_str)
