@@ -19,6 +19,9 @@ VALUE_NOT_SET = "NOT-SET"
 SELF_CHAT_ALIASES = ["me", "mensajes guardados", "saved messages", "self"]
 ID_PREFIX_RE = re.compile(r"^id:", re.IGNORECASE)
 
+# Claves que apuntan a servicios externos y requieren verificación de red activa
+NETWORK_FIELDS = {"database_url", "chat_id"}
+
 
 class Commands:
     PROFILE_CREATE = f"{CLI_BIN} profile create"

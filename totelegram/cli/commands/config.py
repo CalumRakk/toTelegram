@@ -10,7 +10,8 @@ from totelegram.cli.ui import UI, DisplayConfig, DisplayGeneric, DisplayProfile
 from totelegram.database import DatabaseSession, normalize_database_url
 from totelegram.identity import ConfigService
 from totelegram.migration import DatabaseState, inspect_database
-from totelegram.schemas import VALUE_NOT_SET, Commands
+from totelegram.models import TelegramChat
+from totelegram.schemas import NETWORK_FIELDS, VALUE_NOT_SET, Commands
 from totelegram.telegram.access import ChatAccessService
 from totelegram.telegram.search import ChatSearchService
 from totelegram.telegram.utils import (
@@ -39,6 +40,72 @@ def handle_config_errors(func):
             raise typer.Exit(1)
 
     return wrapper
+
+
+def _validate_live_database(db_url_value: str, manager) -> None:
+    """Prueba la conexión real con la base de datos antes de persistirla."""
+    from totelegram.database import DatabaseSession, normalize_database_url
+
+    resolved_url = normalize_database_url(db_url_value, manager.database_path)
+
+    with UI.loading("Verificando conexión con la base de datos..."):
+        start_time = time.monotonic()
+        try:
+            with DatabaseSession(resolved_url, auto_init_schema=False) as db:
+                report = inspect_database(db)
+                latency_ms = int((time.monotonic() - start_time) * 1000)
+
+                if report.state == DatabaseState.AHEAD:
+                    raise ValueError(
+                        f"La base de datos es versión v{report.current_version}, "
+                        f"pero el cliente solo soporta hasta v{report.target_version}."
+                    )
+
+                UI.success(
+                    f"Conexión exitosa a [bold]{report.engine_name.upper()}[/] "
+                    f"[dim](Latencia: {latency_ms}ms, Esquema: v{report.current_version})[/dim]"
+                )
+        except Exception as e:
+            raise ValueError(f"No se pudo conectar a la base de datos: {e}") from e
+
+
+def _validate_live_chat_id(
+    chat_id_value: str | int, profile_name: str, state: CLIState
+) -> tuple[int | str, str]:
+    """Valida los permisos del chat en Telegram y retorna (chat_id_normalizado, titulo_chat)."""
+    normalized_id = normalize_chat_id(chat_id_value)
+
+    if normalized_id == VALUE_NOT_SET:
+        return VALUE_NOT_SET, ""
+
+    with state.get_telegram_session(profile_name) as client:
+        with UI.loading("Verificando acceso y permisos en Telegram..."):
+            access_service = ChatAccessService(client)
+            report = access_service.verify_access(normalized_id)
+
+        if not report.is_ready or not report.chat:
+            hint = f"\n[dim]{report.hint}[/dim]" if report.hint else ""
+            raise ValueError(f"Chat inválido: {report.reason}{hint}")
+
+        # Guardar / Actualizar en la base de datos local para que el nombre quede en caché
+        try:
+            from totelegram.database import DatabaseSession, normalize_database_url
+
+            settings = state.manager.get_settings(profile_name)
+            db_url = normalize_database_url(
+                settings.database_url, state.manager.database_path
+            )
+            with DatabaseSession(db_url, auto_init_schema=True):
+                tg_chat_obj = client.get_chat(report.chat.id)
+                TelegramChat.get_or_create_from_chat(tg_chat_obj)  # type: ignore
+        except Exception:
+            pass  # Si la DB aún no está inicializada, no bloqueamos la configuración
+
+        title = report.chat.title or "Mensajes Guardados"
+        UI.success(
+            f"Destino confirmado: [bold cyan]{title}[/] [dim](ID: {report.chat.id})[/]"
+        )
+        return report.chat.id, title
 
 
 def _get_config_tools(ctx: typer.Context) -> Tuple[str, ConfigService]:
@@ -107,37 +174,45 @@ def main(ctx: typer.Context):
 def set_configs(
     ctx: typer.Context,
     args: List[str] = typer.Argument(
-        None, help="Pares de CLAVE VALOR (ej: chat_id 12345 upload_limit_rate_kbps 500)"
+        ..., help="Pares de CLAVE VALOR (ej: chat_id 12345 upload_limit_rate_kbps 500)"
+    ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        "-f",
+        help="Fuerza el guardado sin verificar la conectividad de los endpoints de red (modo offline).",
     ),
 ):
     """
-    Modifica una o varias configuraciones al mismo tiempo.
-    Uso: totelegram config set chat_id 999999 upload_limit_rate_kbps 1000
-
-    NOTA:
-    Evitar implementar lógica de red o resolución de Telegram (como 'config resolve')
-    dentro de este comando por las siguientes razones:
-
-    1. INDEPENDENCIA: 'config set' debe funcionar 100% offline. Su única responsabilidad
-       es la persistencia en disco (.env). No debe depender de una sesión de Pyrogram.
-    2. ATOMICIDAD: Este comando puede recibir múltiples pares clave-valor.
-       Añadir banderas como '--verify' o '--resolve' crearía ambigüedad sobre qué
-       campo se está verificando o resolviendo.
-    3. PREDICTIBILIDAD: Para automatización, 'set' debe ser instantáneo.
-       Cualquier validación de red debe delegarse al comando 'config check' o
-       'config resolve'.
+    Modifica una o varias configuraciones. Valida automáticamente endpoints de red
+    (database_url, chat_id) en tiempo real a menos que se use --force.
     """
-
+    state: CLIState = ctx.obj
     settings_name, service = _get_config_tools(ctx)
     updates = service.prepare_updates(args)
+
     for key, val in updates.items():
+        is_network_key = key in NETWORK_FIELDS
+
+        # Validación en vivo si es una clave de red y no se forzó
+        if is_network_key and not force:
+            if key == "database_url" and val:
+                _validate_live_database(str(val), state.manager)
+            elif key == "chat_id":
+                val, _ = _validate_live_chat_id(val, settings_name, state)
+
+        if is_network_key and force:
+            UI.warn(
+                f"Guardando [bold]{key}[/] sin verificación de red (--force activo)."
+            )
+
         changed, final_val = service.apply_update(settings_name, key, val, action="set")
         if changed:
             UI.success(
-                f"Configuracion [bold]{key}[/] actualizada con [bold]{final_val}[/]."
+                f"Configuración [bold]{key}[/] actualizada con [bold]{final_val}[/]."
             )
         else:
-            UI.info(f"Configuracion [bold]{key}[/] ya tiene ese valor.")
+            UI.info(f"Configuración [bold]{key}[/] ya tiene ese valor.")
 
 
 @app.command("unset")

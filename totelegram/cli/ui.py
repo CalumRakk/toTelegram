@@ -22,7 +22,7 @@ from totelegram.database import (
 )
 from totelegram.identity import Profile, Settings, SettingsManager
 from totelegram.models import TelegramChat
-from totelegram.schemas import COLORS, AccessLevel, Commands, ScanReport
+from totelegram.schemas import COLORS, VALUE_NOT_SET, AccessLevel, Commands, ScanReport
 from totelegram.telegram.types import ChatMatch
 
 Spacing = Optional[Literal["top", "bottom", "block"]]
@@ -46,41 +46,41 @@ def strip_markup(text: str) -> str:
     return Text.from_markup(text).plain
 
 
-def get_friendly_chat_name(chat_id: str, db_url: str) -> str:
+def get_friendly_chat_name(chat_id: str | int, db_url: str) -> str:
     """
-    Aplica las reglas heurísticas para devolver un nombre amigable de chat.
-    Aprovecha la conexión activa si existe sin forzar conexiones de red pesadas.
+    Devuelve un nombre amigable en formato 'Título (ID)'.
+    Aprovecha la base de datos conectada o la caché local.
     """
-    val = str(chat_id).lower().strip()
+    val = str(chat_id).strip()
 
-    if val in ("me", "self"):
-        return "Mensajes Guardados"
+    if val in ("me", "self", VALUE_NOT_SET):
+        return (
+            "Mensajes Guardados (me)"
+            if val in ("me", "self")
+            else "[yellow]Pendiente[/]"
+        )
 
     if val.startswith("@"):
         return val
 
-    if val.replace("-", "").isdigit():
+    try:
         chat_int_id = int(val)
-        # Si la base de datos ya está conectada globalmente, la usamos directamente
+        # 1. Si la DB ya está conectada en memoria
         if db_proxy.obj is not None and not db_proxy.is_closed():
-            try:
-                chat = TelegramChat.get_or_none(TelegramChat.id == chat_int_id)
-                if chat and chat.title:
-                    return f"{chat.title}"
-            except Exception:
-                pass
+            chat = TelegramChat.get_or_none(TelegramChat.id == chat_int_id)
+            if chat and chat.title:
+                return f"[bold cyan]{chat.title}[/] [dim]({chat.id})[/]"
         else:
-            # Si está desconectada y es SQLite local, hacemos una lectura rápida sin DDL
+            # 2. Lectura rápida si es SQLite
             if db_url.startswith("sqlite://"):
-                try:
-                    with DatabaseSession(db_url, auto_init_schema=False):
-                        chat = TelegramChat.get_or_none(TelegramChat.id == chat_int_id)
-                        if chat and chat.title:
-                            return f"{chat.title}"
-                except Exception:
-                    pass
+                with DatabaseSession(db_url, auto_init_schema=False):
+                    chat = TelegramChat.get_or_none(TelegramChat.id == chat_int_id)
+                    if chat and chat.title:
+                        return f"[bold cyan]{chat.title}[/] [dim]({chat.id})[/]"
+    except Exception:
+        pass
 
-    return chat_id
+    return str(chat_id)
 
 
 class UI:
