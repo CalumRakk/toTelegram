@@ -205,10 +205,28 @@ def _step_v1_to_v2(db: peewee.Database):
         logger.debug(f"Aviso en paso v1->v2 (DROP COLUMN): {e}")
 
 
-# Registro de pasos: clave representa la versión de origen (from_version)
+def _step_v2_to_v3(db: peewee.Database):
+    """Paso v2 -> v3: Convertir offsets y tamaño de payload a BigInt (soporte >2GB en Postgres)."""
+    migrator = _get_migrator(db)
+    try:
+        migrate(
+            migrator.alter_column_type(
+                "payload", "start_offset", peewee.BigIntegerField()
+            ),
+            migrator.alter_column_type(
+                "payload", "end_offset", peewee.BigIntegerField()
+            ),
+            migrator.alter_column_type("payload", "size", peewee.BigIntegerField()),
+        )
+    except Exception as e:
+        logger.debug(f"Aviso en paso v2->v3: {e}")
+
+
+# Registrar en MIGRATION_REGISTRY:
 MIGRATION_REGISTRY: Dict[int, Callable[[peewee.Database], None]] = {
-    0: _step_v0_to_v1,  # Lleva de v0 a v1
-    1: _step_v1_to_v2,  # Lleva de v1 a v2
+    0: _step_v0_to_v1,
+    1: _step_v1_to_v2,
+    2: _step_v2_to_v3,
 }
 
 

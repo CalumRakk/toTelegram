@@ -508,9 +508,9 @@ class Payload(BaseModel):
     filename = cast(str, peewee.CharField())  # Nombre "Humano" (foto...png.01-10)
     filename_short = cast(str, peewee.CharField())  # Nombre "Técnico" (hash.png.01-10)
     sequence_index = cast(int, peewee.IntegerField())
-    start_offset = cast(int, peewee.IntegerField())
-    end_offset = cast(int, peewee.IntegerField())
-    size = cast(int, peewee.IntegerField())
+    start_offset = cast(int, peewee.BigIntegerField())
+    end_offset = cast(int, peewee.BigIntegerField())
+    size = cast(int, peewee.BigIntegerField())
 
     @property
     def has_remote(self) -> bool:
