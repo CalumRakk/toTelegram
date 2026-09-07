@@ -1,6 +1,8 @@
 import hashlib
 import json
 import logging
+import os
+import uuid
 from pathlib import Path
 from typing import (
     Annotated,
@@ -275,17 +277,12 @@ class SettingsManager:
         self.inventories_dir = self.worktable / "inventories"
         self.database_path = self.worktable / f"{self.worktable.name}.sqlite"
 
+        self._worker_instance_id = f"{uuid.uuid4().hex[:8]}:{os.getpid()}"
+
     @property
     def node_id(self) -> str:
-        """Retorna el identificador único persistente para este nodo de ejecución."""
-        node_id_file = self.worktable / "node_id"
-        if not node_id_file.exists():
-            import uuid
-
-            node_id = str(uuid.uuid4())
-            node_id_file.write_text(node_id)
-            return node_id
-        return node_id_file.read_text().strip()
+        """Identificador único del proceso en ejecución."""
+        return self._worker_instance_id
 
     def get_lock_for_path(self, path: Path):
         """Obtiene un FileLock específico para un archivo dado, basado en su ruta.

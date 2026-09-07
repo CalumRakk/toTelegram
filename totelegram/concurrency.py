@@ -128,13 +128,11 @@ class ConcurrencyCoordinator:
             # Colisión: verificar si el claim existente pertenece a este nodo o ya expiró
             claim = cast(Claim, Claim.get_or_none(Claim.resource_id == resource_id))
             if claim:
-                if claim.node_id == self.node_id or is_expired(claim.expires_at):
+                if is_expired(claim.expires_at):
                     claim.node_id = self.node_id
                     claim.expires_at = expires_at
                     claim.save(only=[Claim.node_id, Claim.expires_at, Claim.updated_at])
-                    logger.debug(
-                        f"Lease recuperado/renovado: {resource_id} [Nodo: {self.node_id}]"
-                    )
+                    logger.debug(f"Lease expirado recuperado: {resource_id}")
                     return True
 
             return False

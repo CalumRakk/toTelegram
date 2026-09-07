@@ -172,26 +172,6 @@ class TestConcurrencyCoordinator(unittest.TestCase):
             self.assertEqual(claim.node_id, self.node_b)
             self.assertGreater(claim.expires_at, datetime.now(timezone.utc))
 
-    def test_same_node_can_reacquire_or_extend_its_own_lease(self):
-        """Un nodo puede volver a llamar _acquire_resource sobre su propio lease para extenderlo."""
-        res_id = "test_custom_resource"
-        self.assertTrue(
-            self.coord_a._acquire_resource(res_id, ResourceType.PAYLOAD, ttl_seconds=30)
-        )
-
-        claim_1 = Claim.get(Claim.resource_id == res_id)
-        original_expires = claim_1.expires_at
-
-        # El mismo nodo vuelve a adquirir con mayor TTL
-        time.sleep(0.01)
-        self.assertTrue(
-            self.coord_a._acquire_resource(res_id, ResourceType.PAYLOAD, ttl_seconds=90)
-        )
-
-        claim_2 = Claim.get(Claim.resource_id == res_id)
-        self.assertEqual(claim_2.node_id, self.node_a)
-        self.assertGreater(claim_2.expires_at, original_expires)
-
     def test_renew_resources_batch(self):
         """Valida la renovación de vigencia en lote de múltiples recursos."""
         res_ids = ["payload:101", "payload:102", f"account:{self.user.id}"]
