@@ -138,7 +138,7 @@ class StatelessPartitioner:
                 fragment = VirtualFileFragment(
                     vol_idx=manifest.volume_index,
                     offset_in_vol=entry.local_window.start,
-                    bytes_in_volume=entry.local_window.end,
+                    bytes_in_volume=entry.local_window.end - entry.local_window.start,
                     state=entry.state.value,
                 )
                 if entry.info.md5sum is None:

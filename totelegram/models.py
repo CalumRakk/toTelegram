@@ -667,7 +667,7 @@ class TapeMember(BaseModel):
                     "payload": payload,
                     "state": e.state.value,
                     "offset_in_volume": e.local_window.start,
-                    "bytes_in_volume": e.local_window.end,
+                    "bytes_in_volume": e.local_window.end - e.local_window.start,
                 }
                 for e in batch
                 if not e.info.is_dir

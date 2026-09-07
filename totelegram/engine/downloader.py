@@ -235,8 +235,22 @@ class DownloadEngine:
 
             try:
                 for idx, member in enumerate(inventory, 1):
-                    file_dest = target_folder / member.relative_path
+                    # Normalizar ruta para evitar duplicar el nombre de la carpeta raíz
+                    rel_parts = Path(member.relative_path).parts
+                    if rel_parts and rel_parts[0] == manifest.source.filename:
+                        clean_rel_path = Path(*rel_parts[1:])
+                    else:
+                        clean_rel_path = Path(member.relative_path)
+
+                    file_dest = target_folder / clean_rel_path
                     file_dest.parent.mkdir(parents=True, exist_ok=True)
+
+                    # Detección inteligente para compatibilidad hacia atrás:
+                    # Verifica si bytes_in_volume fue guardado como end_offset (bug previo) o como longitud neta.
+                    total_if_end = sum(
+                        f.bytes_in_volume - f.offset_in_vol for f in member.fragments
+                    )
+                    is_legacy_end_offset = total_if_end == member.size
 
                     hasher = hashlib.md5()
                     with open(file_dest, "wb") as out_f:
@@ -248,7 +262,11 @@ class DownloadEngine:
                                 )
 
                             vol_handle.seek(frag.offset_in_vol)
-                            bytes_left = frag.bytes_in_volume
+
+                            if is_legacy_end_offset:
+                                bytes_left = frag.bytes_in_volume - frag.offset_in_vol
+                            else:
+                                bytes_left = frag.bytes_in_volume
 
                             while bytes_left > 0:
                                 chunk_size = min(bytes_left, 64 * 1024)
