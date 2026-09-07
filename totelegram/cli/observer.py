@@ -127,6 +127,12 @@ class RichDownloadObserver:
         self._dl_task_id = None
         self._extract_task_id = None
 
+    def on_part_skipped(self, part_index: int, total_parts: int, filename: str):
+        label = f"[{part_index}/{total_parts}]" if total_parts > 1 else "[1/1]"
+        UI.info(
+            f"{label} Pieza [bold]{filename}[/] ya en disco y verificada [dim](Reutilizada)[/dim]."
+        )
+
     def on_part_download_start(
         self, part_index: int, total_parts: int, filename: str, total_bytes: int
     ):
@@ -203,7 +209,6 @@ class RichDownloadObserver:
         self, relative_path: str, size: int, current_file_idx: int, total_files: int
     ):
         if self._extract_progress is not None and self._extract_task_id is not None:
-            # Acortar nombre si es muy largo para que no rompa la barra
             display_name = (
                 relative_path
                 if len(relative_path) <= 40

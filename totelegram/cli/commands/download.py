@@ -38,10 +38,16 @@ def download_snapshot(
         "-f",
         help="Sobrescribir archivos o carpetas existentes en el destino.",
     ),
+    keep_cache: bool = typer.Option(
+        False,
+        "--keep-cache",
+        "-k",
+        help="Conservar los segmentos descargados tras una restauración exitosa.",
+    ),
 ):
     """
     Descarga y restaura un archivo o carpeta archivada a partir de su Snapshot (.json.xz).
-    Verifica la integridad de cada pieza y archivo on-the-fly.
+    Verifica la integridad de cada pieza y archivo on-the-fly con soporte de reanudación.
     """
     state: CLIState = ctx.obj
     profile_name, _ = _get_config_tools(ctx)
@@ -82,13 +88,14 @@ def download_snapshot(
     # Conectar a Telegram e iniciar el motor de descarga
     with state.get_telegram_session(profile_name) as client:
         observer = RichDownloadObserver()
-        engine = DownloadEngine(client=client, observer=observer)  # type: ignore # TODO: tipear correctamente para evitar advertencia en VSCode
+        engine = DownloadEngine(client=client, observer=observer)  # type: ignore
 
         try:
             report = engine.restore(
                 manifest=manifest,
                 output_dir=target_output_dir,
                 force=force,
+                keep_cache=keep_cache,
             )
 
             UI.separator()
