@@ -175,16 +175,20 @@ class Source(BaseModel):
         stat = path.stat()
         current_size = stat.st_size
         current_mtime = stat.st_mtime
-        path_str = str(path)
+        canonical_path = str(path.resolve())
 
-        cached = Source.get_or_none(
-            (Source.path_str == path_str)
-            & (Source.size == current_size)
-            & (Source.mtime == current_mtime)
-        )
+        # Intentar resolver por caché rápido (mismo path absoluto)
+        cached = Source.get_or_none(Source.path_str == canonical_path)
         if cached:
-            return cached
+            # Validamos tamaño exacto y mtime con tolerancia (menor a 1 segundo)
+            # Esto evita los problemas de precisión flotante entre Python y SQLite/Postgres
+            size_matches = cached.size == current_size
+            mtime_matches = abs(cached.mtime - current_mtime) < 1.0
 
+            if size_matches and mtime_matches:
+                return cached
+
+        # Si cambió o es nuevo, calculamos MD5
         md5sum = create_md5sum_by_hashlib(path)
         source = cast(Optional[Source], Source.get_or_none(Source.md5sum == md5sum))
         if source:
@@ -195,13 +199,12 @@ class Source(BaseModel):
             with db_proxy.atomic():
                 return Source.create(
                     md5sum=md5sum,
-                    path_str=path_str,
+                    path_str=canonical_path,
                     size=current_size,
                     mtime=current_mtime,
                     mimetype=get_mimetype(path),
                 )
         except peewee.IntegrityError:
-            # Rescate si otro proceso/nodo insertó el mismo MD5
             source = cast(Source, Source.get(Source.md5sum == md5sum))
             source.update_if_needed(path)
             return source
@@ -252,19 +255,18 @@ class Source(BaseModel):
 
     def update_if_needed(self, path: Path) -> bool:
         if self.is_folder:
-            # TODO implementar para carpeta.
             return False
 
         stat = path.stat()
         current_size = stat.st_size
         current_mtime = stat.st_mtime
-        path_str = str(path)
+        canonical_path = str(path.resolve())
 
         changed = False
-        if self.path_str != path_str:
-            self.path_str = path_str
+        if self.path_str != canonical_path:
+            self.path_str = canonical_path
             changed = True
-        if self.mtime != current_mtime:
+        if abs(self.mtime - current_mtime) >= 1.0:
             self.mtime = current_mtime
             changed = True
         if self.size != current_size:
