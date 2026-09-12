@@ -1,5 +1,7 @@
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
+from totelegram.concurrency import ConcurrencyError
+
 if TYPE_CHECKING:
     from totelegram.concurrency import LeaseHeartbeat
     from totelegram.models import Job, Payload
@@ -89,16 +91,16 @@ class ProgressMultiplexer:
       2. La notificación de bytes al UploadObserver (cálculo de velocidad y dibujo en UI).
     """
 
-    def __init__(
-        self,
-        heartbeat: "LeaseHeartbeat",
-        observer: UploadObserver,
-    ):
+    def __init__(self, heartbeat: "LeaseHeartbeat", observer: UploadObserver):
         self.heartbeat = heartbeat
         self.observer = observer
 
     def __call__(self, current: int, total: int, *args, **kwargs) -> None:
-
-        self.heartbeat.pulse(current, total, *args, **kwargs)
+        # Si falló la renovación del lease en PostgreSQL, abortamos la subida
+        success = self.heartbeat.pulse(current, total, *args, **kwargs)
+        if not success:
+            raise ConcurrencyError(
+                "Conexión con la base de datos perdida durante la transferencia. Abortando."
+            )
 
         self.observer.on_payload_progress(current, total)

@@ -40,6 +40,12 @@ class PayloadClaimError(ConcurrencyError):
     pass
 
 
+class SystemSuspendedError(ConcurrencyError):
+    """Lanzada cuando se detecta que el sistema entró en suspensión/hibernación."""
+
+    pass
+
+
 # DTOs Y CONTROLADOR DE LATIDOS (HEARTBEAT)
 
 
@@ -77,11 +83,31 @@ class LeaseHeartbeat:
 
         remaining = total_seconds
         while remaining > 0:
+            chunk_start = time.time()
             sleep_chunk = min(remaining, step_seconds)
             time.sleep(sleep_chunk)
+            chunk_elapsed = time.time() - chunk_start
+
+            # Si pedimos dormir 1 segundo pero pasaron más de 15 segundos reales,
+            # significa inequívocamente que la máquina se suspendió/hibernó.
+            if chunk_elapsed > (sleep_chunk + 10):
+                logger.warning(
+                    f"Detectada suspensión del sistema: se esperaban {sleep_chunk}s "
+                    f"pero transcurrieron {chunk_elapsed:.1f}s."
+                )
+                raise SystemSuspendedError(
+                    "El sistema operativo se suspendió o hibernó durante la ejecución. "
+                    "Abortando para proteger la integridad de los datos y reconectar limpiamente."
+                )
+
             remaining -= sleep_chunk
 
-            self.pulse()
+            # Si renovar el lease falla porque la conexión a DB murió, no continuar
+            if not self.pulse():
+                raise ConcurrencyError(
+                    "Se perdió la conexión con la base de datos o el lease expiró."
+                )
+
             if on_tick:
                 on_tick(remaining, total_seconds)
 
