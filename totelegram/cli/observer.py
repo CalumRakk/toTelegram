@@ -31,6 +31,59 @@ class RichUploadObserver:
         self._current_task_id = None
         self._pause_status = None
 
+        # Controladores de la barra de Hashing
+        self._hash_progress: Optional[Progress] = None
+        self._hash_task_id = None
+
+    def on_hash_start(self, filename: str, total_bytes: int) -> None:
+        """Inicia la barra visual de lectura de disco si el archivo supera el umbral."""
+        if total_bytes < HASH_VISUAL_THRESHOLD:
+            return
+
+        self._hash_progress = Progress(
+            SpinnerColumn(),
+            TextColumn("[bold yellow]{task.fields[label]}[/]"),
+            TextColumn("[white]{task.fields[filename]}[/]"),
+            BarColumn(bar_width=None),
+            "[progress.percentage]{task.percentage:>3.0f}%",
+            "•",
+            DownloadColumn(),
+            "•",
+            TransferSpeedColumn(),
+            "•",
+            TimeRemainingColumn(),
+            console=console,
+            transient=True,
+        )
+        self._hash_progress.start()
+        self._hash_task_id = self._hash_progress.add_task(
+            description="hashing",
+            total=total_bytes,
+            filename=filename,
+            label="[Indexando MD5]",
+        )
+
+    def on_hash_progress(self, current_bytes: int, total_bytes: int) -> None:
+        """Actualiza el avance de lectura en disco."""
+        if self._hash_progress is not None and self._hash_task_id is not None:
+            self._hash_progress.update(
+                self._hash_task_id,
+                completed=current_bytes,
+            )
+
+    def on_hash_complete(self, filename: str, md5sum: str) -> None:
+        """Detiene la barra y muestra una confirmación sutil."""
+        if self._hash_progress is not None:
+            if self._hash_task_id is not None:
+                self._hash_progress.remove_task(self._hash_task_id)
+                self._hash_task_id = None
+            self._hash_progress.stop()
+            self._hash_progress = None
+
+            # Mensaje sutil y elegante de confirmación
+            short_hash = md5sum[:12]
+            UI.info(f"Huella digital verificada: [bold dim]{short_hash}...[/bold dim]")
+
     def on_job_start(self, job: "Job", total_payloads: int) -> None:
         pass
 
@@ -130,59 +183,6 @@ class RichDownloadObserver:
         self._extract_progress: Optional[Progress] = None
         self._dl_task_id = None
         self._extract_task_id = None
-
-        # Controladores de la barra de Hashing
-        self._hash_progress: Optional[Progress] = None
-        self._hash_task_id = None
-
-    def on_hash_start(self, filename: str, total_bytes: int) -> None:
-        """Inicia la barra visual de lectura de disco si el archivo supera el umbral."""
-        if total_bytes < HASH_VISUAL_THRESHOLD:
-            return
-
-        self._hash_progress = Progress(
-            SpinnerColumn(),
-            TextColumn("[bold yellow]{task.fields[label]}[/]"),
-            TextColumn("[white]{task.fields[filename]}[/]"),
-            BarColumn(bar_width=None),
-            "[progress.percentage]{task.percentage:>3.0f}%",
-            "•",
-            DownloadColumn(),
-            "•",
-            TransferSpeedColumn(),
-            "•",
-            TimeRemainingColumn(),
-            console=console,
-            transient=True,
-        )
-        self._hash_progress.start()
-        self._hash_task_id = self._hash_progress.add_task(
-            description="hashing",
-            total=total_bytes,
-            filename=filename,
-            label="[Indexando MD5]",
-        )
-
-    def on_hash_progress(self, current_bytes: int, total_bytes: int) -> None:
-        """Actualiza el avance de lectura en disco."""
-        if self._hash_progress is not None and self._hash_task_id is not None:
-            self._hash_progress.update(
-                self._hash_task_id,
-                completed=current_bytes,
-            )
-
-    def on_hash_complete(self, filename: str, md5sum: str) -> None:
-        """Detiene la barra y muestra una confirmación sutil."""
-        if self._hash_progress is not None:
-            if self._hash_task_id is not None:
-                self._hash_progress.remove_task(self._hash_task_id)
-                self._hash_task_id = None
-            self._hash_progress.stop()
-            self._hash_progress = None
-
-            # Mensaje sutil y elegante de confirmación
-            short_hash = md5sum[:12]
-            UI.info(f"Huella digital verificada: [bold dim]{short_hash}...[/bold dim]")
 
     def on_part_skipped(self, part_index: int, total_parts: int, filename: str):
         label = f"[{part_index}/{total_parts}]" if total_parts > 1 else "[1/1]"
