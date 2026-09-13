@@ -185,10 +185,12 @@ class Source(BaseModel):
         # Intentar resolver por caché rápido (mismo path absoluto)
         cached = Source.get_or_none(Source.path_str == canonical_path)
         if cached:
-            # Validamos tamaño exacto y mtime con tolerancia (menor a 1 segundo)
+            # Validamos tamaño exacto y mtime con tolerancia (menor a 4 segundo)
             # Esto evita los problemas de precisión flotante entre Python y SQLite/Postgres
             size_matches = cached.size == current_size
-            mtime_matches = abs(cached.mtime - current_mtime) < 1.0
+            mtime_matches = (
+                abs(cached.mtime - current_mtime) < 3.3
+            )  # TODO: analizar bien si una tolerancia de más de 3.3 puede dar falsos positivos.
 
             if size_matches and mtime_matches:
                 return cached
