@@ -3,20 +3,29 @@ import os
 import re
 import sys
 from pathlib import Path
+from typing import Callable, Optional
 
 import filetype
 
 
-def create_md5sum_by_hashlib(path: Path) -> str:
-    """
-    Calcula el MD5 de un archivo por bloques de forma eficiente.
-    Esta utilidad es pura y libre de efectos colaterales en consola.
-    """
-    hash_md5 = hashlib.md5()
+def create_md5sum_by_hashlib(
+    path: Path,
+    chunk_size: int = 2 * 1024 * 1024,
+    on_progress: Optional[Callable[[int, int], None]] = None,
+) -> str:
+    """Calcula el MD5 de un archivo emitiendo progreso por lotes."""
+    hasher = hashlib.md5()
+    total_size = path.stat().st_size
+    current_bytes = 0
+
     with open(path, "rb") as f:
-        for chunk in iter(lambda: f.read(50 * 1024 * 1024), b""):
-            hash_md5.update(chunk)
-    return hash_md5.hexdigest()
+        while chunk := f.read(chunk_size):
+            hasher.update(chunk)
+            current_bytes += len(chunk)
+            if on_progress:
+                on_progress(current_bytes, total_size)
+
+    return hasher.hexdigest()
 
 
 def get_mimetype(path: Path) -> str:

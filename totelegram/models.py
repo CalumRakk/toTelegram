@@ -3,7 +3,7 @@ import logging
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Generator, List, Optional, Tuple, cast
+from typing import TYPE_CHECKING, Callable, Generator, List, Optional, Tuple, cast
 
 import peewee
 import tartape
@@ -171,7 +171,12 @@ class Source(BaseModel):
         return self.type == SourceType.FOLDER
 
     @staticmethod
-    def get_or_create_from_filepath(path: Path) -> "Source":
+    def get_or_create_from_filepath(
+        path: Path,
+        on_hash_start: Optional[Callable[[str, int], None]] = None,
+        on_hash_progress: Optional[Callable[[int, int], None]] = None,
+        on_hash_complete: Optional[Callable[[str, str], None]] = None,
+    ) -> "Source":
         stat = path.stat()
         current_size = stat.st_size
         current_mtime = stat.st_mtime
@@ -188,8 +193,16 @@ class Source(BaseModel):
             if size_matches and mtime_matches:
                 return cached
 
-        # Si cambió o es nuevo, calculamos MD5
-        md5sum = create_md5sum_by_hashlib(path)
+        # Solo si de verdad hay que leer el disco, notificamos a la UI
+        if on_hash_start:
+            on_hash_start(path.name, current_size)
+
+        md5sum = create_md5sum_by_hashlib(path, on_progress=on_hash_progress)
+
+        if on_hash_complete:
+            on_hash_complete(path.name, md5sum)
+
+        # Comprobar si existe el MD5
         source = cast(Optional[Source], Source.get_or_none(Source.md5sum == md5sum))
         if source:
             source.update_if_needed(path)

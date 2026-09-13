@@ -50,7 +50,7 @@ class JobPlanner:
         if path.is_dir():
             source = cls._resolve_folder_source(path, ctx, force, auto_truncate)
         else:
-            source = cls._resolve_file_source(path)
+            source = cls._resolve_file_source(path, ctx)
 
         # Buscar si ya existía un Job activo para este source en el chat
         existing_job = Job.get_for_source_in_chat(source, chat_db)
@@ -87,9 +87,14 @@ class JobPlanner:
         return job
 
     @classmethod
-    def _resolve_file_source(cls, path: Path) -> Source:
-        """Obtiene o registra el Source para un archivo individual."""
-        return Source.get_or_create_from_filepath(path)
+    def _resolve_file_source(cls, path: Path, ctx: UploadContext) -> Source:
+        """Obtiene o registra el Source para un archivo individual comunicando progreso."""
+        return Source.get_or_create_from_filepath(
+            path,
+            on_hash_start=ctx.observer.on_hash_start,
+            on_hash_progress=ctx.observer.on_hash_progress,
+            on_hash_complete=ctx.observer.on_hash_complete,
+        )
 
     @classmethod
     def _resolve_folder_source(

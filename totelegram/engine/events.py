@@ -11,6 +11,17 @@ if TYPE_CHECKING:
 class UploadObserver(Protocol):
     """Protocolo que define los eventos del ciclo de vida de la subida."""
 
+    def on_hash_start(self, filename: str, total_bytes: int) -> None:
+        """Llamado antes de iniciar el cálculo del hash MD5."""
+        ...
+
+    def on_hash_progress(self, current_bytes: int, total_bytes: int) -> None:
+        """Llamado durante la lectura de disco para el cálculo del hash."""
+        ...
+
+    def on_hash_complete(self, filename: str, md5sum: str) -> None:
+        """Llamado cuando el hash MD5 ha terminado de calcularse."""
+
     def on_job_start(self, job: "Job", total_payloads: int) -> None:
         """Llamado cuando un Job inicia su procesamiento."""
         ...
@@ -52,6 +63,15 @@ class UploadObserver(Protocol):
 
 class NullObserver:
     """Implementación no-op útil para tests unitarios o ejecución desatendida."""
+
+    def on_hash_start(self, filename: str, total_bytes: int) -> None:
+        pass
+
+    def on_hash_progress(self, current_bytes: int, total_bytes: int) -> None:
+        pass
+
+    def on_hash_complete(self, filename: str, md5sum: str) -> None:
+        pass
 
     def on_job_start(self, job: "Job", total_payloads: int) -> None:
         pass
