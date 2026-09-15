@@ -222,11 +222,23 @@ def _step_v2_to_v3(db: peewee.Database):
         logger.debug(f"Aviso en paso v2->v3: {e}")
 
 
+def _step_v3_to_v4(db: peewee.Database):
+    """Paso v3 -> v4: Convertir mtime a DoubleField (float8) para evitar pérdida de precisión en Postgres."""
+    migrator = _get_migrator(db)
+    try:
+        migrate(
+            migrator.alter_column_type("source", "mtime", peewee.DoubleField()),
+        )
+    except Exception as e:
+        logger.debug(f"Aviso en paso v3->v4: {e}")
+
+
 # Registrar en MIGRATION_REGISTRY:
 MIGRATION_REGISTRY: Dict[int, Callable[[peewee.Database], None]] = {
     0: _step_v0_to_v1,
     1: _step_v1_to_v2,
     2: _step_v2_to_v3,
+    3: _step_v3_to_v4,
 }
 
 

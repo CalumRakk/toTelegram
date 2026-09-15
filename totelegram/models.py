@@ -153,8 +153,9 @@ class Source(BaseModel):
     path_str = cast(str, peewee.CharField())
     md5sum = cast(str, peewee.CharField(unique=True))  # MD5 o Fingerprint
     size = cast(int, peewee.BigIntegerField())
+
     # mtime : Unix timestamp. Es util para la identificar archivo
-    mtime = cast(float, peewee.FloatField())
+    mtime = cast(float, peewee.DoubleField())
     mimetype = cast(str, peewee.CharField())
     type = cast(SourceType, EnumField(SourceType, default=SourceType.FILE))  # type: ignore
 
@@ -171,6 +172,25 @@ class Source(BaseModel):
         return self.type == SourceType.FOLDER
 
     @staticmethod
+    def _is_mtime_matching(cached_mtime: float, current_mtime: float) -> bool:
+        diff = abs(cached_mtime - current_mtime)
+
+        # Coincidencia para sistemas modernos (Linux, Windows, macOS):
+        # Tolera únicamente infinitesimales de float64 (< 1 milisegundo)
+        if diff < 0.001:
+            return True
+
+        # Tolerancia para sistemas sin subsegundos (FAT32, TAR, ZIP):
+        # Solo si alguno de los dos timestamps no tiene parte fraccionaria (redondeado a segundo entero)
+        is_cached_integer = (cached_mtime % 1.0) == 0.0
+        is_current_integer = (current_mtime % 1.0) == 0.0
+
+        if (is_cached_integer or is_current_integer) and diff <= 2.0:
+            return True
+
+        return False
+
+    @staticmethod
     def get_or_create_from_filepath(
         path: Path,
         on_hash_start: Optional[Callable[[str, int], None]] = None,
@@ -182,20 +202,16 @@ class Source(BaseModel):
         current_mtime = stat.st_mtime
         canonical_path = str(path.resolve())
 
-        # Intentar resolver por caché rápido (mismo path absoluto)
+        # Intenta resolver por caché rápido
         cached = Source.get_or_none(Source.path_str == canonical_path)
         if cached:
-            # Validamos tamaño exacto y mtime con tolerancia (menor a 4 segundo)
-            # Esto evita los problemas de precisión flotante entre Python y SQLite/Postgres
             size_matches = cached.size == current_size
-            mtime_matches = (
-                abs(cached.mtime - current_mtime) < 3.3
-            )  # TODO: analizar bien si una tolerancia de más de 3.3 puede dar falsos positivos.
+            mtime_matches = Source._is_mtime_matching(cached.mtime, current_mtime)
 
             if size_matches and mtime_matches:
                 return cached
 
-        # Solo si de verdad hay que leer el disco, notificamos a la UI
+        # Si no coincide estrictamente, se procede al hash completo seguro...
         if on_hash_start:
             on_hash_start(path.name, current_size)
 
