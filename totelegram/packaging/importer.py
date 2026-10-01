@@ -3,6 +3,7 @@ import json
 import logging
 import lzma
 import mimetypes
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -130,23 +131,23 @@ class BaseSnapshotAdapter:
 
 class LegacyV3Adapter(BaseSnapshotAdapter):
     """
-    Soporte para snapshots legacy versión 3.0:
-    {"kind": "pieces-file", "manager": {"file": {...}, "pieces": [...]}, "version": "3.0"}
+    Soporte para snapshots legacy versión 3.0.
+    Maneja tanto archivos troceados ('pieces-file') como archivos únicos ('single-file').
     """
 
     @staticmethod
     def matches(raw_data: Dict[str, Any]) -> bool:
-        return (
-            raw_data.get("version") == "3.0"
-            and "manager" in raw_data
-            and "pieces" in raw_data.get("manager", {})
-        )
+        if raw_data.get("version") != "3.0" or "manager" not in raw_data:
+            return False
+        mgr = raw_data.get("manager", {})
+        # Hace match si tiene la lista de pieces O el mensaje directo de single-file
+        return "pieces" in mgr or "message" in mgr
 
     @classmethod
     def to_canonical(cls, raw_data: Dict[str, Any]) -> CanonicalSnapshot:
         manager = raw_data["manager"]
         file_info = manager["file"]
-        pieces = manager["pieces"]
+        is_single = "message" in manager or raw_data.get("kind") == "single-file"
 
         # Parseo de fecha
         created_str = raw_data.get("createdTime")
@@ -165,32 +166,53 @@ class LegacyV3Adapter(BaseSnapshotAdapter):
         else:
             mimetype = raw_mime
 
-        # Reconstrucción continua y determinista de offsets
         parts: List[CanonicalPart] = []
-        current_offset = 0
 
-        for idx, piece in enumerate(pieces):
-            p_size = piece["size"]
-            msg = piece.get("message", {})
-
-            start = current_offset
-            end = current_offset + p_size
-            current_offset = end
-
+        # Archivo Único (single-file)
+        if is_single:
+            msg = manager["message"]
+            file_size = file_info["size"]
             part = CanonicalPart(
-                sequence=idx,
-                filename=piece["filename"],
-                filename_short=msg.get("file_name", piece["filename"]),
-                size=p_size,
-                start_offset=start,
-                end_offset=end,
+                sequence=0,
+                filename=file_info["filename"],
+                filename_short=msg.get("file_name", file_info["filename"]),
+                size=file_size,
+                start_offset=0,
+                end_offset=file_size,
                 chat_id=msg["chat_id"],
                 message_id=msg["message_id"],
-                md5sum=None,
+                md5sum=file_info["md5sum"],  # En archivo único, el hash coincide
             )
             parts.append(part)
+            strategy = Strategy.SINGLE
 
-        strategy = Strategy.CHUNKED if len(parts) > 1 else Strategy.SINGLE
+        # Archivo Troceado (pieces-file)
+        else:
+            pieces = manager.get("pieces", [])
+            current_offset = 0
+
+            for idx, piece in enumerate(pieces):
+                p_size = piece["size"]
+                msg = piece.get("message", {})
+
+                start = current_offset
+                end = current_offset + p_size
+                current_offset = end
+
+                part = CanonicalPart(
+                    sequence=idx,
+                    filename=piece["filename"],
+                    filename_short=msg.get("file_name", piece["filename"]),
+                    size=p_size,
+                    start_offset=start,
+                    end_offset=end,
+                    chat_id=msg["chat_id"],
+                    message_id=msg["message_id"],
+                    md5sum=None,
+                )
+                parts.append(part)
+
+            strategy = Strategy.CHUNKED if len(parts) > 1 else Strategy.SINGLE
 
         return CanonicalSnapshot(
             filename=file_info["filename"],
@@ -203,6 +225,93 @@ class LegacyV3Adapter(BaseSnapshotAdapter):
             parts=parts,
             raw_version="3.0",
             adapter_name="LegacyV3Adapter",
+        )
+
+
+class LegacyYamlV0Adapter(BaseSnapshotAdapter):
+    """
+    Soporte para snapshots ancestrales v0.0.1 en formato YAML:
+    chat_id: -100...
+    md5sum: aa0b...
+    version: 0.0.1
+    files:
+      - filename: '...mp4_1-3'
+        message_id: 169
+        part: 1-3
+        size: 2097152000
+    """
+
+    @staticmethod
+    def matches(raw_data: Dict[str, Any]) -> bool:
+        return (
+            isinstance(raw_data, dict)
+            and "files" in raw_data
+            and "chat_id" in raw_data
+            and "md5sum" in raw_data
+            and str(raw_data.get("version", "")).startswith("0.0.")
+        )
+
+    @classmethod
+    def to_canonical(cls, raw_data: Dict[str, Any]) -> CanonicalSnapshot:
+        files = raw_data["files"]
+        target_chat_id = int(raw_data["chat_id"])
+        md5sum = str(raw_data["md5sum"])
+
+        # Deducir nombre base original limpiando el sufijo '_1-3' o '_X-Y'
+        first_filename = files[0]["filename"]
+        base_filename = re.sub(r"_\d+-\d+$", "", first_filename)
+
+        # Inferir MimeType a partir de la extensión del nombre recuperado
+        guessed_mime, _ = mimetypes.guess_type(base_filename)
+        mimetype = guessed_mime or "application/octet-stream"
+
+        # Reconstruir partes y calcular offsets continuos
+        parts: List[CanonicalPart] = []
+        current_offset = 0
+
+        for idx, item in enumerate(files):
+            p_size = int(item["size"])
+            start = current_offset
+            end = current_offset + p_size
+            current_offset = end
+
+            # Parsear secuencia si viene como '1-3'
+            part_str = str(item.get("part", ""))
+            if "-" in part_str:
+                try:
+                    seq = int(part_str.split("-")[0]) - 1
+                except ValueError:
+                    seq = idx
+            else:
+                seq = idx
+
+            part = CanonicalPart(
+                sequence=seq,
+                filename=item["filename"],
+                filename_short=item["filename"],
+                size=p_size,
+                start_offset=start,
+                end_offset=end,
+                chat_id=target_chat_id,
+                message_id=int(item["message_id"]),
+                md5sum=None,
+            )
+            parts.append(part)
+
+        total_size = current_offset
+        strategy = Strategy.CHUNKED if len(parts) > 1 else Strategy.SINGLE
+
+        return CanonicalSnapshot(
+            filename=base_filename,
+            size=total_size,
+            md5sum=md5sum,
+            mtime=datetime.now(timezone.utc).timestamp(),
+            mimetype=mimetype,
+            source_type=SourceType.FILE,
+            strategy=strategy,
+            parts=parts,
+            raw_version=str(raw_data.get("version", "0.0.1")),
+            adapter_name="LegacyYamlV0Adapter",
         )
 
 
@@ -266,40 +375,52 @@ class ModernCanonicalAdapter(BaseSnapshotAdapter):
 
 
 class SnapshotInspector:
-    ADAPTERS = [LegacyV3Adapter, ModernCanonicalAdapter]
+    ADAPTERS = [LegacyV3Adapter, LegacyYamlV0Adapter, ModernCanonicalAdapter]
 
     @classmethod
-    def load_raw_json(cls, path: Path) -> Dict[str, Any]:
-        """Carga transparente de archivos .json o .json.xz."""
+    def load_raw_data(cls, path: Path) -> Dict[str, Any]:
+        """Carga transparente de archivos .json, .json.xz, .yaml y .yml."""
+        # Caso YAML
+        if path.suffix.lower() in (".yaml", ".yml"):
+            try:
+                import yaml
+            except ImportError:
+                raise RuntimeError(
+                    "PyYAML no está instalado. Ejecuta: pip install pyyaml"
+                )
+            with open(path, "r", encoding="utf-8") as f:
+                return yaml.safe_load(f)
+
+        # Caso JSON comprimido XZ
         if path.suffix == ".xz" or path.name.endswith(".json.xz"):
             with lzma.open(path, "rt", encoding="utf-8") as f:
                 return json.load(f)
-        else:
-            with open(path, "r", encoding="utf-8") as f:
-                return json.load(f)
+
+        # Caso JSON plano
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
 
     @classmethod
     def inspect_file(cls, path: Path) -> SnapshotInspection:
         try:
-            raw_data = cls.load_raw_json(path)
+            raw_data = cls.load_raw_data(path)
         except Exception as e:
             return SnapshotInspection(
                 path=path,
                 status=InspectionStatus.CORRUPTED,
-                error_detail=f"Fallo de lectura/descompresión: {e}",
+                error_detail=f"Fallo de lectura/parser: {e}",
             )
 
         if not isinstance(raw_data, dict):
             return SnapshotInspection(
                 path=path,
                 status=InspectionStatus.CORRUPTED,
-                error_detail="El contenido raíz no es un objeto JSON válido.",
+                error_detail="El contenido raíz no es un diccionario/objeto válido.",
             )
 
         root_keys = sorted(list(raw_data.keys()))
         detected_version = str(raw_data.get("version", "desconocida"))
 
-        # Probar adaptadores registrados
         for adapter in cls.ADAPTERS:
             if adapter.matches(raw_data):
                 try:
@@ -320,7 +441,6 @@ class SnapshotInspector:
                         root_keys=root_keys,
                     )
 
-        # Si ningún adaptador pudo interpretarlo:
         return SnapshotInspection(
             path=path,
             status=InspectionStatus.UNKNOWN_VERSION,
@@ -330,16 +450,17 @@ class SnapshotInspector:
 
     @classmethod
     def find_all_candidates(cls, paths: List[Path]) -> List[Path]:
-        """Encuentra recursivamente todos los .json y .json.xz."""
+        """Encuentra recursivamente todos los .json, .json.xz, .yaml y .yml."""
+        valid_exts = (".json", ".json.xz", ".yaml", ".yml")
         candidates = []
         for p in paths:
             if p.is_file():
-                if p.name.endswith(".json") or p.name.endswith(".json.xz"):
+                if any(p.name.endswith(ext) for ext in valid_exts):
                     candidates.append(p)
             elif p.is_dir():
                 for sub in p.rglob("*"):
-                    if sub.is_file() and (
-                        sub.name.endswith(".json") or sub.name.endswith(".json.xz")
+                    if sub.is_file() and any(
+                        sub.name.endswith(ext) for ext in valid_exts
                     ):
                         candidates.append(sub)
         return sorted(list(set(candidates)))
@@ -379,7 +500,7 @@ class SnapshotImportPlanner:
             target_chat_id = canonical.parts[0].chat_id
             total_parts = len(canonical.parts)
 
-            # 1. ¿Existe el Source por MD5?
+            # ¿Existe el Source por MD5?
             existing_source = Source.get_or_none(Source.md5sum == canonical.md5sum)
 
             if existing_source is None:
@@ -395,7 +516,7 @@ class SnapshotImportPlanner:
                 )
                 continue
 
-            # 2. Source existe. ¿Existe Job activo para este chat?
+            # Source existe. ¿Existe Job activo para este chat?
             existing_job = Job.get_or_none(
                 (Job.source == existing_source)
                 & (Job.chat == target_chat_id)
@@ -416,7 +537,7 @@ class SnapshotImportPlanner:
                 )
                 continue
 
-            # 3. Source y Job existen. Comparar piezas remotas activas
+            # Source y Job existen. Comparar piezas remotas activas
             existing_payloads = list(
                 existing_job.payloads.order_by(Payload.sequence_index)
             )
@@ -514,7 +635,7 @@ class SnapshotImporter:
         canonical = item.inspection.canonical
         assert canonical is not None
 
-        # 1. Asegurar TelegramChat (crea un stub si no existe en la DB receptora)
+        # Asegurar TelegramChat (crea un stub si no existe en la DB receptora)
         chat, _ = TelegramChat.get_or_create(
             id=item.target_chat_id,
             defaults={
@@ -525,7 +646,7 @@ class SnapshotImporter:
             },
         )
 
-        # 2. Resolver o Crear Source
+        # Resolver o Crear Source
         if item.existing_source:
             source = item.existing_source
         else:
@@ -538,7 +659,7 @@ class SnapshotImporter:
                 type=canonical.source_type,
             )
 
-        # 3. Resolver o Crear Job
+        # Resolver o Crear Job
         if item.existing_job:
             job = item.existing_job
         else:
@@ -559,7 +680,7 @@ class SnapshotImporter:
                 deleted_at=0,
             )
 
-        # 4. Crear o Completar Payloads y RemotePayloads
+        # Crear o Completar Payloads y RemotePayloads
         payload_map = {p.sequence_index: p for p in job.payloads}  # type: ignore
 
         for part in canonical.parts:
