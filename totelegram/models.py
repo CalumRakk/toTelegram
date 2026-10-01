@@ -150,6 +150,8 @@ class TelegramUser(BaseModel):
 class Source(BaseModel):
     """Representa la identidad única de un recurso (Archivo o Carpeta)."""
 
+    id: int
+
     path_str = cast(str, peewee.CharField())
     md5sum = cast(str, peewee.CharField(unique=True))  # MD5 o Fingerprint
     size = cast(int, peewee.BigIntegerField())
@@ -317,6 +319,7 @@ class Source(BaseModel):
 
 
 class Job(BaseModel):
+    chat_id: int
     id: int
     payloads: peewee.ModelSelect
 
