@@ -3,21 +3,14 @@ from pathlib import Path
 from typing import List
 
 import typer
-from rich.progress import (
-    BarColumn,
-    Progress,
-    SpinnerColumn,
-    TextColumn,
-    TimeRemainingColumn,
-)
+from rich.panel import Panel
 from rich.table import Table
 
 from totelegram.cli.state import CLIState
 from totelegram.cli.ui import UI, console
-from totelegram.database import DatabaseSession, normalize_database_url
 from totelegram.models import TelegramUser
 from totelegram.packaging.importer import (
-    InspectionStatus,
+    ImportPlan,
     PlanAction,
     SnapshotImporter,
     SnapshotImportPlanner,
@@ -26,39 +19,35 @@ from totelegram.packaging.importer import (
 
 logger = logging.getLogger(__name__)
 
-app = typer.Typer(help="Gestión e importación de snapshots de subida (*.json.xz).")
+app = typer.Typer(help="Herramientas para inspeccionar e importar snapshots.")
 
 
 def _format_size(size_bytes: int) -> str:
-    """Convierte bytes a un formato legible."""
-    if size_bytes < 1024 * 1024:
-        return f"{size_bytes / 1024:.1f} KB"
-    elif size_bytes < 1024 * 1024 * 1024:
-        return f"{size_bytes / (1024 * 1024):.1f} MB"
-    return f"{size_bytes / (1024 * 1024 * 1024):.2f} GB"
+    for unit in ["B", "KB", "MB", "GB", "TB"]:
+        if abs(size_bytes) < 1024.0:
+            return f"{size_bytes:.1f} {unit}"
+        size_bytes /= 1024.0  # type: ignore
+    return f"{size_bytes:.1f} PB"
 
 
-def _render_plan_table(plan, show_all: bool = False):
-    """Muestra la tabla del plan con estilos y límites para lotes grandes."""
-    table = Table(
-        title="Plan de Importación de Snapshots", show_header=True, expand=True
-    )
-    table.add_column("Acción", style="bold", width=14)
-    table.add_column("Archivo / Contenido", style="cyan")
-    table.add_column("Tamaño", justify="right", width=10)
-    table.add_column("Partes", justify="center", width=8)
-    table.add_column("Chat ID", style="dim", width=15)
-    table.add_column("Detalle", style="bright_black")
+def _display_plan_table(plan: ImportPlan):
+    table = Table(title="Plan de Importación de Snapshots", show_header=True)
+    table.add_column("Acción", style="bold", no_wrap=True)
+    table.add_column("Recurso")
+    table.add_column("Tamaño", justify="right")
+    table.add_column("Partes", justify="center")
+    table.add_column("Chat ID", style="dim")
+    table.add_column("Detalle")
 
     action_styles = {
         PlanAction.CREATE_NEW: ("[green]NUEVO[/]", "green"),
         PlanAction.CREATE_JOB: ("[cyan]RAMIFICAR[/]", "cyan"),
-        PlanAction.MERGE_REMOTES: ("[yellow]FUSIONAR[/]", "yellow"),
+        PlanAction.MERGE_REMOTES: ("[yellow]COMPLETAR[/]", "yellow"),
         PlanAction.ALREADY_EXISTS: ("[dim]OMITIR[/]", "dim"),
-        PlanAction.CONFLICT: ("[red]CONFLICTO[/]", "red"),
+        PlanAction.CONFLICT: ("[bold red]CONFLICTO[/]", "red"),
     }
 
-    # Mostrar primero las acciones que generan cambios
+    # Mostrar primero las acciones que van a ejecutarse o tienen conflicto
     sorted_items = sorted(
         plan.items,
         key=lambda x: (
@@ -66,27 +55,68 @@ def _render_plan_table(plan, show_all: bool = False):
             if x.action
             in (PlanAction.CREATE_NEW, PlanAction.CREATE_JOB, PlanAction.MERGE_REMOTES)
             else 1
+            if x.action == PlanAction.CONFLICT
+            else 2
         ),
     )
 
-    max_display = len(sorted_items) if show_all else 20
-    displayed_items = sorted_items[:max_display]
+    # Límite visual para no saturar si son miles de archivos ya existentes
+    displayed_noop = 0
+    max_noop_display = 5
 
-    for item in displayed_items:
-        label, _ = action_styles.get(item.action, (item.action.value, "white"))
-        filename = item.snapshot_path.name
-        size_str = _format_size(item.total_size) if item.total_size > 0 else "--"
-        parts_str = str(item.parts_count) if item.parts_count > 0 else "--"
-        chat_str = str(item.chat_id) if item.chat_id else "--"
+    for item in sorted_items:
+        label, _ = action_styles[item.action]
+        canon = item.inspection.canonical
+        assert canon is not None
 
-        table.add_row(label, filename, size_str, parts_str, chat_str, item.message)
+        if item.action == PlanAction.ALREADY_EXISTS:
+            displayed_noop += 1
+            if displayed_noop > max_noop_display:
+                continue
+
+        table.add_row(
+            label,
+            canon.filename,
+            _format_size(canon.size),
+            str(item.total_parts),
+            str(item.target_chat_id),
+            item.reason,
+        )
+
+    if displayed_noop > max_noop_display:
+        omitted = displayed_noop - max_noop_display
+        table.add_row(
+            "[dim]OMITIR[/]",
+            f"[dim]... y {omitted} snapshots más ya completos e idénticos en DB[/dim]",
+            "-",
+            "-",
+            "-",
+            "[dim]Sin cambios requeridos[/dim]",
+        )
 
     console.print(table)
 
-    if not show_all and len(sorted_items) > max_display:
-        console.print(
-            f"  [dim]... y {len(sorted_items) - max_display} snapshots más idénticos u omitidos.[/]\n"
+
+def _display_unknown_table(unknown_items):
+    table = Table(
+        title="Snapshots con Versión No Reconocida (Requieren Migrador)",
+        show_header=True,
+    )
+    table.add_column("Archivo", style="yellow")
+    table.add_column("Versión Detectada", justify="center")
+    table.add_column("Claves Estructurales Raíz")
+
+    for u in unknown_items[:20]:
+        table.add_row(
+            u.path.name,
+            u.detected_version or "desconocida",
+            ", ".join(u.root_keys[:8]),
         )
+
+    if len(unknown_items) > 20:
+        table.add_row("...", "...", f"... y {len(unknown_items) - 20} archivos más.")
+
+    console.print(table)
 
 
 @app.command("import")
@@ -95,181 +125,127 @@ def import_snapshots(
     paths: List[Path] = typer.Argument(
         ...,
         exists=True,
-        help="Rutas a archivos .json.xz o carpetas que los contengan.",
+        help="Rutas a archivos (.json, .json.xz) o carpetas que contengan snapshots.",
     ),
     apply: bool = typer.Option(
         False,
         "--apply",
         "-a",
-        help="Aplica los cambios directamente a la base de datos sin preguntar.",
+        help="Aplica el plan en la base de datos sin solicitar confirmación.",
     ),
     dry_run: bool = typer.Option(
         False,
         "--dry-run",
-        help="Ejecuta únicamente el análisis y muestra el plan sin modificar la base de datos.",
+        help="Solo muestra el plan de importación sin realizar ninguna modificación.",
     ),
     show_unknown: bool = typer.Option(
         False,
         "--show-unknown",
-        help="Muestra la lista de snapshots con versiones no reconocidas y sus claves.",
-    ),
-    show_all: bool = typer.Option(
-        False,
-        "--show-all",
-        help="Muestra todas las filas del plan en lugar de resumir.",
+        help="Muestra una tabla detallada con las claves de los snapshots no reconocidos.",
     ),
 ):
     """
-    Inspecciona y alimenta la base de datos a partir de archivos de snapshot (*.json.xz).
+    Inspecciona y alimenta la base de datos a partir de archivos Snapshot.
+    Soporta formato canónico moderno y versiones legacy v3.0.
     """
     state: CLIState = ctx.obj
-    profile_name = state.manager.resolve_profile_name(state.profile_name, strict=True)
-    assert profile_name is not None
-    settings = state.manager.get_settings(profile_name)
+    manager = state.manager
 
-    # 1. Escaneo e Inspección de Archivos (Fase 2)
-    with console.status("[bold green]Escaneando y clasificando snapshots..."):
-        inspections = SnapshotInspector.scan_paths(paths)
+    # Resolver perfil activo
+    profile_name = manager.resolve_profile_name(state.profile_name, strict=True)
+    settings = manager.get_settings(profile_name)  # type: ignore
 
-    if not inspections:
+    UI.separator()
+    with console.status("[dim]Buscando archivos snapshot...[/]"):
+        candidates = SnapshotInspector.find_all_candidates(paths)
+
+    if not candidates:
         UI.warn(
-            "No se encontraron archivos de snapshot (*.json.xz) en las rutas indicadas."
+            "No se encontraron archivos snapshot (.json, .json.xz) en las rutas proporcionadas."
         )
         raise typer.Exit(0)
 
-    # Resumen preliminar de inspección
-    valid_inspections = [
-        i for i in inspections if i.status == InspectionStatus.CURRENT_VERSION
-    ]
-    unknown_inspections = [
-        i for i in inspections if i.status == InspectionStatus.UNKNOWN_VERSION
-    ]
-    corrupted_inspections = [
-        i for i in inspections if i.status == InspectionStatus.CORRUPTED
-    ]
+    UI.info(f"Escaneando e inspeccionando [bold]{len(candidates)}[/] snapshots...")
 
-    db_url = normalize_database_url(settings.database_url, state.manager.database_path)
+    # Inspección y Normalización
+    inspections = [SnapshotInspector.inspect_file(p) for p in candidates]
 
-    # 2. Planificación contra la Base de Datos (Fase 3 - Solo Lectura)
+    # Planificación contra DB (Conexión directa)
+    from totelegram.database import DatabaseSession, normalize_database_url
+
+    db_url = normalize_database_url(settings.database_url, manager.database_path)
+
     with DatabaseSession(db_url, auto_init_schema=True) as db:
-        with console.status(
-            "[bold blue]Consultando base de datos y construyendo el PLAN..."
-        ):
-            plan = SnapshotImportPlanner.build_plan(valid_inspections, db)
+        plan = SnapshotImportPlanner.plan(inspections)
 
-        UI.separator()
-        _render_plan_table(plan, show_all=show_all)
-
-        # Resumen consolidado del PLAN
-        ready_to_import = sum(
-            1
-            for i in plan.items
-            if i.action
-            in (PlanAction.CREATE_NEW, PlanAction.CREATE_JOB, PlanAction.MERGE_REMOTES)
-        )
-        already_present = sum(
-            1 for i in plan.items if i.action == PlanAction.ALREADY_EXISTS
-        )
-        conflicts = sum(1 for i in plan.items if i.action == PlanAction.CONFLICT)
-
-        console.print("[bold]Resumen del Diagnóstico:[/bold]")
-        console.print(
-            f"  • Listos para importar:       [bold green]{ready_to_import:>6}[/]"
-        )
-        console.print(
-            f"  • Ya registrados (No-Op):     [dim white]{already_present:>6}[/]"
-        )
-        if conflicts > 0:
-            console.print(
-                f"  • En conflicto (Omitidos):    [bold red]{conflicts:>6}[/]"
-            )
-        if unknown_inspections:
-            console.print(
-                f"  • Versiones desconocidas:     [bold yellow]{len(unknown_inspections):>6}[/] [dim](Omitidos sin riesgo)[/dim]"
-            )
-        if corrupted_inspections:
-            console.print(
-                f"  • Archivos corruptos:         [bold red]{len(corrupted_inspections):>6}[/]"
-            )
         console.print()
+        _display_plan_table(plan)
 
-        # Si se solicitó ver detalles de versiones desconocidas
-        if show_unknown and unknown_inspections:
-            unk_table = Table(title="Snapshots con Versiones Desconocidas", expand=True)
-            unk_table.add_column("Archivo", style="yellow")
-            unk_table.add_column("Claves Encontradas", style="cyan")
-            unk_table.add_column("Detalle Error", style="dim")
-            for u in unknown_inspections[:30]:
-                keys_str = ", ".join(u.root_keys[:6]) if u.root_keys else "N/A"
-                unk_table.add_row(u.path.name, keys_str, u.error_message or "")
-            console.print(unk_table)
-            if len(unknown_inspections) > 30:
-                console.print(f"  [dim]... y {len(unknown_inspections) - 30} más.[/]\n")
+        # Panel de Resumen
+        summary_lines = [
+            f"• [bold green]Listos para importar:[/]   {len(plan.actionable_items)}",
+            f"• [dim]Ya registrados (No-Op):[/]   {plan.already_exists_count}",
+            f"• [bold red]Conflictos de esquema:[/]   {plan.conflicts_count}",
+            f"• [bold yellow]Versiones desconocidas:[/] {len(plan.unknown_items)}",
+            f"• [bold red]Archivos corruptos:[/]     {len(plan.corrupted_items)}",
+        ]
+        console.print(
+            Panel("\n".join(summary_lines), title="[bold blue]Resumen del Plan[/]")
+        )
 
-        # Salir si es modo dry-run
+        if plan.unknown_items and show_unknown:
+            console.print()
+            _display_unknown_table(plan.unknown_items)
+        elif plan.unknown_items:
+            UI.tip(
+                "Usa [bold]--show-unknown[/] para ver detalles estructurales de las versiones no reconocidas."
+            )
+
         if dry_run:
-            UI.info(
-                "Modo --dry-run activo. No se aplicaron cambios a la base de datos."
-            )
+            UI.info("Modo [bold]--dry-run[/] activo. No se aplicaron cambios.")
             raise typer.Exit(0)
 
-        if ready_to_import == 0:
-            UI.info(
-                "No hay acciones pendientes por aplicar. La base de datos ya está al día."
-            )
+        if not plan.actionable_items:
+            UI.success("No hay nuevos snapshots para importar. Base de datos al día.")
             raise typer.Exit(0)
 
-        # Confirmación interactiva si no viene --apply
+        # Confirmación si no viene --apply
         if not apply:
+            console.print()
             confirmed = typer.confirm(
-                f"¿Deseas aplicar este plan e importar {ready_to_import} snapshots a la base de datos?",
+                f"¿Deseas aplicar este plan e importar {len(plan.actionable_items)} snapshots a la DB?",
                 default=True,
             )
             if not confirmed:
-                UI.warn("Operación cancelada por el usuario.")
+                UI.info("Operación cancelada por el usuario.")
                 raise typer.Exit(0)
 
-        # 3. Aplicación Transaccional (Fase 4 - Escritura)
-        account_id = settings.telegram_account_id or 1
+        # Aplicación
+        # Resolver o crear el usuario owner de referencia
+        owner_id = settings.telegram_account_id or 1
         owner, _ = TelegramUser.get_or_create(
-            id=account_id,
+            id=owner_id,
             defaults={
                 "first_name": profile_name,
-                "username": profile_name,
                 "is_premium": False,
             },
         )
 
-        importer = SnapshotImporter(db, default_owner=owner)
+        with console.status(
+            "[bold green]Importando snapshots a la base de datos...[/]"
+        ) as status:
 
-        progress = Progress(
-            SpinnerColumn(),
-            TextColumn("[bold cyan]Importando:[/] {task.fields[filename]}"),
-            BarColumn(bar_width=None),
-            "[progress.percentage]{task.percentage:>3.0f}%",
-            "•",
-            TextColumn("[dim]({task.completed}/{task.total})[/]"),
-            TimeRemainingColumn(),
-            console=console,
-            transient=True,
-        )
+            def _prog(cur, tot, name):
+                status.update(f"[bold green]Importando ({cur}/{tot}):[/] {name}")
 
-        task_id = progress.add_task(
-            "import", total=ready_to_import, filename="Iniciando..."
-        )
-
-        def _on_tick(current: int, total: int, filename: str):
-            progress.update(task_id, completed=current, filename=filename)
-
-        with progress:
-            report = importer.apply(plan, on_progress=_on_tick)
+            succeeded, failed = SnapshotImporter.apply_plan(
+                plan, db, owner, on_progress=_prog
+            )
 
         UI.separator()
-        if report.successful > 0:
+        if succeeded > 0:
             UI.success(
-                f"Se importaron [bold]{report.successful}[/] snapshots correctamente a la base de datos."
+                f"Se importaron exitosamente [bold]{succeeded}[/] snapshots a la base de datos."
             )
-        if report.failed > 0:
-            UI.error(
-                f"Ocurrieron errores al procesar [bold]{report.failed}[/] snapshots. Revisa los logs para más detalles."
-            )
+        if failed > 0:
+            UI.error(f"Ocurrieron errores al importar [bold]{failed}[/] snapshots.")
