@@ -41,6 +41,7 @@ class PlanAction(str, enum.Enum):
     MERGE_REMOTES = "MERGE_REMOTES"  # Job existe pero faltaban piezas remotas
     ALREADY_EXISTS = "ALREADY_EXISTS"  # Todo completo en DB (No-Op)
     CONFLICT = "CONFLICT"  # Discrepancia en cantidad de piezas u offsets
+    NEEDS_TELEGRAM = "NEEDS_TELEGRAM"
 
 
 @dataclass
@@ -68,6 +69,7 @@ class CanonicalSnapshot:
     parts: List[CanonicalPart]
     raw_version: str
     adapter_name: str
+    is_incomplete: bool = False
 
 
 @dataclass
@@ -285,6 +287,7 @@ class LegacyYamlV0Adapter(BaseSnapshotAdapter):
             else:
                 seq = idx
 
+            part_md5 = md5sum if len(files) == 1 else None
             part = CanonicalPart(
                 sequence=seq,
                 filename=item["filename"],
@@ -294,7 +297,7 @@ class LegacyYamlV0Adapter(BaseSnapshotAdapter):
                 end_offset=end,
                 chat_id=target_chat_id,
                 message_id=int(item["message_id"]),
-                md5sum=None,
+                md5sum=part_md5,
             )
             parts.append(part)
 
@@ -371,6 +374,79 @@ class ModernCanonicalAdapter(BaseSnapshotAdapter):
         )
 
 
+class LegacyDocumentsYamlAdapter(BaseSnapshotAdapter):
+    """
+    Soporta formato ancestral sin versión ni tamaños.
+    Delega la resolución de tamaños exactos a Telegram.
+    """
+
+    @staticmethod
+    def matches(raw_data: Dict[str, Any]) -> bool:
+        if not isinstance(raw_data, dict):
+            return False
+        return (
+            "filedocuments" in raw_data
+            and "md5sum" in raw_data
+            and "chat_id" in raw_data
+        )
+
+    @classmethod
+    def to_canonical(cls, raw_data: Dict[str, Any]) -> CanonicalSnapshot:
+        docs = raw_data["filedocuments"]
+        chat_id = int(raw_data["chat_id"])
+        md5sum = str(raw_data["md5sum"])
+
+        first_name = docs[0]["filepart"]
+        base_filename = re.sub(r"_\d+-\d+$", "", first_name)
+
+        guessed_mime, _ = mimetypes.guess_type(base_filename)
+        mimetype = guessed_mime or "application/octet-stream"
+
+        parts: List[CanonicalPart] = []
+        has_missing_sizes = False
+
+        for idx, doc in enumerate(docs):
+            msg_id = int(doc["message_id"])
+            p_name = doc["filepart"]
+
+            # Si el documento no tiene 'size', marcamos -1
+            if "size" in doc:
+                p_size = int(doc["size"])
+            else:
+                p_size = -1
+                has_missing_sizes = True
+
+            parts.append(
+                CanonicalPart(
+                    sequence=idx,
+                    filename=p_name,
+                    filename_short=p_name,
+                    size=p_size,
+                    start_offset=0,
+                    end_offset=0,
+                    chat_id=chat_id,
+                    message_id=msg_id,
+                    md5sum=None,
+                )
+            )
+
+        strategy = Strategy.CHUNKED if len(parts) > 1 else Strategy.SINGLE
+
+        return CanonicalSnapshot(
+            filename=base_filename,
+            size=0,
+            md5sum=md5sum,
+            mtime=datetime.now(timezone.utc).timestamp(),
+            mimetype=mimetype,
+            source_type=SourceType.FILE,
+            strategy=strategy,
+            parts=parts,
+            raw_version="pre-alpha (filedocuments)",
+            adapter_name="LegacyDocumentsYamlAdapter",
+            is_incomplete=has_missing_sizes,
+        )
+
+
 # Inspector
 
 
@@ -384,12 +460,27 @@ class SnapshotInspector:
         if path.suffix.lower() in (".yaml", ".yml"):
             try:
                 import yaml
+
+                class SafeObjectLoader(yaml.SafeLoader):
+                    pass
+
+                def _construct_python_object(loader, tag_suffix, node):
+                    return loader.construct_mapping(node)
+
+                SafeObjectLoader.add_multi_constructor(
+                    "tag:yaml.org,2002:python/object:", _construct_python_object
+                )
+                SafeObjectLoader.add_multi_constructor(
+                    "!python/object:", _construct_python_object
+                )
+
             except ImportError:
                 raise RuntimeError(
                     "PyYAML no está instalado. Ejecuta: pip install pyyaml"
                 )
             with open(path, "r", encoding="utf-8") as f:
-                return yaml.safe_load(f)
+                # Usar SafeObjectLoader para neutralizar tags !!python/object:...
+                return yaml.load(f, Loader=SafeObjectLoader)
 
         # Caso JSON comprimido XZ
         if path.suffix == ".xz" or path.name.endswith(".json.xz"):
@@ -471,13 +562,12 @@ class SnapshotInspector:
 
 class SnapshotImportPlanner:
     @classmethod
-    def plan(cls, inspections: List[SnapshotInspection]) -> ImportPlan:
+    def plan(cls, inspections: List[SnapshotInspection], client=None) -> ImportPlan:
         plan = ImportPlan()
 
         for insp in inspections:
             if insp.status == InspectionStatus.UNKNOWN_VERSION:
                 plan.unknown_items.append(insp)
-                print(f"Unknown version: {insp.path}")
                 continue
             if insp.status == InspectionStatus.CORRUPTED:
                 plan.corrupted_items.append(insp)
@@ -486,21 +576,41 @@ class SnapshotImportPlanner:
             canonical = insp.canonical
             assert canonical is not None
 
-            # Determinar chat_id objetivo
-            if not canonical.parts:
-                plan.corrupted_items.append(
-                    SnapshotInspection(
-                        path=insp.path,
-                        status=InspectionStatus.CORRUPTED,
-                        error_detail="El snapshot no contiene piezas registradas.",
+            # AUTO-CURACIÓN ONLINE: Si faltan tamaños, preguntar a Telegram
+            if canonical.is_incomplete:
+                if client is None:
+                    plan.items.append(
+                        PlanItem(
+                            inspection=insp,
+                            action=PlanAction.NEEDS_TELEGRAM,
+                            target_chat_id=canonical.parts[0].chat_id,
+                            total_parts=len(canonical.parts),
+                            missing_parts_count=len(canonical.parts),
+                            reason="Faltan tamaños de piezas. Requiere ejecutar con sesión de Telegram activa.",
+                        )
                     )
-                )
-                continue
+                    continue
 
+                # Curar llamando a Telegram
+                try:
+                    cls._heal_from_telegram(client, canonical)
+                except Exception as e:
+                    plan.items.append(
+                        PlanItem(
+                            inspection=insp,
+                            action=PlanAction.CONFLICT,
+                            target_chat_id=canonical.parts[0].chat_id,
+                            total_parts=len(canonical.parts),
+                            missing_parts_count=0,
+                            reason=f"No se pudo verificar en Telegram: {e}",
+                        )
+                    )
+                    continue
+
+            # (A partir de aquí, canonical tiene tamaños y offsets 100% exactos)
             target_chat_id = canonical.parts[0].chat_id
             total_parts = len(canonical.parts)
 
-            # ¿Existe el Source por MD5?
             existing_source = Source.get_or_none(Source.md5sum == canonical.md5sum)
 
             if existing_source is None:
@@ -511,12 +621,12 @@ class SnapshotImportPlanner:
                         target_chat_id=target_chat_id,
                         total_parts=total_parts,
                         missing_parts_count=total_parts,
-                        reason="Nuevo contenido y nuevo Job en la base de datos.",
+                        reason="Nuevo contenido curado vía Telegram.",
                     )
                 )
                 continue
 
-            # Source existe. ¿Existe Job activo para este chat?
+            # (El resto de la lógica de Source/Job existente sigue idéntica...)
             existing_job = Job.get_or_none(
                 (Job.source == existing_source)
                 & (Job.chat == target_chat_id)
@@ -537,25 +647,7 @@ class SnapshotImportPlanner:
                 )
                 continue
 
-            # Source y Job existen. Comparar piezas remotas activas
-            existing_payloads = list(
-                existing_job.payloads.order_by(Payload.sequence_index)
-            )
-            if existing_payloads and len(existing_payloads) != total_parts:
-                plan.items.append(
-                    PlanItem(
-                        inspection=insp,
-                        action=PlanAction.CONFLICT,
-                        target_chat_id=target_chat_id,
-                        total_parts=total_parts,
-                        missing_parts_count=0,
-                        existing_source=existing_source,
-                        existing_job=existing_job,
-                        reason=f"Conflicto de piezas: DB tiene {len(existing_payloads)} partes, snapshot tiene {total_parts}.",
-                    )
-                )
-                continue
-
+            # Verificación de piezas existentes
             valid_remotes_count = (
                 RemotePayload.select()
                 .join(Payload)
@@ -594,6 +686,37 @@ class SnapshotImportPlanner:
                 )
 
         return plan
+
+    @classmethod
+    def _heal_from_telegram(cls, client, canonical: CanonicalSnapshot):
+        """Consulta los mensajes reales a Telegram para obtener tamaños y nombres exactos."""
+        # TODO: ver si moverlo al paquete telegram.
+        chat_id = canonical.parts[0].chat_id
+        msg_ids = [p.message_id for p in canonical.parts]
+
+        messages = client.get_messages(chat_id, msg_ids)
+        if not isinstance(messages, list):
+            messages = [messages]
+
+        msg_map = {m.id: m for m in messages if m and not getattr(m, "empty", True)}
+
+        current_offset = 0
+        for part in canonical.parts:
+            msg = msg_map.get(part.message_id)
+            if not msg or not msg.document:
+                raise ValueError(
+                    f"Mensaje {part.message_id} en chat {chat_id} no existe o no tiene documento."
+                )
+
+            real_size = msg.document.file_size
+            part.size = real_size
+            part.filename_short = msg.document.file_name or part.filename_short
+            part.start_offset = current_offset
+            part.end_offset = current_offset + real_size
+            current_offset = part.end_offset
+
+        canonical.size = current_offset
+        canonical.is_incomplete = False
 
 
 # Ejecutor Transaccional

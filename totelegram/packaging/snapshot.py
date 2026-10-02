@@ -2,7 +2,7 @@ import json
 import logging
 import lzma
 from pathlib import Path
-from typing import List, Optional
+from typing import TYPE_CHECKING, List, Optional
 
 from totelegram.models import Job, Payload, RemotePayload, TapeMember, TapeMemberGPS
 from totelegram.packaging.schemas import (
@@ -14,33 +14,20 @@ from totelegram.packaging.schemas import (
 )
 from totelegram.schemas import SourceType
 
+if TYPE_CHECKING:
+    from pyrogram.client import Client
+
+
 logger = logging.getLogger(__name__)
 
 
 class SnapshotService:
     @staticmethod
-    def load_snapshot(snapshot_path: Path) -> UploadManifest:
-        """
-        Carga, descomprime y valida un archivo snapshot (.json.xz).
-        Lanza FileNotFoundError o ValueError si el archivo no existe o está corrupto.
-        """
-        if not snapshot_path.exists():
-            raise FileNotFoundError(f"El archivo snapshot no existe: {snapshot_path}")
+    def load_snapshot(path: Path, client: Optional["Client"] = None) -> UploadManifest:
+        """Carga y valida un snapshot, auto-migrándolo transparentemente a v5.0 si es antiguo."""
+        from totelegram.packaging.upgrader import SnapshotUpgrader
 
-        try:
-            with lzma.open(snapshot_path, "rt", encoding="utf-8") as f:
-                raw_json = f.read()
-            manifest = UploadManifest.model_validate_json(raw_json)
-            logger.info(
-                f"Snapshot cargado correctamente: {manifest.source.filename} "
-                f"(Estrategia: {manifest.strategy}, Partes: {len(manifest.parts)})"
-            )
-            return manifest
-        except Exception as e:
-            logger.error(f"Error al deserializar snapshot {snapshot_path.name}: {e}")
-            raise ValueError(
-                f"El archivo snapshot '{snapshot_path.name}' es inválido o está corrupto: {e}"
-            ) from e
+        return SnapshotUpgrader.load_and_upgrade(path, tg_client=client)
 
     @staticmethod
     def generate_snapshot(job: Job) -> UploadManifest:
