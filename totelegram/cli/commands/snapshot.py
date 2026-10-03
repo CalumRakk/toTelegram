@@ -142,9 +142,9 @@ def import_snapshots(
         exists=True,
         help="Rutas a archivos (.json.xz) o carpetas que contengan snapshots v5.0.",
     ),
-    apply: bool = typer.Option(
+    yes: bool = typer.Option(
         False,
-        "--apply",
+        "--yes",
         "-a",
         help="Aplica el plan en la base de datos sin solicitar confirmación.",
     ),
@@ -217,7 +217,7 @@ def import_snapshots(
                     )
                 raise typer.Exit(0)
 
-            if not apply:
+            if not yes:
                 console.print()
                 confirmed = typer.confirm(
                     f"¿Deseas aplicar este plan e importar {len(plan.actionable_items)} snapshots a la DB?",
@@ -240,7 +240,7 @@ def import_snapshots(
                 def _prog(cur, tot, name):
                     status.update(f"[bold green]Importando ({cur}/{tot}):[/] {name}")
 
-                succeeded, failed = SnapshotImporter.apply_plan(
+                succeeded, errors = SnapshotImporter.apply_plan(
                     plan, db, owner, on_progress=_prog
                 )
 
@@ -249,8 +249,22 @@ def import_snapshots(
                 UI.success(
                     f"Se importaron [bold]{succeeded}[/] snapshots exitosamente a la base de datos."
                 )
-            if failed > 0:
-                UI.error(f"Ocurrieron errores al importar [bold]{failed}[/] snapshots.")
+
+            if errors:
+                UI.error(
+                    f"Ocurrieron errores al importar [bold]{len(errors)}[/] snapshots:"
+                )
+                err_table = Table(show_header=True, title="Detalle de Fallos")
+                err_table.add_column("Archivo", style="bold red")
+                err_table.add_column("Motivo del Fallo")
+                for fname, reason in errors[:20]:
+                    err_table.add_row(fname, reason)
+                if len(errors) > 20:
+                    err_table.add_row(
+                        "...",
+                        f"... y {len(errors) - 20} errores más (revisar archivo log).",
+                    )
+                console.print(err_table)
 
 
 @app.command("upgrade")
@@ -286,27 +300,18 @@ def upgrade_snapshots(
     manager = state.manager
     profile_name = manager.resolve_profile_name(state.profile_name, strict=False)
 
-    valid_exts = (".json", ".xz", ".yaml", ".yml")
-    all_candidates: List[Tuple[Path, Path]] = []  # (file_path, base_root)
+    with console.status("[dim]Buscando archivos snapshot...[/]"):
+        candidates = SnapshotInspector.find_all_candidates(paths)
 
-    # Recolectar archivos conservando el origen para la ruta relativa
-    for target in paths:
-        if target.is_file():
-            if any(target.name.lower().endswith(ext) for ext in valid_exts):
-                all_candidates.append((target, target.parent))
-        elif target.is_dir():
-            for f in target.rglob("*"):
-                if f.is_file() and any(
-                    f.name.lower().endswith(ext) for ext in valid_exts
-                ):
-                    all_candidates.append((f, target))
-
-    if not all_candidates:
+    if not candidates:
         UI.warn("No se encontraron snapshots para migrar.")
         raise typer.Exit(0)
 
+    # Base root para determinar rutas relativas
+    base_root = paths[0] if paths[0].is_dir() else paths[0].parent
+
     UI.separator()
-    UI.info(f"Encontrados [bold]{len(all_candidates)}[/] snapshots para procesar.")
+    UI.info(f"Encontrados [bold]{len(candidates)}[/] snapshots para procesar.")
     if output_dir:
         UI.info(
             f"Directorio de salida: [bold cyan]{output_dir}[/] (Estructura relativa activada)"
@@ -316,7 +321,6 @@ def upgrade_snapshots(
             "Modo in-place: Los nuevos snapshots se guardarán junto a los originales."
         )
 
-    # Mantener la sesión de Telegram ABIERTA durante todo el procesamiento
     with maybe_telegram_session(state, profile_name) as tg_client:
         if tg_client:
             UI.success(
@@ -326,16 +330,28 @@ def upgrade_snapshots(
             UI.info("Operando en modo offline (sin sesión de Telegram activa).")
 
         migrated = 0
-        errors = 0
+        skipped_already_v5 = 0
+        error_list: List[Tuple[str, str]] = []
 
         with console.status("[bold green]Migrando snapshots a v5.0...[/]") as status:
-            for idx, (file_path, base_root) in enumerate(all_candidates, 1):
+            for idx, file_path in enumerate(candidates, 1):
                 status.update(
-                    f"[bold green]Migrando ({idx}/{len(all_candidates)}):[/] {file_path.name}"
+                    f"[bold green]Migrando ({idx}/{len(candidates)}):[/] {file_path.name}"
                 )
                 try:
                     raw_data = load_raw_snapshot(file_path)
                     if not isinstance(raw_data, dict):
+                        error_list.append(
+                            (
+                                file_path.name,
+                                "El archivo no contiene un objeto/diccionario válido.",
+                            )
+                        )
+                        continue
+
+                    # Si ya es v5.0 nativo, omitir para no re-procesar innecesariamente
+                    if raw_data.get("manifest_version") == "5.0":
+                        skipped_already_v5 += 1
                         continue
 
                     v5_dict, transition = SnapshotUpgrader.upgrade_to_dict(
@@ -345,9 +361,12 @@ def upgrade_snapshots(
                     source_name = v5_dict["source"]["filename"]
                     out_name = f"{source_name}.json.xz"
 
-                    # Preservar estructura de directorios relativa
                     if output_dir:
-                        rel_dir = file_path.parent.relative_to(base_root)
+                        rel_dir = (
+                            file_path.parent.relative_to(base_root)
+                            if file_path.is_relative_to(base_root)
+                            else Path()
+                        )
                         target_folder = output_dir / rel_dir
                     else:
                         target_folder = file_path.parent
@@ -365,12 +384,23 @@ def upgrade_snapshots(
                     migrated += 1
 
                 except Exception as e:
-                    errors += 1
+                    error_list.append((file_path.name, str(e)))
                     logger.error(f"Error migrando {file_path.name}: {e}")
 
     UI.separator()
     UI.success(
         f"Migración finalizada: [bold]{migrated}[/] convertidos a v5.0 exitosamente."
     )
-    if errors > 0:
-        UI.warn(f"Se encontraron [bold]{errors}[/] errores durante la migración.")
+    if skipped_already_v5 > 0:
+        UI.info(f"Omitidos [bold]{skipped_already_v5}[/] snapshots que ya eran v5.0.")
+
+    if error_list:
+        UI.warn(
+            f"Se encontraron [bold]{len(error_list)}[/] errores durante la migración:"
+        )
+        err_table = Table(show_header=True)
+        err_table.add_column("Archivo", style="bold red")
+        err_table.add_column("Error")
+        for f, err in error_list[:15]:
+            err_table.add_row(f, err)
+        console.print(err_table)

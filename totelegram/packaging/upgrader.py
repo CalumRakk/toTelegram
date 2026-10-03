@@ -13,38 +13,76 @@ from typing import Any, Dict, Optional, Tuple
 from totelegram.packaging.schemas import UploadManifest
 
 
+def _parse_yaml_text(text: str) -> Any:
+    try:
+        import yaml
+
+        class SafeObjectLoader(yaml.SafeLoader):
+            pass
+
+        def _construct_mapping(loader, node):
+            return loader.construct_mapping(node)
+
+        # Manejadores para constructores de objetos de Python serializados en versiones previas
+        for prefix in (
+            "tag:yaml.org,2002:python/object:",
+            "tag:yaml.org,2002:python/object/apply:",
+            "tag:yaml.org,2002:python/object/new:",
+            "!python/object:",
+            "!python/object/apply:",
+            "!python/object/new:",
+        ):
+            SafeObjectLoader.add_multi_constructor(
+                prefix,
+                lambda l, s, n: _construct_mapping(l, n),  # noqa: E741
+            )
+
+        return yaml.load(text, Loader=SafeObjectLoader)
+    except ImportError:
+        raise RuntimeError("PyYAML no instalado. Ejecuta: pip install pyyaml")
+
+
+def derive_clean_source_name(path: Path) -> str:
+    """Extrae el nombre base del recurso eliminando las extensiones conocidas de snapshots."""
+    name = path.name
+    # Eliminar extensiones compuestas y simples
+    for ext in (".json.xz", ".yaml.xz", ".yml.xz", ".json", ".yaml", ".yml", ".xz"):
+        if name.lower().endswith(ext):
+            name = name[: -len(ext)]
+            break
+    return name
+
+
 def load_raw_snapshot(path: Path) -> Any:
-    suffix = path.suffix.lower()
+    name_lower = path.name.lower()
 
-    if suffix in (".yaml", ".yml"):
-        try:
-            import yaml
+    # Archivos YAML planos
+    if name_lower.endswith((".yaml", ".yml")):
+        with open(path, "r", encoding="utf-8") as f:
+            return _parse_yaml_text(f.read())
 
-            class SafeObjectLoader(yaml.SafeLoader):
-                pass
-
-            def _construct_mapping(loader, node):
-                return loader.construct_mapping(node)
-
-            SafeObjectLoader.add_multi_constructor(
-                "tag:yaml.org,2002:python/object:",
-                lambda l, s, n: _construct_mapping(l, n),  # noqa: E741
-            )
-            SafeObjectLoader.add_multi_constructor(
-                "!python/object:",
-                lambda l, s, n: _construct_mapping(l, n),  # noqa: E741
-            )
-            with open(path, "r", encoding="utf-8") as f:
-                return yaml.load(f, Loader=SafeObjectLoader)
-        except ImportError:
-            raise RuntimeError("PyYAML no instalado. Ejecuta: pip install pyyaml")
-
-    if suffix == ".xz" or path.name.endswith(".json.xz"):
+    # Archivos YAML comprimidos en XZ (.yaml.xz / .yml.xz)
+    if name_lower.endswith((".yaml.xz", ".yml.xz")):
         with lzma.open(path, "rt", encoding="utf-8") as f:
-            return json.load(f)
+            return _parse_yaml_text(f.read())
 
+    # Archivos JSON comprimidos (.json.xz o genéricos .xz)
+    if name_lower.endswith((".json.xz", ".xz")):
+        with lzma.open(path, "rt", encoding="utf-8") as f:
+            content = f.read()
+            try:
+                return json.loads(content)
+            except json.JSONDecodeError:
+                # Fallback: si dentro del .xz había un YAML antiguo
+                return _parse_yaml_text(content)
+
+    # JSON plano estándar
     with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
+        content = f.read()
+        try:
+            return json.loads(content)
+        except json.JSONDecodeError:
+            return _parse_yaml_text(content)
 
 
 def clean_part_suffix(filename: str) -> str:
@@ -84,32 +122,55 @@ class SnapshotUpgrader:
 
     @classmethod
     def upgrade_to_dict(
-        cls, data: Dict[str, Any], tg_client: Any = None
+        cls,
+        data: Dict[str, Any],
+        source_path: Optional[Path] = None,
+        tg_client: Any = None,
     ) -> Tuple[Dict[str, Any], str]:
         ver = cls.detect_version(data)
 
         if ver == "5.0":
             return data, "5.0 (nativo)"
         if ver == "4.0":
-            return cls._upgrade_v4(data), "4.0 -> 5.0"
-        if ver == "3.0":
-            return cls._upgrade_v3(data), "3.0 -> 5.0"
-        if ver == "1.0":
-            return cls._upgrade_v1(data), "1.0 -> 5.0"
-        if ver in ("0.0.3", "0.0.2"):
-            return cls._upgrade_v0_0_x(data), f"{ver} -> 5.0"
-        if ver == "0.0.1":
-            return cls._upgrade_v0_0_x(
-                data, root_chat_id=data.get("chat_id")
-            ), "0.0.1 -> 5.0"
-        if ver == "legacy-pieces":
-            return cls._upgrade_legacy_pieces(data), "legacy-pieces -> 5.0"
-        if ver == "legacy-filedocuments":
-            return cls._upgrade_legacy_filedocuments(
-                data, tg_client
-            ), "legacy-filedocuments -> 5.0"
+            res, trans = cls._upgrade_v4(data, source_path), "4.0 -> 5.0"
+        elif ver == "3.0":
+            res, trans = cls._upgrade_v3(data, source_path), "3.0 -> 5.0"
+        elif ver == "1.0":
+            res, trans = cls._upgrade_v1(data, source_path), "1.0 -> 5.0"
+        elif ver in ("0.0.3", "0.0.2"):
+            res, trans = (
+                cls._upgrade_v0_0_x(data, source_path=source_path, tg_client=tg_client),
+                f"{ver} -> 5.0",
+            )
+        elif ver == "0.0.1":
+            res, trans = (
+                cls._upgrade_v0_0_x(
+                    data,
+                    root_chat_id=data.get("chat_id"),
+                    source_path=source_path,
+                    tg_client=tg_client,
+                ),
+                "0.0.1 -> 5.0",
+            )
+        elif ver == "legacy-pieces":
+            res, trans = (
+                cls._upgrade_legacy_pieces(data, source_path),
+                "legacy-pieces -> 5.0",
+            )
+        elif ver == "legacy-filedocuments":
+            res, trans = (
+                cls._upgrade_legacy_filedocuments(data, tg_client, source_path),
+                "legacy-filedocuments -> 5.0",
+            )
+        else:
+            origin = f" en '{source_path}'" if source_path else ""
+            raise ValueError(f"Versión de snapshot no reconocida ({ver}){origin}")
 
-        raise ValueError(f"Versión de snapshot no reconocida: {ver}")
+        # Inyectar marca de trazabilidad del origen
+        if source_path:
+            res["_origin_snapshot"] = str(source_path.resolve())
+
+        return res, trans
 
     @classmethod
     def load_and_upgrade(cls, path: Path, tg_client: Any = None) -> UploadManifest:
@@ -121,7 +182,9 @@ class SnapshotUpgrader:
         return UploadManifest.model_validate(v5_dict)
 
     @staticmethod
-    def _upgrade_v4(data: Dict[str, Any]) -> Dict[str, Any]:
+    def _upgrade_v4(
+        data: Dict[str, Any], source_path: Optional[Path]
+    ) -> Dict[str, Any]:
         source = data.get("source", {})
         source.setdefault("type", "file")
         source.setdefault("tape_catalog", None)
@@ -168,7 +231,9 @@ class SnapshotUpgrader:
         }
 
     @staticmethod
-    def _upgrade_v3(data: Dict[str, Any]) -> Dict[str, Any]:
+    def _upgrade_v3(
+        data: Dict[str, Any], source_path: Optional[Path]
+    ) -> Dict[str, Any]:
         mgr = data.get("manager", {})
         f_info = mgr.get("file", {})
         kind = data.get("kind") or mgr.get("kind", "single-file")
@@ -245,7 +310,9 @@ class SnapshotUpgrader:
         }
 
     @staticmethod
-    def _upgrade_v1(data: Dict[str, Any]) -> Dict[str, Any]:
+    def _upgrade_v1(
+        data: Dict[str, Any], source_path: Optional[Path]
+    ) -> Dict[str, Any]:
         filename = data.get("filename", "unknown_file")
         total_size = data.get("size", 0)
         md5sum = data.get("md5sum", "")
@@ -319,18 +386,28 @@ class SnapshotUpgrader:
 
     @staticmethod
     def _upgrade_v0_0_x(
-        data: Dict[str, Any], root_chat_id: Optional[int] = None
+        data: Dict[str, Any],
+        root_chat_id: Optional[int] = None,
+        source_path: Optional[Path] = None,
+        tg_client: Any = None,
     ) -> Dict[str, Any]:
         files = data.get("files", [])
+        origin_str = f" en '{source_path}'" if source_path else ""
+
         if not files:
-            raise ValueError("No se encontraron elementos en 'files'")
+            raise ValueError(f"No se encontraron elementos en 'files'{origin_str}")
 
         first_file = files[0]
-        sample_name = first_file.get("file_name") or first_file.get(
-            "filename", "unknown"
-        )
-        clean_name = clean_part_suffix(sample_name)
 
+        # 1. Resolver el nombre sin caer ciegamente en 'unknown'
+        sample_name = first_file.get("file_name") or first_file.get("filename")
+        if not sample_name:
+            if source_path:
+                sample_name = derive_clean_source_name(source_path)
+            else:
+                sample_name = "unknown"
+
+        clean_name = clean_part_suffix(sample_name)
         chat_id = root_chat_id or data.get("chat_id") or first_file.get("chat_id", 0)
         md5sum = data.get("md5sum", "")
         total_parts = len(files)
@@ -340,7 +417,7 @@ class SnapshotUpgrader:
         total_size = 0
 
         for idx, f in enumerate(files):
-            p_size = f.get("size", 0)
+            p_size = f.get("size") or f.get("file_size") or 0
             p_chat = f.get("chat_id", chat_id)
             p_name = (
                 f.get("file_name") or f.get("filename") or f"{clean_name}_{idx + 1}"
@@ -361,6 +438,20 @@ class SnapshotUpgrader:
             )
             offset += p_size
             total_size += p_size
+
+        # 2. VALIDACIÓN ESTRICTA (FAIL-FAST):
+        # Si tiene piezas pero el tamaño total es 0, no permitir que continúe silenciosamente
+        if total_size == 0 and len(parts) > 0:
+            raise ValueError(
+                f"Snapshot corrupto o incompleto{origin_str}: "
+                f"Tiene {len(parts)} piezas registradas pero su tamaño es 0 bytes. "
+                f"(Claves encontradas en primer item: {list(first_file.keys())})"
+            )
+
+        if not clean_name or clean_name.lower() == "unknown":
+            raise ValueError(
+                f"Snapshot corrupto{origin_str}: No fue posible determinar el nombre del recurso."
+            )
 
         return {
             "manifest_version": "5.0",
@@ -385,7 +476,7 @@ class SnapshotUpgrader:
         }
 
     @staticmethod
-    def _upgrade_legacy_pieces(data: Dict[str, Any]) -> Dict[str, Any]:
+    def _upgrade_legacy_pieces(data: Dict[str, Any], tg_client: Any) -> Dict[str, Any]:
         f_info = data.get("file", {})
         filename = f_info.get("filename", "unknown_file")
         total_size = f_info.get("size", 0)
@@ -451,7 +542,7 @@ class SnapshotUpgrader:
 
     @staticmethod
     def _upgrade_legacy_filedocuments(
-        data: Dict[str, Any], tg_client: Any = None
+        data: Dict[str, Any], tg_client: Any = None, source_path: Optional[Path] = None
     ) -> Dict[str, Any]:
         chat_id = data.get("chat_id", 0)
         docs = data.get("filedocuments", [])
