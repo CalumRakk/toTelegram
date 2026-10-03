@@ -52,6 +52,9 @@ ChatID = Annotated[
     BeforeValidator(normalize_chat_id),
 ]
 
+TG_MAX_SIZE_SINGLE_FILE = 2000 * 1024 * 1024  # 2,097,152,000 bytes
+TG_MAX_SIZE_MULTIPLE_FILES = 4000 * 1024 * 1024  # 4,194,304,000 bytes
+
 
 class Settings(BaseSettings):
     # TODO: agrega un default que impida subir archivo muy pequeños.
@@ -89,18 +92,18 @@ class Settings(BaseSettings):
     )
 
     tg_max_size_normal: int = Field(
-        default=2000 * 1024 * 1024,
+        default=TG_MAX_SIZE_SINGLE_FILE,
         description="Limite de tamaño en bytes para usuarios NO premium.",
         json_schema_extra={"is_sensitive": False, "access": AccessLevel.DEBUG_EDITABLE},
     )
     tg_max_size_premium: int = Field(
-        default=4000 * 1024 * 1024,
+        default=TG_MAX_SIZE_MULTIPLE_FILES,
         description="Límite de tamaño en bytes para usuarios premium.",
         json_schema_extra={"is_sensitive": False, "access": AccessLevel.DEBUG_EDITABLE},
     )
 
     max_filesize_bytes: int = Field(
-        default=80 * 1024 * 1024 * 1024,
+        default=120 * 1024 * 1024 * 1024,
         description="Filtro de seguridad: No procesar archivos que superen este tamaño.",
         json_schema_extra={"is_sensitive": False, "access": AccessLevel.EDITABLE},
     )
