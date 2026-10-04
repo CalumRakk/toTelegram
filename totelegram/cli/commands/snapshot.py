@@ -4,16 +4,13 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 
 import typer
-from rich.panel import Panel
 from rich.table import Table
 
 from totelegram.cli.state import CLIState
-from totelegram.cli.ui import UI, console
-from totelegram.models import TelegramUser
+from totelegram.cli.ui import UI, DisplaySnapshotPlan, console
 from totelegram.packaging.importer import (
     ImportPlan,
     PlanAction,
-    SnapshotImporter,
     SnapshotImportPlanner,
     SnapshotInspector,
 )
@@ -145,7 +142,7 @@ def import_snapshots(
     yes: bool = typer.Option(
         False,
         "--yes",
-        "-a",
+        "-y",
         help="Aplica el plan en la base de datos sin solicitar confirmación.",
     ),
     dry_run: bool = typer.Option(
@@ -154,15 +151,11 @@ def import_snapshots(
         help="Solo muestra el plan de importación sin realizar modificaciones.",
     ),
 ):
-    """
-    Inspecciona y alimenta la base de datos a partir de snapshots UploadManifest v5.0.
-    Si se detectan snapshots de versiones anteriores, se indicará cómo actualizarlos con upgrade.
-    """
     state: CLIState = ctx.obj
     manager = state.manager
-
     profile_name = manager.resolve_profile_name(state.profile_name, strict=True)
-    settings = manager.get_settings(profile_name)  # type: ignore
+    assert profile_name is not None
+    _ = manager.get_settings(profile_name)
 
     UI.separator()
     with console.status("[dim]Buscando archivos snapshot...[/]"):
@@ -172,99 +165,95 @@ def import_snapshots(
         UI.warn("No se encontraron archivos snapshot en las rutas proporcionadas.")
         raise typer.Exit(0)
 
-    UI.info(f"Inspeccionando [bold]{len(candidates)}[/] snapshots...")
-
     inspections = [SnapshotInspector.inspect_file(p) for p in candidates]
 
-    with state.scope() as (_, db):
+    # Desempaquetamos tanto client como db
+    with state.scope() as (client, db):
         with console.status(
             "[bold green]Analizando disponibilidad en la base de datos...[/]"
         ):
             plan = SnapshotImportPlanner.plan(inspections)
 
+        # Caso Fast-Exit: 100% de snapshots sincronizados
+        if (
+            not plan.actionable_items
+            and not plan.conflicts
+            and not plan.needs_upgrade_items
+            and not plan.corrupted_items
+        ):
+            DisplaySnapshotPlan.show_fast_exit(plan.total_scanned)
+            raise typer.Exit(0)
+
+        # Renderizar el flujo completo
+        DisplaySnapshotPlan.show_balance(plan)
+        DisplaySnapshotPlan.show_action_table(plan)
+        DisplaySnapshotPlan.show_inconsistencies_tree(plan)
+        DisplaySnapshotPlan.show_alerts(plan, sample_path=str(paths[0]))
+
+        # Si no hay nada accionable (solo había advertencias/upgrades)
+        if not plan.actionable_items:
+            UI.info("No hay acciones aplicables en la base de datos.")
+            raise typer.Exit(0)
+
+        # Modo Dry-Run
+        if dry_run:
             console.print()
-            _display_plan_table(plan)
+            UI.info("Modo [bold]--dry-run[/] activo. No se aplicaron cambios.")
+            raise typer.Exit(0)
 
-            summary_lines = [
-                f"• [bold green]Listos para importar (v5.0):[/] {len(plan.actionable_items)}",
-                f"• [dim]Ya registrados (No-Op):[/]        {plan.already_exists_count}",
-                f"• [bold red]Conflictos de esquema:[/]        {plan.conflicts_count}",
-                f"• [bold yellow]Requieren 'upgrade' a v5.0:[/]  {len(plan.needs_upgrade_items)}",
-                f"• [bold red]Archivos corruptos:[/]          {len(plan.corrupted_items)}",
-            ]
-            console.print(
-                Panel("\n".join(summary_lines), title="[bold blue]Resumen del Plan[/]")
+        # Confirmación interactiva
+        if not yes:
+            console.print()
+            confirmed = typer.confirm(
+                f"¿Deseas aplicar estos cambios e importar {len(plan.actionable_items)} snapshots a la DB?",
+                default=True,
             )
-
-            if plan.needs_upgrade_items:
-                console.print()
-                _display_needs_upgrade_table(plan.needs_upgrade_items)
-                first_path = paths[0]
-                UI.tip(
-                    "Para migrar estos archivos antiguos al formato v5.0 moderno, ejecuta:",
-                    commands=[f'totelegram snapshot upgrade "{first_path}"'],
-                    spacing="top",
-                )
-
-            if dry_run:
-                UI.info("Modo [bold]--dry-run[/] activo. No se aplicaron cambios.")
+            if not confirmed:
+                UI.info("Operación cancelada por el usuario.")
                 raise typer.Exit(0)
 
-            if not plan.actionable_items:
-                if not plan.needs_upgrade_items:
-                    UI.success(
-                        "No hay nuevos snapshots para importar. Base de datos al día."
-                    )
-                raise typer.Exit(0)
+        # Proceder a aplicar el plan (Fase 4 & 5)
+        from totelegram.models import TelegramUser
+        from totelegram.packaging.importer import SnapshotImporter
 
-            if not yes:
-                console.print()
-                confirmed = typer.confirm(
-                    f"¿Deseas aplicar este plan e importar {len(plan.actionable_items)} snapshots a la DB?",
-                    default=True,
+        owner = None
+        if client:
+            try:
+                me = client.get_me()
+                if me:
+                    owner = TelegramUser.get_or_create_from_tg(me)
+            except Exception:
+                pass
+
+        console.print()
+        with console.status(
+            "[bold green]Aplicando cambios en la base de datos...[/]"
+        ) as status:
+
+            def on_progress(current: int, total: int, filename: str):
+                status.update(
+                    f"[bold green]Importando ({current}/{total}):[/] {filename}"
                 )
-                if not confirmed:
-                    UI.info("Operación cancelada por el usuario.")
-                    raise typer.Exit(0)
 
-            owner_id = settings.telegram_account_id or 1
-            owner, _ = TelegramUser.get_or_create(
-                id=owner_id,
-                defaults={"first_name": profile_name, "is_premium": False},
+            succeeded, errors = SnapshotImporter.apply_plan(
+                plan=plan,
+                db=db,
+                owner=owner,
+                on_progress=on_progress,
             )
 
-            with console.status(
-                "[bold green]Importando snapshots a la base de datos...[/]"
-            ) as status:
+        # Resumen de ejecución
+        UI.separator()
+        if succeeded > 0:
+            UI.success(
+                f"Importación completada: [bold]{succeeded}[/] snapshot(s) aplicados exitosamente a la base de datos."
+            )
 
-                def _prog(cur, tot, name):
-                    status.update(f"[bold green]Importando ({cur}/{tot}):[/] {name}")
-
-                succeeded, errors = SnapshotImporter.apply_plan(
-                    plan, db, owner, on_progress=_prog
-                )
-
-            UI.separator()
-            if succeeded > 0:
-                UI.success(
-                    f"Se importaron [bold]{succeeded}[/] snapshots exitosamente a la base de datos."
-                )
-
-            if errors:
-                UI.error(
-                    f"Ocurrieron errores al importar [bold]{len(errors)}[/] snapshots:"
-                )
-                err_table = Table(show_header=True, title="Detalle de Fallos")
-                err_table.add_column("Archivo", style="bold red")
-                err_table.add_column("Motivo del Fallo")
-                for fname, reason in errors[:20]:
-                    err_table.add_row(fname, reason)
-                if len(errors) > 20:
-                    err_table.add_row(
-                        "...",
-                        f"... y {len(errors) - 20} errores más (revisar archivo log).",
-                    )
-                console.print(err_table)
+        if errors:
+            UI.error(f"Se produjeron errores en [bold]{len(errors)}[/] snapshot(s):")
+            for fname, err in errors:
+                console.print(f"  [red]• {fname}:[/] [dim]{err}[/]")
+            raise typer.Exit(1)
 
 
 @app.command("upgrade")
