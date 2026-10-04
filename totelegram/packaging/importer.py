@@ -48,7 +48,9 @@ class PlanAction(str, enum.Enum):
 
     CREATE_NEW = "CREATE_NEW"  # Recurso y Job completamente nuevos
     CREATE_JOB = "CREATE_JOB"  # Source existente, nuevo Job en este chat
-    MERGE_REMOTES = "MERGE_REMOTES"  # Job existente, se completan piezas faltantes
+    MERGE_REMOTES = (
+        "MERGE_REMOTES"  # Job existente, se completan piezas faltantes o inventario
+    )
     ALREADY_EXISTS = "ALREADY_EXISTS"  # Todo al día (se vuelve estadística)
     CONFLICT = "CONFLICT"  # Discrepancia insalvable en el particionado
 
@@ -77,7 +79,7 @@ class DbMutations:
     create_job: bool = False
     payloads_count: int = 0
     remotes_count: int = 0
-    members_count: int = 0  # Cantidad de archivos a indexar si es carpeta TAR
+    members_count: int = 0  # Cantidad real de archivos a indexar si es carpeta TAR
 
     @property
     def has_changes(self) -> bool:
@@ -94,15 +96,15 @@ class DbMutations:
         """Genera la representación compacta para la columna 'Operaciones en BD'."""
         ops = []
         if self.create_source:
-            ops.append("+Source")
+            ops.append("+Sour")
         if self.create_job:
             ops.append("+Job")
         if self.payloads_count > 0:
-            ops.append(f"+{self.payloads_count}P")
+            ops.append(f"+{self.payloads_count}Pays")
         if self.remotes_count > 0:
-            ops.append(f"+{self.remotes_count}Remotes")
+            ops.append(f"+{self.remotes_count}Res")
         if self.members_count > 0:
-            ops.append(f"+{self.members_count}Files")
+            ops.append(f"+{self.members_count}Fils")
         return "  ".join(ops) if ops else "[dim]Sin cambios[/]"
 
 
@@ -137,7 +139,9 @@ class PlanItem:
             p.action == PartAction.ALREADY_EXISTS for p in self.parts_diff
         )
         has_new = any(p.action == PartAction.WILL_LINK for p in self.parts_diff)
-        return has_existing and has_new
+        return (has_existing and has_new) or (
+            self.mutations.members_count > 0 and has_existing
+        )
 
     @property
     def missing_parts_count(self) -> int:
@@ -185,10 +189,6 @@ class ImportPlan:
 class SnapshotInspector:
     @classmethod
     def inspect_file(cls, path: Path) -> SnapshotInspection:
-        """
-        Inspecciona un archivo de snapshot. Solo acepta nativamente UploadManifest v5.0.
-        Si detecta versiones históricas, las marca como NEEDS_UPGRADE.
-        """
         try:
             raw_data = load_raw_snapshot(path)
         except Exception as e:
@@ -232,7 +232,6 @@ class SnapshotInspector:
 
     @classmethod
     def find_all_candidates(cls, paths: List[Path]) -> List[Path]:
-        """Encuentra recursivamente todos los snapshots con comparación case-insensitive."""
         valid_exts = (".json", ".json.xz", ".yaml", ".yml", ".yaml.xz", ".yml.xz")
         candidates = []
         for p in paths:
@@ -250,18 +249,12 @@ class SnapshotInspector:
 class SnapshotImportPlanner:
     @classmethod
     def plan(cls, inspections: List[SnapshotInspection]) -> ImportPlan:
-        """
-        Evalúa de forma determinista el diferencial entre los snapshots inspeccionados
-        y la base de datos, calculando las mutaciones exactas a nivel de pieza (PartDiff).
-        """
         plan = ImportPlan()
 
-        # Índices en memoria para evitar colisiones dentro del mismo lote
         planned_sources_md5: set[str] = set()
         planned_jobs: set[Tuple[str, int]] = set()
 
         for insp in inspections:
-            # Filtro temprano: No accionables externos
             if insp.status == InspectionStatus.NEEDS_UPGRADE:
                 plan.needs_upgrade_items.append(insp)
                 continue
@@ -277,12 +270,10 @@ class SnapshotImportPlanner:
             md5 = manifest.source.md5sum
             job_key = (md5, target_chat_id)
 
-            # Descarte de duplicados exactos dentro del mismo lote
             if job_key in planned_jobs:
                 plan.synced_count += 1
                 continue
 
-            # Inspeccionar existencia de Source y Job en BD
             existing_source = Source.get_or_none(Source.md5sum == md5)
             source_exists = existing_source is not None or md5 in planned_sources_md5
 
@@ -294,12 +285,34 @@ class SnapshotImportPlanner:
                     & (Job.deleted_at == 0)
                 )
 
+            # --- AUDITORÍA REAL DE ARCHIVOS DE LA CINTA TAR (TapeMember) ---
+            is_folder = manifest.source.type == SourceType.FOLDER
+            total_inventory = (
+                len(manifest.source.inventory)
+                if (is_folder and manifest.source.inventory)
+                else 0
+            )
+
+            existing_members_count = 0
+            if existing_source:
+                existing_members_count = (
+                    TapeMember.select()
+                    .where(TapeMember.source == existing_source)
+                    .count()
+                )
+            elif md5 in planned_sources_md5:
+                # Ya fue planificado en este mismo lote
+                existing_members_count = total_inventory
+
+            missing_members = (
+                max(0, total_inventory - existing_members_count) if is_folder else 0
+            )
+
             # CASO A: Recurso completamente nuevo o Job no existente en este chat
             if existing_job is None:
                 create_source = not source_exists
                 create_job = True
 
-                # Todas las partes son nuevas en este chat
                 parts_diff = [
                     PartDiff(
                         sequence=p.sequence,
@@ -313,20 +326,12 @@ class SnapshotImportPlanner:
                     for p in manifest.parts
                 ]
 
-                # Conteo de archivos internos si es carpeta TAR
-                members_count = 0
-                if (
-                    manifest.source.type == SourceType.FOLDER
-                    and manifest.source.inventory
-                ):
-                    members_count = len(manifest.source.inventory)
-
                 mutations = DbMutations(
                     create_source=create_source,
                     create_job=create_job,
                     payloads_count=total_parts,
                     remotes_count=total_parts,
-                    members_count=members_count,
+                    members_count=missing_members,
                 )
 
                 action = (
@@ -356,7 +361,7 @@ class SnapshotImportPlanner:
                 planned_jobs.add(job_key)
                 continue
 
-            # CASO B: El Job ya existe en BD. Análisis diferencial granular pieza por pieza
+            # CASO B: El Job ya existe en BD. Análisis diferencial granular
             existing_payloads = {
                 p.sequence_index: p for p in cast(list[Payload], existing_job.payloads)
             }
@@ -377,7 +382,6 @@ class SnapshotImportPlanner:
                 seq = part.sequence
                 db_payload = existing_payloads.get(seq)
 
-                # Auditoría física contra Payload en BD (inconsistencia de particionado)
                 if db_payload is not None:
                     if (
                         db_payload.size != part.part_size
@@ -402,7 +406,6 @@ class SnapshotImportPlanner:
                         )
                         continue
 
-                # Auditoría de RemotePayload (¿Mensaje ya vinculado?)
                 if seq in existing_remotes:
                     remote = existing_remotes[seq]
                     parts_diff.append(
@@ -429,7 +432,6 @@ class SnapshotImportPlanner:
                         )
                     )
 
-            # Si se detectó discrepancia física, se aisla como conflicto bloqueante
             if has_conflict:
                 plan.conflicts.append(
                     PlanItem(
@@ -448,7 +450,6 @@ class SnapshotImportPlanner:
                 planned_jobs.add(job_key)
                 continue
 
-            # Calcular mutaciones requeridas
             missing_payloads = sum(
                 1 for p in manifest.parts if p.sequence not in existing_payloads
             )
@@ -456,19 +457,29 @@ class SnapshotImportPlanner:
                 1 for pd in parts_diff if pd.action == PartAction.WILL_LINK
             )
 
-            # Si ya tiene el 100% de las piezas vinculadas: SE VUELVE ESTADÍSTICA
-            if missing_remotes == 0 and missing_payloads == 0:
+            # CRITERIO DE SINCRONIZACIÓN TOTAL: Solo si están todas las piezas Y todos los archivos del TAR
+            if missing_remotes == 0 and missing_payloads == 0 and missing_members == 0:
                 plan.synced_count += 1
                 planned_jobs.add(job_key)
                 continue
 
-            # Si le faltan piezas: se marca como MERGE_REMOTES
             mutations = DbMutations(
                 create_source=False,
                 create_job=False,
                 payloads_count=missing_payloads,
                 remotes_count=missing_remotes,
-                members_count=0,
+                members_count=missing_members,
+            )
+
+            reason_parts = []
+            if missing_remotes > 0:
+                reason_parts.append(f"{missing_remotes}/{total_parts} piezas faltantes")
+            if missing_members > 0:
+                reason_parts.append(f"{missing_members} archivos de cinta a indexar")
+            reason_detail = (
+                ", ".join(reason_parts)
+                if reason_parts
+                else "sincronización de metadatos"
             )
 
             item = PlanItem(
@@ -481,7 +492,7 @@ class SnapshotImportPlanner:
                 parts_diff=parts_diff,
                 existing_source=existing_source,
                 existing_job=existing_job,
-                reason=f"Job existente incompleto. Se vincularán {missing_remotes}/{total_parts} piezas faltantes.",
+                reason=f"Job existente incompleto. Se vincularán: {reason_detail}.",
             )
             plan.items.append(item)
             planned_jobs.add(job_key)
@@ -498,10 +509,6 @@ class SnapshotImporter:
         owner: Optional[TelegramUser] = None,
         on_progress: Optional[Callable[[int, int, str], None]] = None,
     ) -> Tuple[int, List[Tuple[str, str]]]:
-        """
-        Ejecuta las inserciones atómicas en la DB a partir de los ítems accionables del plan.
-        Retorna (exitosos, lista_de_errores[(nombre_archivo, razon)]).
-        """
         actionable = plan.actionable_items
         succeeded = 0
         errors: List[Tuple[str, str]] = []
@@ -524,7 +531,6 @@ class SnapshotImporter:
     def _apply_item(cls, item: PlanItem, owner: Optional[TelegramUser]):
         manifest = item.manifest
 
-        # Resolver Chat
         chat, _ = TelegramChat.get_or_create(
             id=item.target_chat_id,
             defaults={
@@ -535,7 +541,6 @@ class SnapshotImporter:
             },
         )
 
-        # Resolver Owner (usuario actual o el registrado en el snapshot)
         owner_obj = owner
         if owner_obj is None:
             owner_obj, _ = TelegramUser.get_or_create(
@@ -547,7 +552,6 @@ class SnapshotImporter:
                 },
             )
 
-        # Resolver o Crear Source
         source = item.existing_source
         if source is None:
             source = Source.get_or_none(Source.md5sum == manifest.source.md5sum)
@@ -563,7 +567,6 @@ class SnapshotImporter:
                 tape_catalog=manifest.source.tape_catalog,
             )
 
-        # Resolver o Crear Job
         job = item.existing_job
         if job is None:
             job = Job.get_or_none(
@@ -585,7 +588,6 @@ class SnapshotImporter:
                 deleted_at=0,
             )
 
-        # Mapear Payloads existentes y asegurar que existan todos
         payload_map = {p.sequence_index: p for p in cast(list[Payload], job.payloads)}
 
         for part in manifest.parts:
@@ -603,7 +605,6 @@ class SnapshotImporter:
                 )
                 payload_map[part.sequence] = payload
 
-        # Vincular quirúrgicamente SOLO las partes planificadas como WILL_LINK
         will_link_sequences = {
             pd.sequence for pd in item.parts_diff if pd.action == PartAction.WILL_LINK
         }
@@ -633,56 +634,61 @@ class SnapshotImporter:
                 is_orphaned=False,
             )
 
-        # Indexar miembros y GPS si es una carpeta TAR y aún no estaban
-        if (
-            manifest.source.type == SourceType.FOLDER
-            and manifest.source.inventory
-            and item.mutations.members_count > 0
-        ):
-            member_inserts = [
-                {
-                    "source": source,
-                    "relative_path": m.relative_path,
-                    "size": m.size,
-                    "md5sum": m.md5sum,
-                }
-                for m in manifest.source.inventory
-            ]
-            for batch in batched(member_inserts, 100):
-                TapeMember.insert_many(batch).on_conflict_ignore().execute()
+        # --- GESTIÓN DE ARCHIVOS TAR Y GPS ---
+        if manifest.source.type == SourceType.FOLDER and manifest.source.inventory:
+            # 1. Asegurar TapeMembers si hay miembros faltantes
+            if item.mutations.members_count > 0:
+                member_inserts = [
+                    {
+                        "source": source,
+                        "relative_path": m.relative_path,
+                        "size": m.size,
+                        "md5sum": m.md5sum,
+                    }
+                    for m in manifest.source.inventory
+                ]
+                for batch in batched(member_inserts, 100):
+                    TapeMember.insert_many(batch).on_conflict_ignore().execute()
 
-            # Mapear relative_path -> id
-            paths = [m.relative_path for m in manifest.source.inventory]
-            db_members = TapeMember.select(
-                TapeMember.id, TapeMember.relative_path
-            ).where((TapeMember.source == source) & (TapeMember.relative_path << paths))  # type: ignore
-            path_to_id = {m.relative_path: m.id for m in db_members}
+            # 2. Asegurar TapeMemberGPS para los Payloads de este Job específico
+            has_gps = (
+                TapeMemberGPS.select().join(Payload).where(Payload.job == job).exists()
+            )
 
-            gps_inserts = []
-            for m in manifest.source.inventory:
-                member_id = path_to_id.get(m.relative_path)
-                if not member_id:
-                    continue
+            if not has_gps:
+                paths = [m.relative_path for m in manifest.source.inventory]
+                db_members = TapeMember.select(
+                    TapeMember.id, TapeMember.relative_path
+                ).where(
+                    (TapeMember.source == source) & (TapeMember.relative_path << paths)  # type: ignore
+                )
+                path_to_id = {m.relative_path: m.id for m in db_members}
 
-                for frag in m.fragments:
-                    payload_obj = payload_map.get(frag.vol_idx)
-                    if not payload_obj:
+                gps_inserts = []
+                for m in manifest.source.inventory:
+                    member_id = path_to_id.get(m.relative_path)
+                    if not member_id:
                         continue
 
-                    gps_inserts.append(
-                        {
-                            "member": member_id,
-                            "payload": payload_obj,
-                            "state": "COMPLETED",
-                            "offset_in_volume": frag.offset_in_vol,
-                            "bytes_in_volume": frag.bytes_in_volume,
-                        }
-                    )
+                    for frag in m.fragments:
+                        payload_obj = payload_map.get(frag.vol_idx)
+                        if not payload_obj:
+                            continue
 
-            for batch in batched(gps_inserts, 200):
-                TapeMemberGPS.insert_many(batch).execute()
+                        gps_inserts.append(
+                            {
+                                "member": member_id,
+                                "payload": payload_obj,
+                                "state": "COMPLETED",
+                                "offset_in_volume": frag.offset_in_vol,
+                                "bytes_in_volume": frag.bytes_in_volume,
+                            }
+                        )
 
-        # Asegurar que el estado del Job quede como UPLOADED si ya no tiene piezas pendientes
+                for batch in batched(gps_inserts, 200):
+                    TapeMemberGPS.insert_many(batch).execute()
+
+        # Actualizar estado a UPLOADED si no quedan piezas pendientes
         if Payload.total_pending_for_job(job) == 0:
             if job.status != JobStatus.UPLOADED:
                 job.status = JobStatus.UPLOADED

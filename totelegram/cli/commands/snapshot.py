@@ -9,8 +9,6 @@ from rich.table import Table
 from totelegram.cli.state import CLIState
 from totelegram.cli.ui import UI, DisplaySnapshotPlan, console
 from totelegram.packaging.importer import (
-    ImportPlan,
-    PlanAction,
     SnapshotImportPlanner,
     SnapshotInspector,
 )
@@ -35,102 +33,6 @@ def maybe_telegram_session(state: CLIState, profile_name: Optional[str]):
     yield None
 
 
-def _format_size(size_bytes: int) -> str:
-    for unit in ["B", "KB", "MB", "GB", "TB"]:
-        if abs(size_bytes) < 1024.0:
-            return f"{size_bytes:.1f} {unit}"
-        size_bytes /= 1024.0  # type: ignore
-    return f"{size_bytes:.1f} PB"
-
-
-def _display_plan_table(plan: ImportPlan):
-    table = Table(title="Plan de Importación de Snapshots (v5.0)", show_header=True)
-    table.add_column("Acción", style="bold", no_wrap=True)
-    table.add_column("Recurso")
-    table.add_column("Tamaño", justify="right")
-    table.add_column("Partes", justify="center")
-    table.add_column("Chat ID", style="dim")
-    table.add_column("Detalle")
-
-    action_styles = {
-        PlanAction.CREATE_NEW: "[green]NUEVO[/]",
-        PlanAction.CREATE_JOB: "[cyan]RAMIFICAR[/]",
-        PlanAction.MERGE_REMOTES: "[yellow]COMPLETAR[/]",
-        PlanAction.ALREADY_EXISTS: "[dim]OMITIR[/]",
-        PlanAction.CONFLICT: "[bold red]CONFLICTO[/]",
-    }
-
-    sorted_items = sorted(
-        plan.items,
-        key=lambda x: (
-            0
-            if x.action
-            in (PlanAction.CREATE_NEW, PlanAction.CREATE_JOB, PlanAction.MERGE_REMOTES)
-            else 1
-            if x.action == PlanAction.CONFLICT
-            else 2
-        ),
-    )
-
-    displayed_noop = 0
-    max_noop_display = 5
-
-    for item in sorted_items:
-        label = action_styles[item.action]
-        source = item.manifest.source
-
-        if item.action == PlanAction.ALREADY_EXISTS:
-            displayed_noop += 1
-            if displayed_noop > max_noop_display:
-                continue
-
-        table.add_row(
-            label,
-            source.filename,
-            _format_size(source.size),
-            str(item.total_parts),
-            str(item.target_chat_id),
-            item.reason,
-        )
-
-    if displayed_noop > max_noop_display:
-        omitted = displayed_noop - max_noop_display
-        table.add_row(
-            "[dim]OMITIR[/]",
-            f"[dim]... y {omitted} snapshots más ya completos e idénticos en DB[/dim]",
-            "-",
-            "-",
-            "-",
-            "[dim]Sin cambios requeridos[/dim]",
-        )
-
-    console.print(table)
-
-
-def _display_needs_upgrade_table(needs_upgrade_items):
-    table = Table(
-        title="Snapshots en Versiones Anteriores (Requieren Upgrade a v5.0)",
-        show_header=True,
-    )
-    table.add_column("Archivo", style="yellow")
-    table.add_column("Versión Detectada", justify="center")
-    table.add_column("Acción Requerida")
-
-    for u in needs_upgrade_items[:15]:
-        table.add_row(
-            u.path.name,
-            u.detected_version or "desconocida",
-            "Ejecutar 'totelegram snapshot upgrade' para convertir a v5.0 (.json.xz)",
-        )
-
-    if len(needs_upgrade_items) > 15:
-        table.add_row(
-            "...", "...", f"... y {len(needs_upgrade_items) - 15} archivos más."
-        )
-
-    console.print(table)
-
-
 @app.command("import")
 def import_snapshots(
     ctx: typer.Context,
@@ -151,6 +53,10 @@ def import_snapshots(
         help="Solo muestra el plan de importación sin realizar modificaciones.",
     ),
 ):
+    """
+    Inspecciona e importa snapshots v5.0 a la base de datos de manera incremental y segura.
+    Calcula un plan de ejecución determinista y solo aplica cambios confirmados.
+    """
     state: CLIState = ctx.obj
     manager = state.manager
     profile_name = manager.resolve_profile_name(state.profile_name, strict=True)
@@ -161,20 +67,20 @@ def import_snapshots(
     with console.status("[dim]Buscando archivos snapshot...[/]"):
         candidates = SnapshotInspector.find_all_candidates(paths)
 
+    # Caso límite 1: Directorio sin snapshots
     if not candidates:
         UI.warn("No se encontraron archivos snapshot en las rutas proporcionadas.")
         raise typer.Exit(0)
 
     inspections = [SnapshotInspector.inspect_file(p) for p in candidates]
 
-    # Desempaquetamos tanto client como db
-    with state.scope() as (client, db):
+    with state.scope() as (client, db):  # type: ignore
         with console.status(
             "[bold green]Analizando disponibilidad en la base de datos...[/]"
         ):
             plan = SnapshotImportPlanner.plan(inspections)
 
-        # Caso Fast-Exit: 100% de snapshots sincronizados
+        # Caso límite 2: Fast-Exit (100% de snapshots sincronizados al día)
         if (
             not plan.actionable_items
             and not plan.conflicts
@@ -184,35 +90,42 @@ def import_snapshots(
             DisplaySnapshotPlan.show_fast_exit(plan.total_scanned)
             raise typer.Exit(0)
 
-        # Renderizar el flujo completo
+        # Renderizado del flujo acordado
         DisplaySnapshotPlan.show_balance(plan)
         DisplaySnapshotPlan.show_action_table(plan)
         DisplaySnapshotPlan.show_inconsistencies_tree(plan)
         DisplaySnapshotPlan.show_alerts(plan, sample_path=str(paths[0]))
 
-        # Si no hay nada accionable (solo había advertencias/upgrades)
+        # Caso límite 3: Sin cambios aplicables (solo había corruptos o desactualizados)
         if not plan.actionable_items:
+            console.print()
             UI.info("No hay acciones aplicables en la base de datos.")
             raise typer.Exit(0)
 
-        # Modo Dry-Run
+        # Caso límite 4: Modo Simulación (--dry-run)
         if dry_run:
             console.print()
-            UI.info("Modo [bold]--dry-run[/] activo. No se aplicaron cambios.")
+            UI.info("Modo [bold]--dry-run[/] activo. No se aplicaron modificaciones.")
             raise typer.Exit(0)
 
         # Confirmación interactiva
         if not yes:
             console.print()
-            confirmed = typer.confirm(
-                f"¿Deseas aplicar estos cambios e importar {len(plan.actionable_items)} snapshots a la DB?",
-                default=True,
+            conflict_warning = (
+                f" [yellow]({len(plan.conflicts)} en conflicto serán ignorados)[/]"
+                if plan.conflicts
+                else ""
             )
+            prompt_msg = (
+                f"¿Deseas aplicar estos cambios e importar [bold]{len(plan.actionable_items)}[/] snapshot(s) a la BD?"
+                f"{conflict_warning}"
+            )
+            confirmed = typer.confirm(prompt_msg, default=True)
             if not confirmed:
                 UI.info("Operación cancelada por el usuario.")
                 raise typer.Exit(0)
 
-        # Proceder a aplicar el plan (Fase 4 & 5)
+        # Ejecución transaccional en Base de Datos
         from totelegram.models import TelegramUser
         from totelegram.packaging.importer import SnapshotImporter
 
@@ -242,7 +155,7 @@ def import_snapshots(
                 on_progress=on_progress,
             )
 
-        # Resumen de ejecución
+        # Balance final de ejecución
         UI.separator()
         if succeeded > 0:
             UI.success(
@@ -296,7 +209,6 @@ def upgrade_snapshots(
         UI.warn("No se encontraron snapshots para migrar.")
         raise typer.Exit(0)
 
-    # Base root para determinar rutas relativas
     base_root = paths[0] if paths[0].is_dir() else paths[0].parent
 
     UI.separator()
@@ -338,7 +250,6 @@ def upgrade_snapshots(
                         )
                         continue
 
-                    # Si ya es v5.0 nativo, omitir para no re-procesar innecesariamente
                     if raw_data.get("manifest_version") == "5.0":
                         skipped_already_v5 += 1
                         continue

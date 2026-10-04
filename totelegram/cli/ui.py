@@ -837,9 +837,9 @@ class DisplaySnapshotPlan:
             source = item.manifest.source
             total_parts = item.total_parts
             strategy_str = (
-                "single (1)"
+                "single"
                 if item.manifest.strategy == Strategy.SINGLE
-                else f"pieces ({total_parts})"
+                else f"pieces {total_parts}"
             )
 
             table.add_row(
@@ -906,6 +906,7 @@ class DisplaySnapshotPlan:
                 f"• {item.manifest.source.filename} (Estrategia: {strat_label}, {item.total_parts} partes)"
             )
 
+            # Detalle de piezas de volumen / remotos
             for p in item.parts_diff:
                 part_label = (
                     f"Parte {p.sequence + 1}/{p.total_parts} (msg: {p.message_id})"
@@ -922,6 +923,12 @@ class DisplaySnapshotPlan:
                     msg = f"✗ {part_label}: {p.detail}"
                     root.add(f"[bold red]{msg}[/]")
                     ui_logger.warning(f"    {msg}")
+
+            # Detalle de archivos internos de la cinta TAR si los hay
+            if item.mutations.members_count > 0:
+                tar_msg = f"+ {item.mutations.members_count} archivos de la cinta TAR serán indexados en base de datos"
+                root.add(f"[bold cyan]{tar_msg}[/]")
+                ui_logger.info(f"    {tar_msg}")
 
             console.print(root)
             console.print()
