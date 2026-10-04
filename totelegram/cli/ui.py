@@ -1,8 +1,9 @@
 import logging
+import re
 import time
 from contextlib import contextmanager
 from pathlib import Path
-from typing import List, Literal, Optional, Union
+from typing import Any, List, Literal, Optional, Union
 
 import typer
 from rich.columns import Columns
@@ -46,7 +47,7 @@ custom_theme = Theme(
     }
 )
 
-console = Console(theme=custom_theme, force_terminal=True, legacy_windows=True)  # noqa: F811
+console = Console(theme=custom_theme, force_terminal=True, legacy_windows=True)
 ui_logger = logging.getLogger("totelegram.ui")
 
 
@@ -59,9 +60,36 @@ def format_size(size_bytes: int) -> str:
     return f"{size_bytes:.1f} PB"
 
 
-def strip_markup(text: str) -> str:
+def strip_markup(text: Any) -> str:
     """Elimina las etiquetas de color [bold], [red], etc. para el archivo de log."""
-    return Text.from_markup(text).plain
+    try:
+        return Text.from_markup(str(text)).plain
+    except Exception:
+        # Fallback si el texto contiene corchetes que no son etiquetas válidas de Rich
+        return re.sub(r"\[/?[a-zA-Z0-9_# =]+\]", "", str(text))
+
+
+def log_table(
+    table: Table,
+    title: Optional[str] = None,
+    logger: logging.Logger = ui_logger,
+) -> None:
+    """Vuelca una tabla de Rich en texto plano estructurado al logger."""
+    try:
+        t_title = title or (strip_markup(str(table.title)) if table.title else "Tabla")
+        logger.info(f"=== {t_title} ===")
+        if not table.columns:
+            return
+
+        headers = [strip_markup(col.header) for col in table.columns]
+        logger.info(" | ".join(headers))
+
+        num_rows = len(table.columns[0]._cells) if table.columns else 0
+        for row_idx in range(num_rows):
+            row_vals = [strip_markup(str(col._cells[row_idx])) for col in table.columns]
+            logger.info("  " + " | ".join(row_vals))
+    except Exception as e:
+        logger.debug(f"Error al volcar tabla en log: {e}")
 
 
 def get_friendly_chat_name(chat_id: str | int, db_url: str) -> str:
@@ -83,13 +111,11 @@ def get_friendly_chat_name(chat_id: str | int, db_url: str) -> str:
 
     try:
         chat_int_id = int(val)
-        # Si la DB ya está conectada en memoria
         if db_proxy.obj is not None and not db_proxy.is_closed():
             chat = TelegramChat.get_or_none(TelegramChat.id == chat_int_id)
             if chat and chat.title:
                 return f"[bold cyan]{chat.title}[/] [dim]({chat.id})[/]"
         else:
-            # Lectura rápida si es SQLite
             if db_url.startswith("sqlite://"):
                 with DatabaseSession(db_url, auto_init_schema=False):
                     chat = TelegramChat.get_or_none(TelegramChat.id == chat_int_id)
@@ -101,10 +127,11 @@ def get_friendly_chat_name(chat_id: str | int, db_url: str) -> str:
     return str(chat_id)
 
 
-class UI:  # noqa: F811
+class UI:
     @classmethod
-    def separator(cls):
-        console.print(Columns([Rule(style="bright_black")], width=45))
+    def separator(cls, style: str = "bright_black"):
+        console.print(Columns([Rule(style=style)], width=45))
+        ui_logger.info("-" * 45)
 
     @staticmethod
     def sleep_progress(seconds: int):
@@ -136,16 +163,7 @@ class UI:  # noqa: F811
         log_level: int = logging.INFO,
         **kwargs,
     ):
-        """Imprime un mensaje con formato y opcionalmente agrega espacio antes o después.
-
-        Args:
-            message: El mensaje a imprimir.
-            spacing: Si se especifica, agrega una línea en la posición indicada:
-                - "top": antes del mensaje
-                - "bottom": después del mensaje
-                - "block": antes y después del mensaje
-            **kwargs: Argumentos adicionales para `console.print()`.
-        """
+        """Imprime un mensaje con formato y opcionalmente agrega espacio antes o después."""
         if spacing in ("top", "block"):
             console.print()
 
@@ -154,7 +172,7 @@ class UI:  # noqa: F811
 
         clean_msg = strip_markup(message).strip()
         if clean_msg:
-            ui_logger.log(log_level, clean_msg)
+            ui_logger.log(log_level, f"{prefix}{clean_msg}")
 
         if spacing in ("bottom", "block"):
             console.print()
@@ -204,19 +222,18 @@ class UI:  # noqa: F811
         message: str,
         commands: Optional[Union[List[str], str]] = None,
         spacing: Spacing = None,
-        **kwarg,
+        **kwargs,
     ):
-        """Muestra una sugerencia al usuario. Opcionalmente formatea un comando."""
-
-        UI._print(f"[dim cyan]  Tip:[/] {message}", spacing=spacing, **kwarg)
+        """Muestra una sugerencia al usuario y la guarda en el log."""
+        UI._print(f"[dim cyan]  Tip:[/] {message}", spacing=spacing, **kwargs)
 
         if commands:
-            # Estandariza cómo se ven los comandos
             if isinstance(commands, str):
                 commands = [commands]
 
             for command in commands:
                 console.print(f"    [bold yellow]> {command}[/]")
+                ui_logger.info(f"    > {strip_markup(command)}")
 
     @staticmethod
     def educational_tip(
@@ -226,21 +243,20 @@ class UI:  # noqa: F811
         spacing: Spacing = None,
         border_style: str = "cyan",
     ):
-        """Muestra una sugerencia educativa destacada en un recuadro (Panel)."""
+        """Muestra una sugerencia educativa destacada en un recuadro (Panel) y la guarda en el log."""
         if spacing in ("top", "block"):
             console.print()
 
         content_lines = [message]
 
         if commands:
-            content_lines.append("")  # Salto de línea estético antes de los comandos
+            content_lines.append("")
             if isinstance(commands, str):
                 commands = [commands]
 
             for command in commands:
                 content_lines.append(f"   [bold yellow]> {command}[/]")
 
-        # Unimos todo en un solo bloque de texto interpretado por Rich
         panel_content = "\n".join(content_lines)
 
         panel = Panel(
@@ -252,12 +268,21 @@ class UI:  # noqa: F811
 
         console.print(panel)
 
+        title_prefix = f"[{strip_markup(title)}] " if title else ""
+        ui_logger.info(f"{title_prefix}{strip_markup(message)}")
+        if commands:
+            if isinstance(commands, str):
+                commands = [commands]
+            for command in commands:
+                ui_logger.info(f"   > {strip_markup(command)}")
+
         if spacing in ("bottom", "block"):
             console.print()
 
     @classmethod
     @contextmanager
     def loading(cls, message: str):
+        ui_logger.info(f"[Iniciando] {strip_markup(message)}")
         with console.status(f"[bold green]{message}"):
             yield
 
@@ -294,10 +319,7 @@ class DisplayUpload:
         force_verbose: Optional[bool] = None,
         skip_title: bool = False,
     ) -> None:
-        """
-        Informa al usuario sobre los ítems omitidos en el inventario.
-        item_type: "archivo" o "carpeta"
-        """
+        """Informa al usuario sobre los ítems omitidos en el inventario."""
         total_skipped = scan_report.total_skipped
         if total_skipped == 0:
             return
@@ -314,7 +336,6 @@ class DisplayUpload:
     @classmethod
     def _show_detailed(cls, report: ScanReport, item_type: str):
         """Muestra una lista línea por línea para pocos ítems."""
-
         for p in report.skipped_by_error:
             UI.error(f"Omitido (Ilegible/Error): {escape(p.name)}")
 
@@ -338,7 +359,6 @@ class DisplayUpload:
         cls, report: ScanReport, item_type: str, skip_title: bool = False
     ):
         """Muestra bloques resumidos con ejemplos para muchos ítems."""
-
         if not skip_title:
             plural = f"{item_type}s"
             UI.print(
@@ -346,7 +366,6 @@ class DisplayUpload:
                 spacing="top",
             )
 
-        # Configuración de etiquetas según categoría
         configs = [
             (report.skipped_by_error, "Errores de integridad/lectura", "dark_red"),
             (report.skipped_by_snapshot, "Ya tienen Snapshot", "dark_blue"),
@@ -373,13 +392,19 @@ class DisplayUpload:
             else ""
         )
 
+        header_line = f"  • {label}: {count}" + (
+            f" ({', '.join(current_patterns)})" if current_patterns else ""
+        )
         console.print(f"  [bold {style}]• {label}:[/] [white]{count}[/]{pat_str}")
+        ui_logger.info(header_line)
 
         for f in files[:3]:
             console.print(f"     [bright_black]- {escape(f.name)}[/]", highlight=False)
+            ui_logger.info(f"     - {f.name}")
 
         if count > 3:
             console.print(f"     [bright_black]... y {count - 3} más.[/]")
+            ui_logger.info(f"     ... y {count - 3} más.")
 
     @staticmethod
     def show_integrity_advice(report: ScanReport):
@@ -424,12 +449,11 @@ class DisplayConfig:
             UI.warn(
                 f"No se detectó un patrón comodin (*), pero el valor coincide con el archivo existente: {file_example.name}"
             )
-            # UI.info(f"Archivo detectado: [bold]{file_example.name}[/]")
         else:
             UI.warn(
                 f"No se detectó un patrón, pero se detectaron {len(values)} archivos existentes."
             )
-            console.print(
+            UI.print(
                 "[i]Esto sugiere que tu terminal expandió un comodín antes de que el programa lo recibiera.[/]"
             )
 
@@ -493,11 +517,9 @@ class DisplayConfig:
             is_value_default = value != default_value
             value_style = "bold green" if is_value_default else "dim white"
 
-            # Si es CHAT_ID, lo resuelve usando la URL de BD configurada
             if field_name.lower() == "chat_id":
                 value = get_friendly_chat_name(value, db_url)
 
-            # Sanitización de campos sensibles
             if field_name.lower() == "database_url":
                 display_val = (
                     sanitize_database_url(value)
@@ -509,7 +531,6 @@ class DisplayConfig:
             else:
                 display_val = str(value)
 
-            # Agrega a la tabla los campo segun el nivel de acceso.
             if is_debug and info.level == AccessLevel.DEBUG_READONLY:
                 table.add_row(
                     f"[grey0]{field_name.lower()}[/]",
@@ -533,16 +554,18 @@ class DisplayConfig:
                 )
 
         console.print(table)
-        # console.print("[green]Valor modificado[/] | [dim]Valor por defecto[/]")
+        log_table(table, f"Configuración del perfil: {profile_name}")
 
 
 class DisplayProfile:
     @staticmethod
     def announce_start_profile_creation(profile_name: str):
         UI.info(f"Creando perfil '[bold]{profile_name}[/]'.\n")
-        console.print("[bold cyan]1. Autenticación con Telegram[/bold cyan]")
-        console.print(
-            "[dim]Se solicitará tu [bold]número telefónico[/] y [bold]código (OTP)[/] para vincular la cuenta.[/dim]\n"
+        UI.print("[bold cyan]1. Autenticación con Telegram[/bold cyan]", indent=False)
+        UI.print(
+            "[dim]Se solicitará tu [bold]número telefónico[/] y [bold]código (OTP)[/] para vincular la cuenta.[/dim]",
+            indent=False,
+            spacing="bottom",
         )
 
     @staticmethod
@@ -554,8 +577,10 @@ class DisplayProfile:
     def announce_start_destination_setup():
         console.print()
         UI.info("Configurando destino de subida (Chat ID).")
-        console.print(
-            "[dim]Puedes omitir este paso y configurarlo más tarde usando 'totelegram config set chat_id <ID>'.[/dim]\n"
+        UI.print(
+            "[dim]Puedes omitir este paso y configurarlo más tarde usando 'totelegram config set chat_id <ID>'.[/dim]",
+            indent=False,
+            spacing="bottom",
         )
 
     @classmethod
@@ -566,13 +591,13 @@ class DisplayProfile:
         profiles: List[Profile],
         quiet: bool = False,
     ):
-        from totelegram.schemas import VALUE_NOT_SET
-
         console.print()
         if quiet:
             console.print("Perfiles disponibles:")
+            ui_logger.info("Perfiles disponibles:")
             for profile in profiles:
                 console.print(" - " + profile.name)
+                ui_logger.info(f" - {profile.name}")
             return
 
         table = Table(
@@ -580,9 +605,7 @@ class DisplayProfile:
             title_style=COLORS.TABLE_TITLE,
         )
         table.add_column("Estado", no_wrap=True)
-        table.add_column(
-            "Perfil",
-        )
+        table.add_column("Perfil")
         table.add_column("Session (.session)", justify="center")
         table.add_column("Config (.env)", justify="center")
         table.add_column("Destino (Chat ID)")
@@ -618,10 +641,11 @@ class DisplayProfile:
             )
 
         console.print(table)
+        log_table(table, "Perfiles disponibles")
 
         if was_orphan:
             console.print()
-            UI.warn("Se detecto al menos un perfil huérfano.")
+            UI.warn("Se detectó al menos un perfil huérfano.")
             UI.info(
                 "Usa 'totelegram profile delete <PERFIL>' para limpiar archivos huérfanos"
             )
@@ -635,7 +659,7 @@ class DisplayProfile:
         elif profile.has_env:
             UI.warn("Existe un archivo de configuración (.env) sin sesión asociada.")
             tip = f"[bold]totelegram --use {profile.name} config check[/]"
-            UI.info(f"Ejecuta un diagnóstico usando: {tip} ")
+            UI.info(f"Ejecuta un diagnóstico usando: {tip}")
 
     @staticmethod
     def show_delete_hint(profile_name: str):
@@ -650,10 +674,10 @@ class DisplayProfile:
 class DisplayGeneric:
     @staticmethod
     def show_matches_summary(query: str, matches: List[ChatMatch]):
-        base = "Explore tus chats más recientes"
+        base = "Exploré tus chats más recientes"
         if len(matches) > 0:
             message = (
-                f"[green]Ok[/green] {base}, y"
+                f"[green]Ok[/green] {base}, y "
                 f"encontré [bold cyan]{len(matches)}[/bold cyan] "
                 f"coincidencias para '[italic]{query}[/italic]':"
             )
@@ -664,25 +688,25 @@ class DisplayGeneric:
                 f"nada que coincida con '[italic]{query}[/italic]'."
             )
         console.print(message)
+        ui_logger.info(strip_markup(message))
 
     @staticmethod
     def show_search_tip():
         """Muestra el consejo de oro para encontrar chats nuevos."""
         tip_text = (
-            "[bold cyan]TIP PARA CHATS NUEVOS:[/bold cyan]\n"
             "Si acabas de crear un canal o grupo y no aparece en la búsqueda:\n"
             "1. Abre ese chat en tu móvil o escritorio.\n"
             "2. Envía un mensaje cualquiera.\n"
-            "3. Vuelva aquí e intenta buscar de nuevo."
+            "3. Vuelve aquí e intenta buscar de nuevo."
         )
-        console.print(
-            Panel(
-                tip_text,
-                title="¿No encuentras tu chat?",
-                border_style="cyan",
-                padding=(1, 1),
-            )
+        panel = Panel(
+            tip_text,
+            title="¿No encuentras tu chat?",
+            border_style="cyan",
+            padding=(1, 1),
         )
+        console.print(panel)
+        ui_logger.info("[¿No encuentras tu chat?] " + tip_text.replace("\n", " "))
 
     @staticmethod
     def render_search_results(chats: List[ChatMatch]):
@@ -703,27 +727,32 @@ class DisplayGeneric:
                 f"@{chat.username}" if chat.username else str(chat.id),
             )
         console.print(table)
+        log_table(table, "Resultados de búsqueda en Telegram")
 
     @classmethod
     def show_chat_table(cls, matches: List[ChatMatch], title: str):
         """Helper para mostrar resultados de chats en formato tabla."""
         table = Table(title=title, show_header=True, title_style=COLORS.TABLE_TITLE)
         table.add_column("ID", style="dim")
-        table.add_column("Titulo")
+        table.add_column("Título")
         table.add_column("Username")
         table.add_column("Tipo")
 
         for m in matches:
             table.add_row(
-                str(m.id), m.title, f"@{m.username}" if m.username else "-", str(m.type)
+                str(m.id),
+                m.title,
+                f"@{m.username}" if m.username else "-",
+                str(m.type),
             )
         console.print(table)
+        log_table(table, title)
 
     @staticmethod
     def warn_report_access_not_found(chat_id: Union[int, str]):
         UI.warn(f"El {chat_id=} no fue encontrado.")
         UI.info("Utiliza [bold]config set chat_id <ID>[/] para configurarlo.")
-        UI.info("Si no sabes el ID, use [bold]totelegram config search[/].")
+        UI.info("Si no sabes el ID, usa [bold]totelegram config search[/].")
 
     @staticmethod
     def warn_report_access_permissions():
@@ -746,27 +775,23 @@ class DisplaySnapshotPlan:
 
         console.print()
         UI.print("[bold blue]BALANCE DEL ESCANEO:[/bold blue]", indent=False)
-        console.print(
-            f"  • Total procesados:     [bold]{plan.total_scanned}[/] snapshots"
-        )
+        UI.print(f"• Total procesados:     [bold]{plan.total_scanned}[/] snapshots")
 
         if plan.synced_count > 0:
-            console.print(
-                f"  • Ya sincronizados:     [bold green]{plan.synced_count}[/] completos al 100% [dim](sin cambios requeridos)[/]"
+            UI.print(
+                f"• Ya sincronizados:     [bold green]{plan.synced_count}[/] completos al 100% [dim](sin cambios requeridos)[/]"
             )
 
         if actionable_count > 0:
-            console.print(
-                f"  • Acciones pendientes:  [bold cyan]{actionable_count}[/] snapshots por aplicar"
+            UI.print(
+                f"• Acciones pendientes:  [bold cyan]{actionable_count}[/] snapshots por aplicar"
             )
         else:
-            console.print(
-                "  • Acciones pendientes:  [dim]0 snapshots por aplicar[/dim]"
-            )
+            UI.print("• Acciones pendientes:  [dim]0 snapshots por aplicar[/dim]")
 
         if warnings_count > 0:
-            console.print(
-                f"  • Con advertencias:     [bold yellow]{warnings_count}[/] snapshots "
+            UI.print(
+                f"• Con advertencias:     [bold yellow]{warnings_count}[/] snapshots "
                 f"[dim]({conflicts_count} conflictos, {len(plan.needs_upgrade_items)} desactualizados, {len(plan.corrupted_items)} corruptos)[/]"
             )
 
@@ -808,7 +833,6 @@ class DisplaySnapshotPlan:
             PlanAction.CONFLICT: "[bold red]CONFLICTO[/]",
         }
 
-        # Listar items accionables
         for item in actionables:
             source = item.manifest.source
             total_parts = item.total_parts
@@ -827,7 +851,6 @@ class DisplaySnapshotPlan:
                 item.mutations.to_badge(),
             )
 
-        # Listar conflictos en la tabla para visibilidad
         for conf in plan.conflicts:
             source = conf.manifest.source
             total_parts = conf.total_parts
@@ -847,9 +870,11 @@ class DisplaySnapshotPlan:
             )
 
         console.print(table)
-        console.print(
-            "  [dim]Leyenda BD: +Source (Origen), +Job (Trabajo), +P (Payloads/Piezas), +Remotes (Mensajes en TG), +Files (Cinta TAR)[/]\n"
-        )
+        log_table(table, "ACCIONES A REALIZAR EN BASE DE DATOS")
+
+        legend = "Leyenda BD: +Source (Origen), +Job (Trabajo), +P (Payloads/Piezas), +Remotes (Mensajes en TG), +Files (Cinta TAR)"
+        console.print(f"  [dim]{legend}[/]\n")
+        ui_logger.info(f"  {legend}")
 
     @classmethod
     def show_inconsistencies_tree(cls, plan: ImportPlan) -> None:
@@ -864,6 +889,7 @@ class DisplaySnapshotPlan:
             "[bold blue]DETALLE DE INCONSISTENCIAS Y DISCREPANCIAS:[/bold blue]",
             indent=False,
         )
+        ui_logger.info("=== DETALLE DE INCONSISTENCIAS Y DISCREPANCIAS ===")
 
         # Árbol para recursos incompletos / parciales
         for item in partials:
@@ -876,17 +902,26 @@ class DisplaySnapshotPlan:
                 f"[cyan]•[/] [bold]{item.manifest.source.filename}[/] "
                 f"[dim](Estrategia: {strat_label}, {item.total_parts} partes)[/]"
             )
+            ui_logger.info(
+                f"• {item.manifest.source.filename} (Estrategia: {strat_label}, {item.total_parts} partes)"
+            )
 
             for p in item.parts_diff:
                 part_label = (
                     f"Parte {p.sequence + 1}/{p.total_parts} (msg: {p.message_id})"
                 )
                 if p.action == PartAction.ALREADY_EXISTS:
-                    root.add(f"[dim]✓ {part_label} ya registrada en DB (omitida)[/]")
+                    msg = f"✓ {part_label} ya registrada en DB (omitida)"
+                    root.add(f"[dim]{msg}[/]")
+                    ui_logger.info(f"    {msg}")
                 elif p.action == PartAction.WILL_LINK:
-                    root.add(f"[green]+ {part_label} será vinculada a la DB[/]")
+                    msg = f"+ {part_label} será vinculada a la DB"
+                    root.add(f"[green]{msg}[/]")
+                    ui_logger.info(f"    {msg}")
                 elif p.action == PartAction.CONFLICT:
-                    root.add(f"[bold red]✗ {part_label}: {p.detail}[/]")
+                    msg = f"✗ {part_label}: {p.detail}"
+                    root.add(f"[bold red]{msg}[/]")
+                    ui_logger.warning(f"    {msg}")
 
             console.print(root)
             console.print()
@@ -905,6 +940,10 @@ class DisplaySnapshotPlan:
             console.print(root)
             console.print()
 
+            ui_logger.warning(
+                f"• CONFLICTO: {conf.manifest.source.filename} (MD5: {short_md5}...): {conf.reason}"
+            )
+
     @classmethod
     def show_alerts(cls, plan: ImportPlan, sample_path: Optional[str] = None) -> None:
         """Muestra advertencias para upgrades pendientes y archivos corruptos."""
@@ -912,20 +951,26 @@ class DisplaySnapshotPlan:
             return
 
         UI.print("[bold red]ATENCIÓN REQUERIDA:[/bold red]", indent=False)
+        ui_logger.warning("=== ATENCIÓN REQUERIDA ===")
 
-        # Snapshots antiguos (Requieren Upgrade)
         if plan.needs_upgrade_items:
             count = len(plan.needs_upgrade_items)
+            msg = f"! {count} snapshot(s) en formato antiguo requieren upgrade previo a v5.0:"
             console.print(
                 f"  [yellow]![/] [bold]{count}[/] snapshot(s) en formato antiguo requieren upgrade previo a v5.0:"
             )
+            ui_logger.warning(f"  {msg}")
+
             for insp in plan.needs_upgrade_items[:5]:
                 ver = insp.detected_version or "antigua"
                 console.print(
                     f"      [bright_black]• {insp.path.name}[/] [dim]({ver})[/]"
                 )
+                ui_logger.warning(f"      • {insp.path.name} ({ver})")
+
             if count > 5:
                 console.print(f"      [dim]... y {count - 5} archivos más.[/dim]")
+                ui_logger.warning(f"      ... y {count - 5} archivos más.")
 
             target_cmd = f'"{sample_path}"' if sample_path else "<RUTA>"
             UI.tip(
@@ -935,15 +980,20 @@ class DisplaySnapshotPlan:
             )
             console.print()
 
-        # Archivos corruptos
         if plan.corrupted_items:
             count = len(plan.corrupted_items)
+            msg = f"X {count} snapshot(s) corruptos o con formato inválido:"
             console.print(
                 f"  [bold red]X[/] [bold]{count}[/] snapshot(s) corruptos o con formato inválido:"
             )
+            ui_logger.error(f"  {msg}")
+
             for insp in plan.corrupted_items[:5]:
                 err = insp.error_detail or "Error de parsing"
                 console.print(f"      [red]• {insp.path.name}:[/] [dim]{err}[/]")
+                ui_logger.error(f"      • {insp.path.name}: {err}")
+
             if count > 5:
                 console.print(f"      [dim]... y {count - 5} archivos más.[/dim]")
+                ui_logger.error(f"      ... y {count - 5} archivos más.")
             console.print()
