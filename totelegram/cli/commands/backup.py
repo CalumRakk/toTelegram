@@ -1,6 +1,6 @@
 import time
 from pathlib import Path
-from typing import List, Optional
+from typing import List
 
 import typer
 
@@ -27,7 +27,7 @@ def backup_folders(
         "-f",
         help="Fuerza ignorando el estado del archivo en el sistema",
     ),
-    auto_truncate: Optional[bool] = typer.Option(
+    auto_truncate: bool | None = typer.Option(
         None,
         "--auto-truncate/--no-auto-truncate",
         help="Activa o desactiva la truncación de nombres largos. Sobrescribe la configuración global.",

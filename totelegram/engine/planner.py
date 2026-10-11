@@ -46,7 +46,7 @@ class JobPlanner:
         """
         chat_db, _ = TelegramChat.get_or_create_from_chat(ctx.tg_chat)
 
-        # Resolver o crear el Source (Archivo simple o Carpeta TAR)
+        # Crea Source (Archivo simple o Carpeta TAR)
         if path.is_dir():
             source = cls._resolve_folder_source(path, ctx, force, auto_truncate)
         else:
@@ -120,7 +120,7 @@ class JobPlanner:
             tape = tartape.create(
                 path,
                 exclude=exclusion_patterns,
-                calculate_hashes=True,
+                checksum="md5",
                 overwrite=force,
                 auto_truncate=auto_truncate,
             )

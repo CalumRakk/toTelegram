@@ -27,8 +27,10 @@ class UploadStream:
 
     @property
     def md5sum(self) -> str:
-        """Retorna el hash MD5 calculado durante la lectura o manualmente."""
-        return getattr(self.stream, "md5sum", "")
+        """Retorna el hash calculado durante la lectura o manualmente."""
+        return getattr(self.stream, "checksum", None) or getattr(
+            self.stream, "md5sum", ""
+        )
 
     def __enter__(self) -> "UploadStream":
         if hasattr(self.stream, "__enter__"):

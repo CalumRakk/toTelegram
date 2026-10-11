@@ -35,4 +35,5 @@ prompt.md
 # .pre-commit-config.yaml
 # README.md
 docs/
+*.backup
 # .github/

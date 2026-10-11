@@ -135,22 +135,32 @@ class StatelessPartitioner:
                     continue
 
                 arc_path = entry.info.arc_path
-                fragment = VirtualFileFragment(
-                    vol_idx=manifest.volume_index,
-                    offset_in_vol=entry.local_window.start,
-                    bytes_in_volume=entry.local_window.end - entry.local_window.start,
-                    state=entry.state.value,
-                )
-                if entry.info.md5sum is None:
-                    raise ValueError(f"File {arc_path} has no md5sum")
+
+                # entry.info.checksum es la nueva propiedad agnóstica
+                checksum_val = entry.info.checksum or entry.info.md5sum
+                if checksum_val is None:
+                    raise ValueError(
+                        f"File '{arc_path}' has no recorded checksum in catalog"
+                    )
 
                 if arc_path not in members_map:
                     members_map[arc_path] = VirtualTapeMember(
                         relative_path=arc_path,
                         size=entry.info.size,
-                        md5sum=entry.info.md5sum,
+                        md5sum=checksum_val,
                         fragments=[],
                     )
-                members_map[arc_path].fragments.append(fragment)
+
+                # Si entry.slice existe, registramos el fragmento quirúrgico.
+                # (Si es None, significa que size == 0 o que en este volumen solo cayó header/padding)
+                if entry.slice is not None:
+                    fragment = VirtualFileFragment(
+                        vol_idx=manifest.volume_index,
+                        volume_offset=entry.slice.volume_offset,
+                        volume_length=entry.slice.volume_length,
+                        source_offset=entry.slice.source_offset,
+                        state=entry.state.value,
+                    )
+                    members_map[arc_path].fragments.append(fragment)
 
         return catalog, chunks, list(members_map.values())

@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Callable, List, Optional, Tuple, cast
 
 import peewee
+from tartape.schemas import EntryState
 
 from totelegram import __VERSION__
 from totelegram.common.helpers import batched
@@ -636,7 +637,7 @@ class SnapshotImporter:
 
         # --- GESTIÓN DE ARCHIVOS TAR Y GPS ---
         if manifest.source.type == SourceType.FOLDER and manifest.source.inventory:
-            # 1. Asegurar TapeMembers si hay miembros faltantes
+            # Asegurar TapeMembers si hay miembros faltantes
             if item.mutations.members_count > 0:
                 member_inserts = [
                     {
@@ -650,7 +651,7 @@ class SnapshotImporter:
                 for batch in batched(member_inserts, 100):
                     TapeMember.insert_many(batch).on_conflict_ignore().execute()
 
-            # 2. Asegurar TapeMemberGPS para los Payloads de este Job específico
+            # Asegurar TapeMemberGPS para los Payloads de este Job específico
             has_gps = (
                 TapeMemberGPS.select().join(Payload).where(Payload.job == job).exists()
             )
@@ -670,18 +671,30 @@ class SnapshotImporter:
                     if not member_id:
                         continue
 
-                    for frag in m.fragments:
+                    total_frags = len(m.fragments)
+                    for frag_idx, frag in enumerate(m.fragments):
                         payload_obj = payload_map.get(frag.vol_idx)
                         if not payload_obj:
                             continue
+
+                        # Deducir estado según posición
+                        if total_frags == 1:
+                            frag_state = EntryState.COMPLETE.value
+                        elif frag_idx == 0:
+                            frag_state = EntryState.HEAD.value
+                        elif frag_idx == total_frags - 1:
+                            frag_state = EntryState.TAIL.value
+                        else:
+                            frag_state = EntryState.BODY.value
 
                         gps_inserts.append(
                             {
                                 "member": member_id,
                                 "payload": payload_obj,
-                                "state": "COMPLETED",
-                                "offset_in_volume": frag.offset_in_vol,
-                                "bytes_in_volume": frag.bytes_in_volume,
+                                "state": frag_state,
+                                "offset_in_volume": frag.volume_offset,
+                                "bytes_in_volume": frag.volume_length,
+                                "source_offset": frag.source_offset,
                             }
                         )
 

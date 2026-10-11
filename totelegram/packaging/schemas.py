@@ -2,24 +2,43 @@ import logging
 from datetime import datetime
 from typing import List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import AliasChoices, BaseModel, Field
 
 from totelegram import __VERSION__
 from totelegram.schemas import SourceType, Strategy, TapeCatalog
 
 logger = logging.getLogger(__name__)
 
-MANIFEST_VERSION = "5.0"
+MANIFEST_VERSION = "5.1"
 
 
 class FileFragment(BaseModel):
     """GPS exacto de un archivo dentro de un volumen (Payload)."""
 
     vol_idx: int  # sequence_index del Payload
-    offset_in_vol: int  # Offset de inicio dentro del archivo .tar del volumen
-    bytes_in_volume: (
-        int  # Cantidad de bytes (o donde termina) este archivo en este volumen
+    volume_offset: int = Field(
+        ...,
+        validation_alias=AliasChoices("volume_offset", "offset_in_vol"),
+        description="Offset de inicio dentro del archivo .tar del volumen",
     )
+    volume_length: int = Field(
+        ...,
+        validation_alias=AliasChoices("volume_length", "bytes_in_volume"),
+        description="Cantidad de bytes útiles en este volumen",
+    )
+    source_offset: int = Field(
+        default=0,
+        description="Offset de inicio dentro del archivo original reconstruido",
+    )
+
+    # Propiedades de retrocompatibilidad
+    @property
+    def offset_in_vol(self) -> int:
+        return self.volume_offset
+
+    @property
+    def bytes_in_volume(self) -> int:
+        return self.volume_length
 
 
 class TapeMemberSnapshot(BaseModel):
@@ -101,16 +120,29 @@ class VirtualFileFragment(BaseModel):
     vol_idx: int = Field(
         ..., description="Índice del volumen (VirtualChunk) donde reside este fragmento"
     )
-    offset_in_vol: int = Field(
+    volume_offset: int = Field(
         ..., description="Offset de inicio dentro del volumen .tar"
     )
-    bytes_in_volume: int = Field(
-        ..., description="Cantidad de bytes del archivo en este volumen"
+    volume_length: int = Field(
+        ..., description="Cantidad de bytes útiles en este volumen"
+    )
+    source_offset: int = Field(
+        default=0,
+        description="Offset de inicio dentro del archivo original reconstruido",
     )
     state: str = Field(
         ...,
         description="Estado de integridad del fragmento según tartape (ej: COMPLETED)",
     )
+
+    # Propiedades de retrocompatibilidad
+    @property
+    def offset_in_vol(self) -> int:
+        return self.volume_offset
+
+    @property
+    def bytes_in_volume(self) -> int:
+        return self.volume_length
 
 
 class VirtualTapeMember(BaseModel):

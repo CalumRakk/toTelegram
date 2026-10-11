@@ -516,8 +516,9 @@ class Job(BaseModel):
                             "member": member_id,
                             "payload": payload_obj,
                             "state": frag.state,
-                            "offset_in_volume": frag.offset_in_vol,
-                            "bytes_in_volume": frag.bytes_in_volume,
+                            "offset_in_volume": frag.volume_offset,
+                            "bytes_in_volume": frag.volume_length,
+                            "source_offset": frag.source_offset,
                         }
                     )
 
@@ -695,20 +696,33 @@ class TapeMember(BaseModel):
             for member in query:
                 path_to_id[member.relative_path] = member.id
 
-        # Registra el GPS de cada archivo en el volumen
+        # Registra el GPS de cada archivo en el volumen usando e.slice
         for batch in batched(entries, BATCH_SIZE):  # type: ignore
-            gps_data = [
-                {
-                    "member": path_to_id[e.info.arc_path],
-                    "payload": payload,
-                    "state": e.state.value,
-                    "offset_in_volume": e.local_window.start,
-                    "bytes_in_volume": e.local_window.end - e.local_window.start,
-                }
-                for e in batch
-                if not e.info.is_dir
-            ]
-            TapeMemberGPS.insert_many(gps_data).execute()
+            gps_data = []
+            for e in batch:
+                if e.info.is_dir:
+                    continue
+                # Si no tiene slice y tiene tamaño > 0, significa que solo cayó el header en este volumen
+                if e.slice is None and e.info.size > 0:
+                    continue
+
+                vol_off = e.slice.volume_offset if e.slice else 0
+                vol_len = e.slice.volume_length if e.slice else 0
+                src_off = e.slice.source_offset if e.slice else 0
+
+                gps_data.append(
+                    {
+                        "member": path_to_id[e.info.arc_path],
+                        "payload": payload,
+                        "state": e.state.value,
+                        "offset_in_volume": vol_off,
+                        "bytes_in_volume": vol_len,
+                        "source_offset": src_off,
+                    }
+                )
+
+            if gps_data:
+                TapeMemberGPS.insert_many(gps_data).execute()
 
 
 class TapeMemberGPS(BaseModel):
@@ -718,6 +732,15 @@ class TapeMemberGPS(BaseModel):
     state = cast(EntryState, EnumField(EntryState))  # type: ignore
     offset_in_volume = cast(int, peewee.BigIntegerField())
     bytes_in_volume = cast(int, peewee.BigIntegerField())
+    source_offset = cast(int, peewee.BigIntegerField(default=0))
+
+    @property
+    def volume_offset(self) -> int:
+        return self.offset_in_volume
+
+    @property
+    def volume_length(self) -> int:
+        return self.bytes_in_volume
 
 
 class Claim(BaseModel):

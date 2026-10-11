@@ -141,6 +141,159 @@ class DownloadEngine:
         else:
             return self._restore_file(manifest, output_dir, force, keep_cache)
 
+    def restore_single_file(
+        self,
+        manifest: UploadManifest,
+        relative_path: str,
+        output_dir: Path,
+        force: bool = False,
+        keep_cache: bool = False,
+    ) -> DownloadReport:
+        """
+        Descarga ÚNICAMENTE las partes de Telegram que contienen fragmentos del archivo
+        solicitado y lo reconstruye directamente sin procesar el resto del backup.
+        Soporta archivos de 0 bytes, archivos contenidos en 1 parte y archivos que
+        abarcan múltiples volúmenes.
+        """
+        source = manifest.source
+        if source.type != SourceType.FOLDER or not source.inventory:
+            raise ValueError(
+                "La extracción quirúrgica por archivo solo está disponible para carpetas archivadas (cintas TAR)."
+            )
+
+        # Buscar el archivo en el inventario del snapshot
+        member = next(
+            (m for m in source.inventory if m.relative_path == relative_path),
+            None,
+        )
+        if not member:
+            raise FileNotFoundError(
+                f"El archivo '{relative_path}' no existe en el inventario de este snapshot."
+            )
+
+        target_file = output_dir / relative_path
+        if target_file.exists() and not force:
+            raise FileExistsError(
+                f"El archivo '{target_file.name}' ya existe en el destino. Usa --force para sobrescribirlo."
+            )
+
+        target_file.parent.mkdir(parents=True, exist_ok=True)
+
+        # Caso Especial: Archivo Vacío (0 Bytes)
+        if member.size == 0:
+            logger.info(f"Restaurando archivo vacío (0 bytes): {relative_path}")
+            target_file.touch()
+            return DownloadReport(
+                source_filename=relative_path,
+                output_path=target_file,
+                total_bytes_downloaded=0,
+                files_extracted=1,
+                is_success=True,
+                message="Archivo vacío de 0 bytes creado exitosamente (sin tráfico de red).",
+            )
+
+        # Identificar TODOS los volúmenes que componen este archivo
+        # (pueden ser 1, 2 o más si abarca múltiples volúmenes)
+        frags = sorted(member.fragments, key=lambda f: f.source_offset)
+        needed_vol_indices = sorted({f.vol_idx for f in frags})
+
+        needed_parts_map = {
+            p.sequence: p for p in manifest.parts if p.sequence in needed_vol_indices
+        }
+
+        staging_dir = self._get_staging_dir(output_dir, source.md5sum)
+        total_parts = len(manifest.parts)
+        total_bytes_transferred = 0
+
+        logger.info(
+            f"Extrayendo '{relative_path}' ({member.size} bytes). "
+            f"Requiere {len(needed_vol_indices)} de {total_parts} partes de Telegram."
+        )
+
+        # Archivo temporal de ensamblado atómico
+        assembling_file = target_file.with_name(f"{target_file.name}.assembling")
+        assembling_file.unlink(missing_ok=True)
+
+        downloaded_vol_paths: dict[int, Path] = {}
+
+        try:
+            with open(assembling_file, "wb") as out_f:
+                # Pre-asignar tamaño si es un archivo grande evita fragmentación
+                if member.size > 0:
+                    out_f.truncate(member.size)
+
+                # Procesar volumen por volumen en orden
+                for vol_idx in needed_vol_indices:
+                    part_meta = needed_parts_map.get(vol_idx)
+                    if not part_meta:
+                        raise ValueError(
+                            f"Falta el metadato de la parte {vol_idx} en el snapshot."
+                        )
+
+                    # Descargar (o reutilizar desde caché local)
+                    vol_path, bytes_dl = self._download_part(
+                        part=part_meta,
+                        staging_dir=staging_dir,
+                        total_parts=total_parts,
+                    )
+                    downloaded_vol_paths[vol_idx] = vol_path
+                    total_bytes_transferred += bytes_dl
+
+                    # Extraer todos los fragmentos que correspondan a este volumen
+                    part_frags = [f for f in frags if f.vol_idx == vol_idx]
+
+                    with open(vol_path, "rb") as vol_f:
+                        for frag in part_frags:
+                            vol_f.seek(frag.volume_offset)
+                            out_f.seek(frag.source_offset)
+
+                            bytes_to_copy = frag.volume_length
+                            while bytes_to_copy > 0:
+                                chunk = vol_f.read(min(64 * 1024, bytes_to_copy))
+                                if not chunk:
+                                    raise DownloadIntegrityError(
+                                        f"Fin inesperado del volumen {vol_idx} mientras se leía {relative_path}"
+                                    )
+                                out_f.write(chunk)
+                                bytes_to_copy -= len(chunk)
+
+                    # Limpieza progresiva si no se pide conservar caché
+                    if not keep_cache:
+                        vol_path.unlink(missing_ok=True)
+                        downloaded_vol_paths.pop(vol_idx, None)
+
+            # Verificación de Integridad MD5 del archivo final ensamblado
+            final_md5 = self._compute_file_md5(assembling_file)
+            if member.md5sum and final_md5 != member.md5sum:
+                assembling_file.unlink(missing_ok=True)
+                raise DownloadIntegrityError(
+                    f"Checksum MD5 inválido para '{relative_path}'. "
+                    f"Esperado: {member.md5sum}, Calculado: {final_md5}"
+                )
+
+            # Renombrado atómico
+            assembling_file.replace(target_file)
+
+        finally:
+            assembling_file.unlink(missing_ok=True)
+            if not keep_cache:
+                for path in downloaded_vol_paths.values():
+                    path.unlink(missing_ok=True)
+                if staging_dir.exists() and not any(staging_dir.iterdir()):
+                    staging_dir.rmdir()
+
+        return DownloadReport(
+            source_filename=relative_path,
+            output_path=target_file,
+            total_bytes_downloaded=total_bytes_transferred,
+            files_extracted=1,
+            is_success=True,
+            message=(
+                f"Archivo '{relative_path}' extraído y verificado quirúrgicamente "
+                f"usando {len(needed_vol_indices)} de {total_parts} volúmenes."
+            ),
+        )
+
     def _get_staging_dir(self, output_dir: Path, source_md5: str) -> Path:
         short_hash = source_md5[:12] if source_md5 else "temp"
         staging = output_dir / f".totelegram_cache_{short_hash}"

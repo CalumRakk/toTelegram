@@ -22,6 +22,95 @@ MIGRATION_ADVISORY_LOCK_ID = 84920492
 _sqlite_migration_lock = threading.RLock()
 
 
+def _heal_legacy_tapemembergps_data(db: peewee.Database):
+    """
+    Sanación matemática in-place para registros históricos en tapemembergps.
+    Convierte las coordenadas antiguas del contenedor TAR a coordenadas
+    quirúrgicas puras (source_offset, volume_offset, volume_length).
+    """
+    from totelegram.models import Payload, TapeMember, TapeMemberGPS
+
+    logger.info(
+        "Iniciando sanación de offsets en registros históricos de 'tapemembergps'..."
+    )
+
+    members_query = TapeMember.select().order_by(TapeMember.id)
+    gps_query = (
+        TapeMemberGPS.select(TapeMemberGPS, Payload)
+        .join(Payload)
+        .order_by(Payload.sequence_index)
+    )
+
+    members = peewee.prefetch(members_query, gps_query)
+
+    gps_to_update = []
+    total_healed = 0
+
+    for member in members:
+        fragments = list(member.fragments)
+        if not fragments:
+            continue
+
+        total_frags = len(fragments)
+
+        if total_frags == 1:
+            frag = fragments[0]
+            frag.offset_in_volume = frag.offset_in_volume + 512
+            frag.bytes_in_volume = member.size
+            frag.source_offset = 0
+            gps_to_update.append(frag)
+        else:
+            accumulated = 0
+            for idx, frag in enumerate(fragments):
+                if idx == 0:
+                    # HEAD: Contiene el Header TAR
+                    frag.offset_in_volume = frag.offset_in_volume + 512
+                    frag.bytes_in_volume = max(0, frag.bytes_in_volume - 512)
+                    frag.source_offset = 0
+                    accumulated += frag.bytes_in_volume
+                elif idx == total_frags - 1:
+                    # TAIL: Eliminar el padding final
+                    frag.offset_in_volume = 0
+                    frag.bytes_in_volume = max(0, member.size - accumulated)
+                    frag.source_offset = accumulated
+                else:
+                    # BODY: Datos puros contiguos
+                    frag.offset_in_volume = 0
+                    frag.source_offset = accumulated
+                    accumulated += frag.bytes_in_volume
+
+                gps_to_update.append(frag)
+
+        if len(gps_to_update) >= 300:
+            TapeMemberGPS.bulk_update(
+                gps_to_update,
+                fields=[
+                    TapeMemberGPS.offset_in_volume,
+                    TapeMemberGPS.bytes_in_volume,
+                    TapeMemberGPS.source_offset,
+                ],
+                batch_size=100,
+            )
+            total_healed += len(gps_to_update)
+            gps_to_update = []
+
+    if gps_to_update:
+        TapeMemberGPS.bulk_update(
+            gps_to_update,
+            fields=[
+                TapeMemberGPS.offset_in_volume,
+                TapeMemberGPS.bytes_in_volume,
+                TapeMemberGPS.source_offset,
+            ],
+            batch_size=100,
+        )
+        total_healed += len(gps_to_update)
+
+    logger.info(
+        f"Sanación completada: {total_healed} fragmentos GPS actualizados a coordenadas quirúrgicas."
+    )
+
+
 class DatabaseState(str, enum.Enum):
     """Estados del ciclo de vida y compatibilidad de la base de datos."""
 
@@ -35,8 +124,6 @@ class DatabaseState(str, enum.Enum):
 
 class IncompatibleDatabaseError(RuntimeError):
     """Excepción lanzada cuando la base de datos es más reciente que el cliente."""
-
-    pass
 
 
 @dataclass
@@ -233,12 +320,37 @@ def _step_v3_to_v4(db: peewee.Database):
         logger.debug(f"Aviso en paso v3->v4: {e}")
 
 
+def _step_v4_to_v5(db: peewee.Database):
+    """Paso v4 -> v5: Agregar source_offset a tapemembergps y sanar datos existentes."""
+    migrator = _get_migrator(db)
+
+    # Verificar si la tabla tapemembergps existe antes de intentar alterar columnas o sanar
+    existing_tables = {t.lower() for t in db.get_tables()}
+
+    if "tapemembergps" in existing_tables:
+        try:
+            migrate(
+                migrator.add_column(
+                    "tapemembergps", "source_offset", peewee.BigIntegerField(default=0)
+                ),
+            )
+        except Exception as e:
+            logger.debug(f"Aviso agregando source_offset en v4->v5: {e}")
+
+        _heal_legacy_tapemembergps_data(db)
+    else:
+        logger.debug(
+            "La tabla 'tapemembergps' no existe en esta versión legacy. Omitiendo sanación de v4->v5."
+        )
+
+
 # Registrar en MIGRATION_REGISTRY:
 MIGRATION_REGISTRY: Dict[int, Callable[[peewee.Database], None]] = {
     0: _step_v0_to_v1,
     1: _step_v1_to_v2,
     2: _step_v2_to_v3,
     3: _step_v3_to_v4,
+    4: _step_v4_to_v5,
 }
 
 

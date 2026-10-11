@@ -3,6 +3,7 @@ Motor de normalización y retrocompatibilidad hacia UploadManifest v5.0.
 Aplica validación física estricta de particionado y rechazo explícito de inconsistencias.
 """
 
+import copy
 import json
 import lzma
 import mimetypes
@@ -12,7 +13,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from totelegram.identity import TG_MAX_SIZE_SINGLE_FILE
-from totelegram.packaging.schemas import UploadManifest
+from totelegram.packaging.schemas import MANIFEST_VERSION, UploadManifest
 
 
 def _parse_yaml_text(text: str) -> Any:
@@ -154,8 +155,10 @@ def validate_and_infer_chunk_size(
 class SnapshotUpgrader:
     @staticmethod
     def detect_version(data: Dict[str, Any]) -> str:
-        if "manifest_version" in data and str(data["manifest_version"]) == "5.0":
-            return "5.0"
+        if "manifest_version" in data:
+            ver = str(data["manifest_version"])
+            if ver in ("5.1", "5.0"):
+                return ver
         if "version" in data and data["version"] is not None:
             return str(data["version"])
         if "filedocuments" in data:
@@ -170,26 +173,28 @@ class SnapshotUpgrader:
     ) -> Tuple[Dict[str, Any], str]:
         ver = cls.detect_version(data)
 
+        if ver == "5.1":
+            return data, "5.1 (nativo)"
         if ver == "5.0":
-            return data, "5.0 (nativo)"
+            return cls._upgrade_v5_0_to_v5_1(data), "5.0 -> 5.1"
         if ver == "4.0":
-            return cls._upgrade_v4(data), "4.0 -> 5.0"
+            return cls._upgrade_v4(data), "4.0 -> 5.1"
         if ver == "3.0":
-            return cls._upgrade_v3(data), "3.0 -> 5.0"
+            return cls._upgrade_v3(data), "3.0 -> 5.1"
         if ver == "1.0":
-            return cls._upgrade_v1(data), "1.0 -> 5.0"
+            return cls._upgrade_v1(data), "1.0 -> 5.1"
         if ver in ("0.0.3", "0.0.2"):
-            return cls._upgrade_v0_0_x(data), f"{ver} -> 5.0"
+            return cls._upgrade_v0_0_x(data), f"{ver} -> 5.1"
         if ver == "0.0.1":
             return cls._upgrade_v0_0_x(
                 data, root_chat_id=data.get("chat_id")
-            ), "0.0.1 -> 5.0"
+            ), "0.0.1 -> 5.1"
         if ver == "legacy-pieces":
-            return cls._upgrade_legacy_pieces(data), "legacy-pieces -> 5.0"
+            return cls._upgrade_legacy_pieces(data), "legacy-pieces -> 5.1"
         if ver == "legacy-filedocuments":
             return cls._upgrade_legacy_filedocuments(
                 data, tg_client
-            ), "legacy-filedocuments -> 5.0"
+            ), "legacy-filedocuments -> 5.1"
 
         raise ValueError(f"Versión de snapshot no reconocida: {ver}")
 
@@ -201,6 +206,62 @@ class SnapshotUpgrader:
 
         v5_dict, transition = cls.upgrade_to_dict(raw_data, tg_client=tg_client)
         return UploadManifest.model_validate(v5_dict)
+
+    @staticmethod
+    def _upgrade_v5_0_to_v5_1(data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Sana matemáticamente los fragmentos de un snapshot v5.0 convirtiendo
+        las coordenadas antiguas de contenedor TAR a coordenadas quirúrgicas v5.1.
+        """
+        upgraded = copy.deepcopy(data)
+        upgraded["manifest_version"] = "5.1"
+
+        source = upgraded.get("source", {})
+        inventory = source.get("inventory")
+
+        if inventory and isinstance(inventory, list):
+            for member in inventory:
+                fragments = member.get("fragments", [])
+                member_size = member.get("size", 0)
+                if not fragments:
+                    continue
+
+                total_frags = len(fragments)
+                if total_frags == 1:
+                    frag = fragments[0]
+                    old_off = frag.get("volume_offset", frag.get("offset_in_vol", 0))
+                    frag["volume_offset"] = old_off + 512
+                    frag["volume_length"] = member_size
+                    frag["source_offset"] = 0
+                else:
+                    accumulated = 0
+                    for idx, frag in enumerate(fragments):
+                        old_off = frag.get(
+                            "volume_offset", frag.get("offset_in_vol", 0)
+                        )
+                        old_bytes = frag.get(
+                            "volume_length", frag.get("bytes_in_volume", 0)
+                        )
+
+                        if idx == 0:
+                            # HEAD: Contiene el Header TAR de 512 bytes al inicio
+                            frag["volume_offset"] = old_off + 512
+                            frag["volume_length"] = max(0, old_bytes - 512)
+                            frag["source_offset"] = 0
+                            accumulated += frag["volume_length"]
+                        elif idx == total_frags - 1:
+                            # TAIL: Sin header, recortar padding final
+                            frag["volume_offset"] = 0
+                            frag["volume_length"] = max(0, member_size - accumulated)
+                            frag["source_offset"] = accumulated
+                        else:
+                            # BODY: Datos puros de punta a punta
+                            frag["volume_offset"] = 0
+                            frag["volume_length"] = old_bytes
+                            frag["source_offset"] = accumulated
+                            accumulated += frag["volume_length"]
+
+        return upgraded
 
     @staticmethod
     def _upgrade_v4(data: Dict[str, Any]) -> Dict[str, Any]:

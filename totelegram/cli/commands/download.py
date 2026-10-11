@@ -1,6 +1,5 @@
 import logging
 from pathlib import Path
-from typing import Optional
 
 import typer
 
@@ -26,7 +25,7 @@ def download_snapshot(
         readable=True,
         help="Ruta al archivo snapshot (.json.xz)",
     ),
-    output_dir: Optional[Path] = typer.Option(
+    output_dir: Path | None = typer.Option(
         None,
         "--output-dir",
         "-o",
@@ -44,6 +43,11 @@ def download_snapshot(
         "-k",
         help="Conservar los segmentos descargados tras una restauración exitosa.",
     ),
+    file_path: str | None = typer.Option(
+        None,
+        "--file",
+        help="Extracción quirúrgica: Ruta interna del archivo específico a restaurar (omite el resto del backup).",
+    ),
 ):
     """
     Descarga y restaura un archivo o carpeta archivada a partir de su Snapshot (.json.xz).
@@ -52,7 +56,7 @@ def download_snapshot(
     state: CLIState = ctx.obj
     profile_name, _ = _get_config_tools(ctx)
 
-    # Cargar y deserializar el Snapshot
+    # Cargar y deserializar el Snapshot (auto-migra v5.0 a v5.1 si es antiguo)
     with UI.loading(f"Cargando snapshot: [bold]{snapshot_path.name}[/]..."):
         try:
             manifest = SnapshotService.load_snapshot(snapshot_path)
@@ -60,16 +64,63 @@ def download_snapshot(
             UI.error(f"Error al leer el snapshot: {e}")
             raise typer.Exit(1)
 
-    # Determinar destino de restauración
     target_output_dir = (
         output_dir.resolve() if output_dir else snapshot_path.parent.resolve()
     )
 
     source = manifest.source
     is_folder = source.type == SourceType.FOLDER
-    item_desc = "Carpeta" if is_folder else "Archivo"
 
     UI.separator()
+
+    # MODO A: Extracción quirúrgica de un solo archivo
+    if file_path:
+        if not is_folder:
+            UI.error(
+                "La opción '--file' solo se aplica a snapshots de carpetas archivadas (TAR)."
+            )
+            raise typer.Exit(1)
+
+        UI.print(f"Extrayendo archivo puntual: [bold cyan]{file_path}[/]")
+        UI.info(
+            f"Desde backup: [bold]{source.filename}[/] ({len(manifest.parts)} partes totales en Telegram)"
+        )
+        UI.info(f"Destino: [bold green]{target_output_dir / file_path}[/]")
+
+        with state.get_telegram_session(profile_name) as client:
+            observer = RichDownloadObserver()
+            engine = DownloadEngine(client=client, observer=observer)  # type: ignore
+
+            try:
+                report = engine.restore_single_file(
+                    manifest=manifest,
+                    relative_path=file_path,
+                    output_dir=target_output_dir,
+                    force=force,
+                    keep_cache=keep_cache,
+                )
+
+                UI.separator()
+                UI.success(f"Archivo [bold]{file_path}[/] extraído exitosamente.")
+                UI.info(f"Ubicación: [bold cyan]{report.output_path}[/]")
+                UI.info(
+                    f"Tráfico transferido: [dim]{report.total_bytes_downloaded / (1024 * 1024):.2f} MB[/dim]"
+                )
+                return
+
+            except FileNotFoundError as e:
+                UI.error(str(e))
+                raise typer.Exit(1)
+            except FileExistsError as e:
+                UI.error(str(e))
+                UI.tip("Usa la opción [bold]--force[/] para sobrescribir.")
+                raise typer.Exit(1)
+            except DownloadIntegrityError as e:
+                UI.error(f"Fallo de integridad: {e}")
+                raise typer.Exit(1)
+
+    # MODO B: Restauración completa estándar
+    item_desc = "Carpeta" if is_folder else "Archivo"
     UI.print(f"Restaurando {item_desc}: [bold cyan]{source.filename}[/]")
     UI.info(
         f"Estrategia: [bold]{manifest.strategy.value}[/] ({len(manifest.parts)} partes en Telegram)"
@@ -85,7 +136,6 @@ def download_snapshot(
 
     UI.separator()
 
-    # Conectar a Telegram e iniciar el motor de descarga
     with state.get_telegram_session(profile_name) as client:
         observer = RichDownloadObserver()
         engine = DownloadEngine(client=client, observer=observer)  # type: ignore
@@ -115,9 +165,6 @@ def download_snapshot(
             raise typer.Exit(1)
         except DownloadIntegrityError as e:
             UI.error(f"Fallo de integridad durante la restauración: {e}")
-            raise typer.Exit(1)
-        except FileNotFoundError as e:
-            UI.error(f"Recurso no encontrado: {e}")
             raise typer.Exit(1)
         except Exception as e:
             UI.error(f"Error inesperado durante la descarga: {e}")

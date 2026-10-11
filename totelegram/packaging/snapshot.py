@@ -67,7 +67,7 @@ class SnapshotService:
         inventory: Optional[List[TapeMemberSnapshot]] = None
         if source.type == SourceType.FOLDER:
             inventory = []
-            # Prefetch correcto usando el modelo Payload
+
             members = (
                 TapeMember.select()
                 .where(TapeMember.source == source)
@@ -78,8 +78,9 @@ class SnapshotService:
                 fragments = [
                     FileFragment(
                         vol_idx=gps.payload.sequence_index,
-                        offset_in_vol=gps.offset_in_volume,
-                        bytes_in_volume=gps.bytes_in_volume,
+                        volume_offset=gps.volume_offset,
+                        volume_length=gps.volume_length,
+                        source_offset=gps.source_offset,
                     )
                     for gps in m.fragments
                 ]
