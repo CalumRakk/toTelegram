@@ -46,15 +46,17 @@ def has_snapshot(file_path: Path) -> bool:
 
 
 def delete_snapshot(file_path: Path):
-    """Elimina los posibles archivos de snapshot asociados a una ruta."""
+    """Elimina los posibles archivos de snapshot y sidecars asociados a una ruta."""
     targets = [
         file_path.with_name(f"{file_path.name}.json.xz"),
         file_path.with_name(f"{file_path.stem}.json.xz"),
+        file_path.with_name(f"{file_path.name}.tartape"),
+        file_path.with_name(f"{file_path.stem}.tartape"),
     ]
     for target in targets:
-        if target.exists():
+        if target.exists() and target.is_file():
             target.unlink()
-            logger.debug(f"Snapshot eliminado físicamente: {target.name}")
+            logger.debug(f"Archivo eliminado físicamente: {target.name}")
 
 
 def is_valid_profile_name(profile_name: str) -> bool:

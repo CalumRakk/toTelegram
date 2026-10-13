@@ -2,6 +2,8 @@ from pathlib import Path
 from typing import List, Tuple
 
 import tartape
+from tartape.chunker import calculate_segments
+from tartape.schemas import EntryState
 
 from totelegram.packaging.schemas import (
     VirtualChunk,
@@ -88,13 +90,6 @@ class StatelessPartitioner:
         path: Path, max_chunk_size: int, exclude_patterns: List[str]
     ) -> Tuple[VirtualTapeCatalog, List[VirtualChunk], List[VirtualTapeMember]]:
         """Empaqueta virtualmente una carpeta usando tartape sin tocar la base de datos."""
-        from tartape.chunker import TarChunker
-
-        tar_chunker = TarChunker(chunk_size=max_chunk_size)
-        vols = list(tar_chunker.iter_volumes(path))
-        total_parts = len(vols)
-
-        # Usamos la primera cinta descubierta para armar los metadatos globales
         tape = tartape.Tape(path)
 
         catalog = VirtualTapeCatalog(
@@ -106,10 +101,12 @@ class StatelessPartitioner:
             exclude_patterns=str(exclude_patterns),
         )
 
-        chunks = []
-        members_map = {}
+        # 1. Calcular segmentos de volúmenes directamente sin crear FileObjects en disco
+        segments = list(calculate_segments(tape.total_size, max_chunk_size))
+        total_parts = len(segments)
 
-        for idx, (vol, manifest) in enumerate(vols):
+        chunks = []
+        for idx, (start, end) in enumerate(segments):
             filename, filename_short = build_payload_names_pure(
                 path=path,
                 source_type=SourceType.FOLDER,
@@ -117,50 +114,60 @@ class StatelessPartitioner:
                 idx=idx,
                 total=total_parts,
             )
-
             chunks.append(
                 VirtualChunk(
-                    sequence_index=manifest.volume_index,
-                    start_offset=manifest.start_offset,
-                    end_offset=manifest.end_offset,
-                    size=manifest.chunk_size,
+                    sequence_index=idx,
+                    start_offset=start,
+                    end_offset=end,
+                    size=end - start,
                     filename=filename,
                     filename_short=filename_short,
                 )
             )
 
-            # Mapeamos los archivos internos (miembros) de este fragmento de cinta
-            for entry in manifest.entries:
-                if entry.info.is_dir:
-                    continue
+        # 2. Transmisión streaming de coordenadas GPS en una sola pasada SQL O(1)
+        members = []
+        for track_gps in tape.iter_gps(tag_or_size=max_chunk_size):
+            if track_gps.is_dir:
+                continue
 
-                arc_path = entry.info.arc_path
+            checksum_val = track_gps.checksum
+            if checksum_val is None:
+                raise ValueError(
+                    f"File '{track_gps.arc_path}' has no recorded checksum in catalog"
+                )
 
-                # entry.info.checksum es la nueva propiedad agnóstica
-                checksum_val = entry.info.checksum or entry.info.md5sum
-                if checksum_val is None:
-                    raise ValueError(
-                        f"File '{arc_path}' has no recorded checksum in catalog"
+            total_frags = len(track_gps.fragments)
+            frags = []
+
+            for frag_idx, sl in enumerate(track_gps.fragments):
+                # Deducción determinista del estado según la posición del fragmento
+                if total_frags == 1:
+                    frag_state = EntryState.COMPLETE.value
+                elif frag_idx == 0:
+                    frag_state = EntryState.HEAD.value
+                elif frag_idx == total_frags - 1:
+                    frag_state = EntryState.TAIL.value
+                else:
+                    frag_state = EntryState.BODY.value
+
+                frags.append(
+                    VirtualFileFragment(
+                        vol_idx=sl.volume_index,
+                        volume_offset=sl.volume_offset,
+                        volume_length=sl.volume_length,
+                        source_offset=sl.source_offset,
+                        state=frag_state,
                     )
+                )
 
-                if arc_path not in members_map:
-                    members_map[arc_path] = VirtualTapeMember(
-                        relative_path=arc_path,
-                        size=entry.info.size,
-                        md5sum=checksum_val,
-                        fragments=[],
-                    )
+            members.append(
+                VirtualTapeMember(
+                    relative_path=track_gps.arc_path,
+                    size=track_gps.size,
+                    md5sum=checksum_val,
+                    fragments=frags,
+                )
+            )
 
-                # Si entry.slice existe, registramos el fragmento quirúrgico.
-                # (Si es None, significa que size == 0 o que en este volumen solo cayó header/padding)
-                if entry.slice is not None:
-                    fragment = VirtualFileFragment(
-                        vol_idx=manifest.volume_index,
-                        volume_offset=entry.slice.volume_offset,
-                        volume_length=entry.slice.volume_length,
-                        source_offset=entry.slice.source_offset,
-                        state=entry.state.value,
-                    )
-                    members_map[arc_path].fragments.append(fragment)
-
-        return catalog, chunks, list(members_map.values())
+        return catalog, chunks, members

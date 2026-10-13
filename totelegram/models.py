@@ -67,10 +67,10 @@ class BaseModel(peewee.Model):
 class TelegramChat(BaseModel):
     id = cast(int, peewee.BigIntegerField(primary_key=True))
     title = cast(str, peewee.CharField(null=True))
-    username = cast(Optional[str], peewee.CharField(null=True))
+    username = cast(str | None, peewee.CharField(null=True))
     type = cast(str, peewee.CharField())
     is_public = cast(bool, peewee.BooleanField(default=False))
-    last_verified = cast(Optional[datetime], peewee.DateTimeField(null=True))
+    last_verified = cast(datetime | None, peewee.DateTimeField(null=True))
 
     @staticmethod
     def get_or_create_from_chat(tg_chat: "TgChat") -> Tuple["TelegramChat", bool]:
@@ -78,7 +78,7 @@ class TelegramChat(BaseModel):
             "title": tg_chat.title,
             "username": tg_chat.username,
             "type": str(tg_chat.type.value),
-            "is_public": True if tg_chat.username else False,
+            "is_public": bool(tg_chat.username),
             "last_verified": datetime.now(timezone.utc),
         }
         try:
@@ -92,7 +92,7 @@ class TelegramChat(BaseModel):
         self.title = tg_chat.title
         self.username = tg_chat.username
         self.type = str(tg_chat.type.value)
-        self.is_public = True if tg_chat.username else False
+        self.is_public = bool(tg_chat.username)
         self.last_verified = datetime.now(timezone.utc)
         self.save(
             only=[
@@ -109,7 +109,7 @@ class TelegramChat(BaseModel):
 class TelegramUser(BaseModel):
     id = cast(int, peewee.BigIntegerField(primary_key=True))
     first_name = cast(str, peewee.CharField())
-    username = cast(Optional[str], peewee.CharField(null=True))
+    username = cast(str | None, peewee.CharField(null=True))
     is_premium = cast(bool, peewee.BooleanField(default=False))
     last_seen = peewee.DateTimeField(default=lambda: datetime.now(timezone.utc))
 
@@ -161,9 +161,7 @@ class Source(BaseModel):
     mimetype = cast(str, peewee.CharField())
     type = cast(SourceType, EnumField(SourceType, default=SourceType.FILE))  # type: ignore
 
-    tape_catalog = cast(
-        Optional[TapeCatalog], PydanticJSONField(TapeCatalog, null=True)
-    )
+    tape_catalog = cast(TapeCatalog | None, PydanticJSONField(TapeCatalog, null=True))
 
     @property
     def path(self) -> Path:
@@ -187,17 +185,14 @@ class Source(BaseModel):
         is_cached_integer = (cached_mtime % 1.0) == 0.0
         is_current_integer = (current_mtime % 1.0) == 0.0
 
-        if (is_cached_integer or is_current_integer) and diff <= 2.0:
-            return True
-
-        return False
+        return bool((is_cached_integer or is_current_integer) and diff <= 2.0)
 
     @staticmethod
     def get_or_create_from_filepath(
         path: Path,
-        on_hash_start: Optional[Callable[[str, int], None]] = None,
-        on_hash_progress: Optional[Callable[[int, int], None]] = None,
-        on_hash_complete: Optional[Callable[[str, str], None]] = None,
+        on_hash_start: Callable[[str, int], None] | None = None,
+        on_hash_progress: Callable[[int, int], None] | None = None,
+        on_hash_complete: Callable[[str, str], None] | None = None,
     ) -> "Source":
         stat = path.stat()
         current_size = stat.st_size
@@ -223,7 +218,7 @@ class Source(BaseModel):
             on_hash_complete(path.name, md5sum)
 
         # Comprobar si existe el MD5
-        source = cast(Optional[Source], Source.get_or_none(Source.md5sum == md5sum))
+        source = cast(Source | None, Source.get_or_none(Source.md5sum == md5sum))
         if source:
             source.update_if_needed(path)
             return source
@@ -411,7 +406,7 @@ class Job(BaseModel):
 
         if self.source.type == SourceType.FOLDER:
             # Ejecutar motor físico
-            catalog, chunks, members = StatelessPartitioner.partition_folder(
+            _, chunks, members = StatelessPartitioner.partition_folder(
                 path, self.config.tg_max_size, settings.exclude_files
             )
             # Guardar en base de datos local
@@ -452,10 +447,10 @@ class Job(BaseModel):
         virtual_members: List[VirtualTapeMember],
     ) -> List["Payload"]:
         """Guarda la estructura de volúmenes y el índice interno de la carpeta (TapeMembers)."""
-
         database = self._meta.database
 
         with db_transaction(database):
+            # 1. Inserción de piezas (Payloads)
             payloads_data = [
                 {
                     "job": self,
@@ -470,7 +465,7 @@ class Job(BaseModel):
             ]
             Payload.insert_many(payloads_data).execute()
 
-            # Recuperar mapeo id <-> index de los payloads recién guardados
+            # Mapeo rápido de sequence_index -> objeto Payload
             payload_map = {
                 p.sequence_index: p
                 for p in cast(
@@ -478,6 +473,7 @@ class Job(BaseModel):
                 )
             }
 
+            # 2. Inserción masiva de TapeMembers en lotes de 500
             member_inserts = [
                 {
                     "source": self.source,
@@ -488,18 +484,17 @@ class Job(BaseModel):
                 for vm in virtual_members
             ]
 
-            for batch in batched(member_inserts, 100):
+            for batch in batched(member_inserts, 500):
                 TapeMember.insert_many(batch).on_conflict_ignore().execute()
 
-            # Obtener mapeo de ruta -> id para asociar los fragmentos (GPS)
-            paths = [vm.relative_path for vm in virtual_members]
+            # 3. Recuperar mapeo (relative_path -> id) consultando por Source
+            # (Evita el límite de variables SQL de 'relative_path << paths')
             db_members = TapeMember.select(
                 TapeMember.id, TapeMember.relative_path
-            ).where(
-                (TapeMember.source == self.source) & (TapeMember.relative_path << paths)  # type: ignore
-            )
+            ).where(TapeMember.source == self.source)
             member_path_to_id = {m.relative_path: m.id for m in db_members}
 
+            # 4. Inserción masiva de fragmentos GPS en lotes de 500
             gps_inserts = []
             for vm in virtual_members:
                 member_id = member_path_to_id.get(vm.relative_path)
@@ -522,7 +517,7 @@ class Job(BaseModel):
                         }
                     )
 
-            for batch in batched(gps_inserts, 200):
+            for batch in batched(gps_inserts, 500):
                 TapeMemberGPS.insert_many(batch).execute()
 
         return cast(List[Payload], list(self.payloads.order_by(Payload.sequence_index)))
@@ -540,7 +535,7 @@ class Payload(BaseModel):
     job_id: int
 
     job = cast(Job, peewee.ForeignKeyField(Job, backref="payloads"))
-    md5sum = cast(Optional[str], peewee.CharField(null=True))
+    md5sum = cast(str | None, peewee.CharField(null=True))
 
     filename = cast(str, peewee.CharField())  # Nombre "Humano" (foto...png.01-10)
     filename_short = cast(str, peewee.CharField())  # Nombre "Técnico" (hash.png.01-10)
@@ -554,7 +549,7 @@ class Payload(BaseModel):
         return (
             RemotePayload.select()
             .where(
-                (RemotePayload.payload == self) & (RemotePayload.is_orphaned == False)  # noqa: E712
+                (RemotePayload.payload == self) & (RemotePayload.is_orphaned == False)
             )
             .exists()
         )
@@ -563,7 +558,7 @@ class Payload(BaseModel):
     def total_pending_for_job(job: "Job") -> int:
         """Cuenta las piezas que aún no tienen un RemotePayload válido."""
         valid_remotes = RemotePayload.select().where(
-            (RemotePayload.payload == Payload.id) & (RemotePayload.is_orphaned == False)  # noqa: E712
+            (RemotePayload.payload == Payload.id) & (RemotePayload.is_orphaned == False)
         )
 
         return (
@@ -586,7 +581,7 @@ class RemotePayload(BaseModel):
     )
     json_metadata = cast(dict, PortableJSONField())
 
-    last_verified_at = cast(Optional[datetime], peewee.DateTimeField(null=True))
+    last_verified_at = cast(datetime | None, peewee.DateTimeField(null=True))
     is_orphaned = cast(bool, peewee.BooleanField(default=False))
 
     def mark_orphaned(self):

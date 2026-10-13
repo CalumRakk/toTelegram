@@ -108,7 +108,7 @@ class JobPlanner:
         if tartape.exists(path) and not force:
             try:
                 tape = tartape.Tape(path)
-                tape.verify(raise_exception=True)
+                tape.verify(deep=False, raise_exception=True)
                 return Source.get_or_create_from_tape(tape)
             except (peewee.DoesNotExist, TarIntegrityError):
                 logger.debug(

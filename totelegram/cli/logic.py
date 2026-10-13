@@ -77,13 +77,16 @@ class InventoryEngine:
         """
         Comprueba: Patrones, Tamaño y (opcionalmente) Snapshot.
         """
+        # Ignorar snapshots de toTelegram y catalogos sidecar de TarTape
         if path.suffix == ".xz" and path.name.endswith(".json.xz"):
             return False
 
-        if check_snapshot and has_snapshot(path):
-            if not self.force:
-                report.log_skip(path, "snapshot")
-                return False
+        if path.suffix == ".tartape" or path.name.endswith(".tartape"):
+            return False
+
+        if check_snapshot and has_snapshot(path) and not self.force:
+            report.log_skip(path, "snapshot")
+            return False
 
         if is_excluded(path, self.patterns):
             report.log_skip(path, "exclusion")
@@ -105,20 +108,18 @@ class InventoryEngine:
             return False
 
         # Si la carpeta ya fue archivada como tal.
-        if has_snapshot(path):
-            if not self.force:
-                report.log_skip(path, "snapshot")
-                return False
+        if has_snapshot(path) and not self.force:
+            report.log_skip(path, "snapshot")
+            return False
 
         if next(path.iterdir(), None) is None:
             report.log_skip(path, "empty")
             return False
 
         tape = tartape.get_tape(path)
-        if tape is not None and not self.force:
-            if not tape.verify(deep=False):
-                report.log_skip(path, "integrity")
-                return False
+        if tape is not None and not self.force and not tape.verify(deep=False):
+            report.log_skip(path, "integrity")
+            return False
 
         return True
 
@@ -140,9 +141,8 @@ class InventoryEngine:
         """Filtra carpetas para la cinta."""
         report = ScanReport()
         for p in paths:
-            if p.is_dir():
-                if self._validate_container(p, report):
-                    report.found.append(p)
+            if p.is_dir() and self._validate_container(p, report):
+                report.found.append(p)
         return report
 
     def scan_backup_internal(self, folder: Path) -> ScanReport:

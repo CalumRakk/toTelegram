@@ -1,5 +1,12 @@
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
+from tartape.schemas import (
+    TarFileEndEvent,
+    TarFileStartEvent,
+    TarObserver,
+    TarTapeCompletedEvent,
+)
+
 from totelegram.concurrency import ConcurrencyError
 
 if TYPE_CHECKING:
@@ -24,6 +31,10 @@ class UploadObserver(Protocol):
 
     def on_job_start(self, job: "Job", total_payloads: int) -> None:
         """Llamado cuando un Job inicia su procesamiento."""
+        ...
+
+    def on_archive_file_start(self, arc_path: str, size: int) -> None:
+        """Llamado cuando TarTape comienza a empaquetar un archivo específico dentro de un volumen."""
         ...
 
     def on_payload_start(
@@ -87,6 +98,9 @@ class NullObserver:
     def on_payload_complete(self, payload: "Payload") -> None:
         pass
 
+    def on_archive_file_start(self, arc_path: str, size: int) -> None:
+        pass
+
     def on_pause_start(self, total_seconds: int, reason: str) -> None:
         pass
 
@@ -124,3 +138,22 @@ class ProgressMultiplexer:
             )
 
         self.observer.on_payload_progress(current, total)
+
+
+class TarUploadObserverBridge(TarObserver):
+    """Puente que traduce los eventos in-band de TarTape hacia el UploadObserver de toTelegram."""
+
+    def __init__(self, observer: UploadObserver):
+        self.observer = observer
+
+    def on_file_start(self, event: TarFileStartEvent) -> None:
+        self.observer.on_archive_file_start(
+            arc_path=event.entry.info.arc_path,
+            size=event.entry.info.size,
+        )
+
+    def on_file_end(self, event: TarFileEndEvent) -> None:
+        pass
+
+    def on_tape_completed(self, event: TarTapeCompletedEvent) -> None:
+        pass

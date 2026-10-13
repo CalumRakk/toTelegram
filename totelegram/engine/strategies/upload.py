@@ -59,6 +59,7 @@ class CooperativeUploadStrategy(JobStrategy):
                     payload=payload,
                     source_path=job.path,
                     max_filename_len=ctx.settings.max_filename_length,
+                    observer=ctx.observer,
                 ) as upload_stream:
                     stream_obj = ThrottledFile(
                         upload_stream.stream, speed_limit_bytes_per_s=limit_bytes

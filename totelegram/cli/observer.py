@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from rich.progress import (
     BarColumn,
@@ -27,12 +27,12 @@ class RichUploadObserver:
     """
 
     def __init__(self):
-        self._progress: Optional[Progress] = None
+        self._progress: Progress | None = None
         self._current_task_id = None
         self._pause_status = None
 
         # Controladores de la barra de Hashing
-        self._hash_progress: Optional[Progress] = None
+        self._hash_progress: Progress | None = None
         self._hash_task_id = None
 
     def on_hash_start(self, filename: str, total_bytes: int) -> None:
@@ -96,6 +96,7 @@ class RichUploadObserver:
                 SpinnerColumn(),
                 TextColumn("[bold cyan]{task.fields[label]}[/]"),
                 TextColumn("[white]{task.fields[filename]}[/]"),
+                TextColumn("[dim cyan]{task.fields[current_file]}[/]"),
                 BarColumn(bar_width=None),
                 "[progress.percentage]{task.percentage:>3.0f}%",
                 "•",
@@ -115,7 +116,19 @@ class RichUploadObserver:
             total=payload.size,
             filename=payload.filename,
             label=label,
+            current_file="",
         )
+
+    def on_archive_file_start(self, arc_path: str, size: int) -> None:
+        """Actualiza el archivo interno que está siendo empaquetado y transmitido."""
+        if self._progress is not None and self._current_task_id is not None:
+            display_name = (
+                f"[{arc_path}]" if len(arc_path) <= 32 else f"[...{arc_path[-28:]}]"
+            )
+            self._progress.update(
+                self._current_task_id,
+                current_file=display_name,
+            )
 
     def on_payload_progress(self, current_bytes: int, total_bytes: int) -> None:
         """Actualiza la barra con la transferencia continua de bytes."""
@@ -179,8 +192,8 @@ class RichDownloadObserver:
     """
 
     def __init__(self):
-        self._dl_progress: Optional[Progress] = None
-        self._extract_progress: Optional[Progress] = None
+        self._dl_progress: Progress | None = None
+        self._extract_progress: Progress | None = None
         self._dl_task_id = None
         self._extract_task_id = None
 

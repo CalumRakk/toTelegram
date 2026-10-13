@@ -2,10 +2,13 @@ import io
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Tuple
+from typing import Self, Tuple
 
 import tartape
 
+from totelegram.engine.events import TarUploadObserverBridge, UploadObserver
+
+# from tartape.stream import FileSliceStream
 from totelegram.models import Payload
 from totelegram.schemas import SourceType
 from totelegram.stream import FileVolume
@@ -27,12 +30,22 @@ class UploadStream:
 
     @property
     def md5sum(self) -> str:
-        """Retorna el hash calculado durante la lectura o manualmente."""
-        return getattr(self.stream, "checksum", None) or getattr(
-            self.stream, "md5sum", ""
+        """Retorna el hash calculado en vuelo durante la lectura, o computado como fallback."""
+        val = getattr(self.stream, "checksum", None) or getattr(
+            self.stream, "md5sum", None
         )
+        # Salvaguarda: Si Pyrogram hizo un seek no lineal (reintento), computar bajo demanda
+        if not val and hasattr(self.stream, "compute_checksum"):
+            try:
+                # FIXME: io.BUfferedIOBase no implementa compute_checksum
+                val = self.stream.compute_checksum(algorithm="md5")  # type: ignore
+            except Exception as e:
+                logger.warning(
+                    f"No se pudo computar checksum de respaldo para {self.filename}: {e}"
+                )
+        return val or ""
 
-    def __enter__(self) -> "UploadStream":
+    def __enter__(self) -> Self:
         if hasattr(self.stream, "__enter__"):
             self.stream.__enter__()
         return self
@@ -46,7 +59,7 @@ class PayloadStreamFactory:
     """
     Fábrica transparente de flujos de datos.
     Traduce una pieza lógica (Payload en DB) a un flujo binario físico listo para subir,
-    sin que el resto del sistema deba saber si proviene de un archivo simple o de un TAR.
+    utilizando el motor de streaming nativo de TarTape 3.0.
     """
 
     @staticmethod
@@ -65,10 +78,8 @@ class PayloadStreamFactory:
         payload: Payload,
         source_path: Path,
         max_filename_len: int = 55,
+        observer: UploadObserver | None = None,
     ) -> UploadStream:
-        """
-        Instancia y retorna el UploadStream apropiado según el tipo de recurso.
-        """
         filename, caption = cls.resolve_naming(payload, max_filename_len)
         source_type = payload.job.source.type
 
@@ -78,18 +89,20 @@ class PayloadStreamFactory:
 
         if source_type == SourceType.FOLDER:
             tape = tartape.Tape(source_path)
+            # Conectamos el puente de telemetría si se proporcionó un observer
+            tar_observer = TarUploadObserverBridge(observer) if observer else None
+
             raw_volume = tape.get_volume(
-                payload.filename,
-                payload.sequence_index,
-                payload.start_offset,
-                payload.end_offset,
+                index=payload.sequence_index,
+                size=payload.job.config.tg_max_size,
+                observer=tar_observer,
             )
         else:
             raw_volume = FileVolume(
-                source_path,
-                payload.start_offset,
-                payload.end_offset,
-                payload.filename,
+                path=source_path,
+                start_offset=payload.start_offset,
+                end_offset=payload.end_offset,
+                name=payload.filename,
             )
 
         return UploadStream(
