@@ -133,7 +133,7 @@ class DownloadEngine:
 
         target_file.parent.mkdir(parents=True, exist_ok=True)
 
-        # 1. Map snapshot fragments to TarTape FileSlice instances
+        # Asigna fragmentos a instancias de TarTape FileSlice
         tartape_slices = [
             FileSlice(
                 volume_index=frag.vol_idx,
@@ -144,7 +144,7 @@ class DownloadEngine:
             for frag in member.fragments
         ]
 
-        # 2. Identify and download ONLY the parts needed for this specific file
+        # Identifica y descarga ÚNICAMENTE las partes necesarias para este archivo en concreto.
         needed_vol_indices = sorted({s.volume_index for s in tartape_slices})
         needed_parts_map = {
             p.sequence: p for p in manifest.parts if p.sequence in needed_vol_indices
@@ -156,31 +156,38 @@ class DownloadEngine:
         downloaded_vol_paths: dict[int, Path] = {}
 
         logger.info(
-            f"Surgically extracting '{relative_path}' ({member.size} bytes). "
-            f"Requires {len(needed_vol_indices)} of {total_parts} Telegram volume parts."
+            f"Extrayendo quirúrgicamente '{relative_path}' ({member.size} bytes). "
+            f"Requiere {len(needed_vol_indices)} de {total_parts} volúmenes de Telegram."
         )
 
-        try:
-            for vol_idx in needed_vol_indices:
-                part_meta = needed_parts_map.get(vol_idx)
-                if not part_meta:
-                    raise ValueError(
-                        f"Missing metadata for volume part {vol_idx} in snapshot."
-                    )
+        def lazy_volume_provider(vol_idx: int) -> Path:
+            """Descarga de Telegram la parte de volumen solicitada bajo demanda (JIT)."""
+            nonlocal total_bytes_transferred
 
-                vol_path, bytes_dl = self._download_part(
-                    part=part_meta,
-                    staging_dir=staging_dir,
-                    total_parts=total_parts,
+            if vol_idx in downloaded_vol_paths:
+                return downloaded_vol_paths[vol_idx]
+
+            part_meta = needed_parts_map.get(vol_idx)
+            if not part_meta:
+                raise ValueError(
+                    f"Faltan metadatos para la parte de volumen {vol_idx} en el snapshot."
                 )
-                downloaded_vol_paths[vol_idx] = vol_path
-                total_bytes_transferred += bytes_dl
 
-            # 3. Delegate byte-level reconstruction and in-flight hashing to TarTape
+            vol_path, bytes_dl = self._download_part(
+                part=part_meta,
+                staging_dir=staging_dir,
+                total_parts=total_parts,
+            )
+            downloaded_vol_paths[vol_idx] = vol_path
+            total_bytes_transferred += bytes_dl
+            return vol_path
+
+        try:
+            # Delega la reconstrucción y hashing en vuelo a TarTape pasando el Callable
             reassemble_file(
                 output_path=target_file,
                 slices=tartape_slices,
-                volumes=downloaded_vol_paths,
+                volumes=lazy_volume_provider,
                 expected_size=member.size,
                 expected_checksum=member.md5sum,
                 checksum_algorithm="md5",
@@ -189,7 +196,9 @@ class DownloadEngine:
 
         except (VolumeChecksumMismatchError, TarIntegrityError) as e:
             target_file.unlink(missing_ok=True)
-            raise DownloadIntegrityError(f"Integrity check failed: {e}") from e
+            raise DownloadIntegrityError(
+                f"Fallo en verificación de integridad: {e}"
+            ) from e
         finally:
             if not keep_cache:
                 for path in downloaded_vol_paths.values():
@@ -358,30 +367,20 @@ class DownloadEngine:
         force: bool,
         keep_cache: bool,
     ) -> DownloadReport:
-        """Restores a multi-volume archived folder using tartape.restore.unpack_volumes."""
+        """Restaura una carpeta archivada extrayendo los volúmenes de forma secuencial en cascada."""
         target_folder = output_dir / manifest.source.filename
 
         if target_folder.exists() and not force:
             raise FileExistsError(
-                f"Folder '{target_folder.name}' already exists at destination. Use --force to overwrite."
+                f"La carpeta '{target_folder.name}' ya existe en el destino. Usa --force para sobrescribir."
             )
 
         staging_dir = self._get_staging_dir(output_dir, manifest.source.md5sum)
         sorted_parts = sorted(manifest.parts, key=lambda p: p.sequence)
         total_parts = len(sorted_parts)
-
         total_bytes_transferred = 0
-        volume_paths: List[Path] = []
 
-        # 1. Download or reuse cached volume files
-        for part in sorted_parts:
-            vol_file, bytes_dl = self._download_part(
-                part, staging_dir, total_parts=total_parts
-            )
-            volume_paths.append(vol_file)
-            total_bytes_transferred += bytes_dl
-
-        # 2. Prepare observer and unpacking callbacks
+        # Preparar observador y callbacks de extracción
         inventory = manifest.source.inventory or []
         total_expected_files = len(inventory) if inventory else 0
         self.observer.on_extraction_start(total_expected_files)
@@ -398,31 +397,62 @@ class DownloadEngine:
                 total_files=total_expected_files or extracted_files_count,
             )
 
-        # 3. Stream sequential volumes through TarTape's safe extractor
-        open_streams = [open(p, "rb") for p in volume_paths]  # noqa: SIM115
+        # Generador perezoso que descarga y abre cada volumen secuencialmente
+        def volume_stream_generator():
+            nonlocal total_bytes_transferred
+            previous_vol_file: Path | None = None
+
+            for part in sorted_parts:
+                # Si no se desea conservar la caché, liberar el volumen anterior antes de descargar el siguiente
+                if not keep_cache and previous_vol_file and previous_vol_file.exists():
+                    try:
+                        previous_vol_file.unlink()
+                    except Exception:
+                        pass
+
+                vol_file, bytes_dl = self._download_part(
+                    part, staging_dir, total_parts=total_parts
+                )
+                total_bytes_transferred += bytes_dl
+                previous_vol_file = vol_file
+
+                # Abre el archivo para lectura; ChainedVolumeStream se encargará de cerrarlo al agotarlo
+                f = open(vol_file, "rb")  # noqa: SIM115
+                yield f
+
+            # Limpieza del último archivo al finalizar el generador
+            if not keep_cache and previous_vol_file and previous_vol_file.exists():
+                try:
+                    previous_vol_file.unlink()
+                except Exception:
+                    pass
+
         try:
             unpack_volumes(
-                volume_streams=open_streams,
+                volume_streams=volume_stream_generator(),
                 dest_dir=output_dir,
                 on_file_extracted=on_extracted,
                 overwrite=force,
             )
         except PathConstraintError as e:
             raise DownloadIntegrityError(
-                f"Security violation extracting TAR: {e}"
+                f"Violación de seguridad al extraer TAR: {e}"
             ) from e
         except Exception as e:
-            raise DownloadIntegrityError(f"Error unpacking TAR archive: {e}") from e
+            raise DownloadIntegrityError(
+                f"Error al desempaquetar archivo TAR: {e}"
+            ) from e
         finally:
-            for s in open_streams:
-                try:
-                    s.close()
-                except Exception:  # noqa: S110
-                    pass
+            if (
+                not keep_cache
+                and staging_dir.exists()
+                and not any(staging_dir.iterdir())
+            ):
+                staging_dir.rmdir()
 
         self.observer.on_extraction_complete(extracted_files_count)
 
-        # 4. Optional individual file MD5 check against snapshot inventory
+        # Validación opcional de hashes de archivos extraídos contra el inventario
         if inventory:
             for member in inventory:
                 if not member.md5sum:
@@ -432,16 +462,9 @@ class DownloadEngine:
                     computed_md5 = self._compute_file_md5(extracted_file)
                     if computed_md5 != member.md5sum:
                         raise DownloadIntegrityError(
-                            f"Checksum mismatch for extracted file '{member.relative_path}'. "
-                            f"Expected: {member.md5sum}, Computed: {computed_md5}"
+                            f"Discrepancia de checksum para archivo extraído '{member.relative_path}'. "
+                            f"Esperado: {member.md5sum}, Calculado: {computed_md5}"
                         )
-
-        # 5. Cleanup cache
-        if not keep_cache:
-            for p in volume_paths:
-                p.unlink(missing_ok=True)
-            if staging_dir.exists() and not any(staging_dir.iterdir()):
-                staging_dir.rmdir()
 
         return DownloadReport(
             source_filename=manifest.source.filename,
@@ -449,7 +472,7 @@ class DownloadEngine:
             total_bytes_downloaded=total_bytes_transferred,
             files_extracted=extracted_files_count,
             is_success=True,
-            message="Folder and contents restored with 100% verified integrity.",
+            message="Carpeta y contenidos restaurados con integridad 100% verificada.",
         )
 
     @staticmethod

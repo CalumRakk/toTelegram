@@ -14,14 +14,6 @@ from totelegram.packaging.schemas import (
 from totelegram.schemas import SourceType
 
 
-def chunk_ranges(file_size: int, chunk_size: int) -> List[Tuple[int, int]]:
-    """Genera coordenadas de lectura (inicio, fin) para la división del archivo."""
-    return [
-        (start, min(start + chunk_size, file_size))
-        for start in range(0, file_size, chunk_size)
-    ]
-
-
 def build_payload_names_pure(
     path: Path,
     source_type: SourceType,
@@ -60,11 +52,16 @@ class StatelessPartitioner:
     ) -> List[VirtualChunk]:
         """Calcula la partición lógica para un archivo individual."""
         file_size = path.stat().st_size
-        ranges = chunk_ranges(file_size=file_size, chunk_size=max_chunk_size)
-        total_parts = len(ranges)
+
+        segments = (
+            list(calculate_segments(file_size, max_chunk_size))
+            if file_size > 0
+            else [(0, 0)]
+        )
+        total_parts = len(segments)
 
         chunks = []
-        for idx, (start, end) in enumerate(ranges):
+        for idx, (start, end) in enumerate(segments):
             filename, filename_short = build_payload_names_pure(
                 path=path,
                 source_type=SourceType.FILE,

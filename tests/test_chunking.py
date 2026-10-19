@@ -2,10 +2,11 @@ import unittest
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
+from tartape.chunker import calculate_segments
+
 from totelegram.packaging.partitioner import (
     StatelessPartitioner,
     build_payload_names_pure,
-    chunk_ranges,
 )
 from totelegram.schemas import SourceType
 
@@ -15,7 +16,7 @@ class TestChunkingMath(unittest.TestCase):
         """Caso: 10MB archivo, 5MB chunk -> 2 partes exactas"""
         file_size = 10 * 1024 * 1024
         chunk_size = 5 * 1024 * 1024
-        ranges = chunk_ranges(file_size, chunk_size)
+        ranges = list(calculate_segments(file_size, chunk_size))
 
         self.assertEqual(len(ranges), 2)
         self.assertEqual(ranges[0], (0, 5242880))
@@ -23,13 +24,13 @@ class TestChunkingMath(unittest.TestCase):
 
     def test_chunk_ranges_remainder(self):
         """Caso: 10 bytes archivo, 3 bytes chunk -> 4 partes (3, 3, 3, 1)"""
-        ranges = chunk_ranges(10, 3)
+        ranges = list(calculate_segments(10, 3))
         expected = [(0, 3), (3, 6), (6, 9), (9, 10)]
         self.assertEqual(ranges, expected)
 
     def test_chunk_ranges_file_smaller_than_chunk(self):
         """Archivo menor que el límite -> 1 sola parte."""
-        ranges = chunk_ranges(file_size=500, chunk_size=1000)
+        ranges = list(calculate_segments(total_size=500, chunk_size=1000))
         self.assertEqual(ranges, [(0, 500)])
 
     # --- PRUEBAS DE NOMBRADO PURO (build_payload_names_pure) ---
@@ -58,7 +59,6 @@ class TestChunkingMath(unittest.TestCase):
         self.assertEqual(full, "video.mp4.01-15")
         self.assertEqual(short, "hash_video_abc.mp4.01-15")
 
-        # Probar la última parte
         full_last, short_last = build_payload_names_pure(
             path=Path("video.mp4"),
             source_type=SourceType.FILE,
@@ -95,13 +95,11 @@ class TestChunkingMath(unittest.TestCase):
             )
 
             self.assertEqual(len(chunks), 3)
-            # Chunk 0
             self.assertEqual(chunks[0].sequence_index, 0)
             self.assertEqual(chunks[0].start_offset, 0)
             self.assertEqual(chunks[0].end_offset, 100)
             self.assertEqual(chunks[0].size, 100)
 
-            # Chunk 2 (Resto de 50 bytes)
             self.assertEqual(chunks[2].sequence_index, 2)
             self.assertEqual(chunks[2].start_offset, 200)
             self.assertEqual(chunks[2].end_offset, 250)

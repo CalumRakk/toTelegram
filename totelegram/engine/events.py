@@ -1,5 +1,6 @@
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
+from tartape.exceptions import TarIntegrityError
 from tartape.schemas import (
     TarFileEndEvent,
     TarFileStartEvent,
@@ -28,6 +29,7 @@ class UploadObserver(Protocol):
 
     def on_hash_complete(self, filename: str, md5sum: str) -> None:
         """Llamado cuando el hash MD5 ha terminado de calcularse."""
+        ...
 
     def on_job_start(self, job: "Job", total_payloads: int) -> None:
         """Llamado cuando un Job inicia su procesamiento."""
@@ -35,6 +37,12 @@ class UploadObserver(Protocol):
 
     def on_archive_file_start(self, arc_path: str, size: int) -> None:
         """Llamado cuando TarTape comienza a empaquetar un archivo específico dentro de un volumen."""
+        ...
+
+    def on_archive_file_end(
+        self, arc_path: str, size: int, checksum: str | None
+    ) -> None:
+        """Llamado cuando TarTape finaliza la lectura de un archivo dentro de un volumen."""
         ...
 
     def on_payload_start(
@@ -69,7 +77,6 @@ class UploadObserver(Protocol):
 
     def on_job_complete(self, job: "Job", snapshot_created: bool) -> None:
         """Llamado cuando el Job finaliza completamente."""
-        ...
 
 
 class NullObserver:
@@ -87,6 +94,14 @@ class NullObserver:
     def on_job_start(self, job: "Job", total_payloads: int) -> None:
         pass
 
+    def on_archive_file_start(self, arc_path: str, size: int) -> None:
+        pass
+
+    def on_archive_file_end(
+        self, arc_path: str, size: int, checksum: str | None
+    ) -> None:
+        pass
+
     def on_payload_start(
         self, payload: "Payload", current_part: int, total_parts: int
     ) -> None:
@@ -96,9 +111,6 @@ class NullObserver:
         pass
 
     def on_payload_complete(self, payload: "Payload") -> None:
-        pass
-
-    def on_archive_file_start(self, arc_path: str, size: int) -> None:
         pass
 
     def on_pause_start(self, total_seconds: int, reason: str) -> None:
@@ -118,23 +130,17 @@ class NullObserver:
 
 
 class ProgressMultiplexer:
-    """
-    Multiplexor para Pyrogram:
-    Recibe (current, total) desde send_document() y despacha simultáneamente:
-      1. El latido al LeaseHeartbeat (renovación de lease en DB con throttling).
-      2. La notificación de bytes al UploadObserver (cálculo de velocidad y dibujo en UI).
-    """
+    """Multiplexes Pyrogram upload progress to lease heartbeats and UI observers."""
 
     def __init__(self, heartbeat: "LeaseHeartbeat", observer: UploadObserver):
         self.heartbeat = heartbeat
         self.observer = observer
 
     def __call__(self, current: int, total: int, *args, **kwargs) -> None:
-        # Si falló la renovación del lease en PostgreSQL, abortamos la subida
         success = self.heartbeat.pulse(current, total, *args, **kwargs)
         if not success:
             raise ConcurrencyError(
-                "Conexión con la base de datos perdida durante la transferencia. Abortando."
+                "Database connection lost during transfer. Aborting upload."
             )
 
         self.observer.on_payload_progress(current, total)
@@ -153,7 +159,24 @@ class TarUploadObserverBridge(TarObserver):
         )
 
     def on_file_end(self, event: TarFileEndEvent) -> None:
-        pass
+        # Validación Fail-Early de integridad en vuelo
+        calculated = event.metadata.checksum
+        expected = event.entry.info.checksum
+
+        # TODO: la logica de esta comprobacion cuesta seguirla.
+        if (
+            event.metadata.is_complete and expected and calculated
+        ) and calculated.lower() != expected.lower():
+            raise TarIntegrityError(
+                f"Discrepancia de integridad en vuelo para '{event.entry.info.arc_path}': "
+                f"calculado {calculated}, esperado {expected}."
+            )
+
+        self.observer.on_archive_file_end(
+            arc_path=event.entry.info.arc_path,
+            size=event.entry.info.size,
+            checksum=calculated,
+        )
 
     def on_tape_completed(self, event: TarTapeCompletedEvent) -> None:
         pass

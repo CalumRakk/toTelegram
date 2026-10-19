@@ -3,7 +3,7 @@ import re
 import time
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, List, Literal, Optional, Union
+from typing import Any, List, Literal
 
 import typer
 from rich.columns import Columns
@@ -15,6 +15,7 @@ from rich.table import Table
 from rich.text import Text
 from rich.theme import Theme
 from rich.tree import Tree
+from tartape.units import format_size
 
 from totelegram.database import (
     DatabaseSession,
@@ -35,7 +36,7 @@ from totelegram.schemas import (
 )
 from totelegram.telegram.types import ChatMatch
 
-Spacing = Optional[Literal["top", "bottom", "block"]]
+Spacing = Literal["top", "bottom", "block"] | None
 
 custom_theme = Theme(
     {
@@ -51,15 +52,6 @@ console = Console(theme=custom_theme, force_terminal=True, legacy_windows=True)
 ui_logger = logging.getLogger("totelegram.ui")
 
 
-def format_size(size_bytes: int) -> str:
-    """Helper para formatear bytes a unidades legibles."""
-    for unit in ["B", "KB", "MB", "GB", "TB"]:
-        if abs(size_bytes) < 1024.0:
-            return f"{size_bytes:.1f} {unit}"
-        size_bytes /= 1024.0  # type: ignore
-    return f"{size_bytes:.1f} PB"
-
-
 def strip_markup(text: Any) -> str:
     """Elimina las etiquetas de color [bold], [red], etc. para el archivo de log."""
     try:
@@ -71,7 +63,7 @@ def strip_markup(text: Any) -> str:
 
 def log_table(
     table: Table,
-    title: Optional[str] = None,
+    title: str | None = None,
     logger: logging.Logger = ui_logger,
 ) -> None:
     """Vuelca una tabla de Rich en texto plano estructurado al logger."""
@@ -220,7 +212,7 @@ class UI:
     @staticmethod
     def tip(
         message: str,
-        commands: Optional[Union[List[str], str]] = None,
+        commands: List[str] | str | None = None,
         spacing: Spacing = None,
         **kwargs,
     ):
@@ -238,8 +230,8 @@ class UI:
     @staticmethod
     def educational_tip(
         message: str,
-        title: Optional[str] = None,
-        commands: Optional[Union[List[str], str]] = None,
+        title: str | None = None,
+        commands: List[str] | str | None = None,
         spacing: Spacing = None,
         border_style: str = "cyan",
     ):
@@ -316,7 +308,7 @@ class DisplayUpload:
         cls,
         scan_report: ScanReport,
         item_type: Literal["archivo", "carpeta"] = "archivo",
-        force_verbose: Optional[bool] = None,
+        force_verbose: bool | None = None,
         skip_title: bool = False,
     ) -> None:
         """Informa al usuario sobre los ítems omitidos en el inventario."""
@@ -478,7 +470,7 @@ class DisplayConfig:
     def _mark_sensitive(cls, value: int | str) -> str:
         """Ofusca un valor de tipo int o str."""
         if not isinstance(value, (str, int)):
-            raise ValueError(
+            raise TypeError(
                 "mark_sensitive solo admite valores de tipo str o int para enmascarar."
             )
 
@@ -538,14 +530,7 @@ class DisplayConfig:
                     f"[grey0]{display_val}[/]",
                     f"[grey0]{info.description}[/]",
                 )
-            elif is_debug:
-                table.add_row(
-                    field_name.lower(),
-                    escape(info.type_annotation),
-                    f"[{value_style}]{display_val}[/]",
-                    info.description,
-                )
-            elif info.level == AccessLevel.EDITABLE:
+            elif is_debug or info.level == AccessLevel.EDITABLE:
                 table.add_row(
                     field_name.lower(),
                     escape(info.type_annotation),
@@ -587,7 +572,7 @@ class DisplayProfile:
     def render_profiles_table(
         cls,
         manager: SettingsManager,
-        active: Optional[str],
+        active: str | None,
         profiles: List[Profile],
         quiet: bool = False,
     ):
@@ -749,7 +734,7 @@ class DisplayGeneric:
         log_table(table, title)
 
     @staticmethod
-    def warn_report_access_not_found(chat_id: Union[int, str]):
+    def warn_report_access_not_found(chat_id: int | str):
         UI.warn(f"El {chat_id=} no fue encontrado.")
         UI.info("Utiliza [bold]config set chat_id <ID>[/] para configurarlo.")
         UI.info("Si no sabes el ID, usa [bold]totelegram config search[/].")
@@ -952,7 +937,7 @@ class DisplaySnapshotPlan:
             )
 
     @classmethod
-    def show_alerts(cls, plan: ImportPlan, sample_path: Optional[str] = None) -> None:
+    def show_alerts(cls, plan: ImportPlan, sample_path: str | None = None) -> None:
         """Muestra advertencias para upgrades pendientes y archivos corruptos."""
         if not plan.needs_upgrade_items and not plan.corrupted_items:
             return
