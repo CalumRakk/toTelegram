@@ -5,8 +5,9 @@ import threading
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from itertools import batched
 from pathlib import Path
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, List
 
 import peewee
 from playhouse.migrate import PostgresqlMigrator, SqliteMigrator, migrate
@@ -28,7 +29,22 @@ def _heal_legacy_tapemembergps_data(db: peewee.Database):
     Convierte las coordenadas antiguas del contenedor TAR a coordenadas
     quirúrgicas puras (source_offset, volume_offset, volume_length).
     """
-    from totelegram.models import Payload, TapeMember, TapeMemberGPS
+    from totelegram.models import Payload, TapeMember
+
+    # Definición local temporal solo si se requiere migrar una BD antigua v4
+    class LegacyTapeMemberGPS(peewee.Model):
+        id = peewee.AutoField()
+        member = peewee.ForeignKeyField(TapeMember, backref="fragments")
+        payload = peewee.ForeignKeyField(Payload)
+        offset_in_volume = peewee.BigIntegerField()
+        bytes_in_volume = peewee.BigIntegerField()
+        source_offset = peewee.BigIntegerField(default=0)
+
+        class Meta:
+            database = db
+            table_name = "tapemembergps"
+
+    TapeMemberGPS = LegacyTapeMemberGPS
 
     logger.info(
         "Iniciando sanación de offsets en registros históricos de 'tapemembergps'..."
@@ -134,7 +150,7 @@ class DatabaseInspectionReport:
     current_version: int
     target_version: int
     engine_name: str
-    details: Optional[str] = None
+    details: str | None = None
 
     @property
     def is_operational(self) -> bool:
@@ -364,6 +380,68 @@ def _step_v5_to_v6(db: peewee.Database):
         )
 
 
+def _step_v6_to_v7(db: peewee.Database):
+    """
+    Paso v6 -> v7: Backfill de start_offset en tapemember y eliminación de tapemembergps.
+    """
+    migrator = _get_migrator(db)
+    existing_tables = {t.lower() for t in db.get_tables()}
+
+    # 1. Backfill seguro antes de borrar la tabla
+    if "tapemembergps" in existing_tables and "tapemember" in existing_tables:
+        logger.info(
+            "Migración v6->v7: Verificando y sanando start_offset en 'tapemember'..."
+        )
+        try:
+            # Obtenemos el start_offset real combinando payload.start_offset y gps.offset_in_volume
+            # para el fragmento inicial de cada archivo (source_offset == 0)
+            cursor = db.execute_sql(
+                """
+                SELECT gps.member_id, (p.start_offset + gps.offset_in_volume - 512) AS calculated_offset
+                FROM tapemembergps gps
+                JOIN payload p ON gps.payload_id = p.id
+                WHERE gps.source_offset = 0;
+                """
+            )
+            rows = cursor.fetchall()
+
+            updates = []
+            for member_id, calculated_offset in rows:
+                if calculated_offset > 0:
+                    updates.append((calculated_offset, member_id))
+
+            if updates:
+                # Actualizar los registros que tengan start_offset en 0
+                for batch in batched(updates, 200):
+                    # Usamos SQL directo para máxima velocidad en la migración
+                    for calc_offset, m_id in batch:
+                        db.execute_sql(
+                            "UPDATE tapemember SET start_offset = %s WHERE id = %s AND start_offset = 0;"
+                            if not isinstance(db, peewee.SqliteDatabase)
+                            else "UPDATE tapemember SET start_offset = ? WHERE id = ? AND start_offset = 0;",
+                            (calc_offset, m_id),
+                        )
+                logger.info(
+                    f"Backfill v6->v7: {len(updates)} miembros verificados/actualizados."
+                )
+        except Exception as e:
+            logger.warning(f"Aviso durante el backfill de start_offset en v6->v7: {e}")
+
+    # 2. Eliminación física de tapemembergps
+    if "tapemembergps" in existing_tables:
+        logger.info("Migración v6->v7: Eliminando tabla 'tapemembergps'...")
+        try:
+            migrate(migrator.drop_table("tapemembergps"))
+        except Exception:
+            # Fallback universal si el migrator no soporta drop_table directamente
+            drop_sql = (
+                "DROP TABLE IF EXISTS tapemembergps;"
+                if isinstance(db, peewee.SqliteDatabase)
+                else "DROP TABLE IF EXISTS tapemembergps CASCADE;"
+            )
+            db.execute_sql(drop_sql)
+
+
 # Registrar en MIGRATION_REGISTRY:
 MIGRATION_REGISTRY: Dict[int, Callable[[peewee.Database], None]] = {
     0: _step_v0_to_v1,
@@ -372,6 +450,7 @@ MIGRATION_REGISTRY: Dict[int, Callable[[peewee.Database], None]] = {
     3: _step_v3_to_v4,
     4: _step_v4_to_v5,
     5: _step_v5_to_v6,
+    6: _step_v6_to_v7,
 }
 
 
@@ -406,7 +485,7 @@ def _backup_sqlite_db_if_needed(db: peewee.SqliteDatabase, current_version: int)
         try:
             path = Path(db_file_path)
             if path.exists():
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                timestamp = datetime.now(tz=timezone.utc).strftime("%Y%m%d_%H%M%S")
                 backup_name = f"{path.name}.v{current_version}.{timestamp}.bak"
                 backup_path = path.parent / backup_name
                 shutil.copy(path, backup_path)
@@ -425,7 +504,6 @@ def _initialize_fresh_database(db: peewee.Database, target_version: int):
         RemotePayload,
         Source,
         TapeMember,
-        TapeMemberGPS,
         TelegramChat,
         TelegramUser,
     )
@@ -442,7 +520,6 @@ def _initialize_fresh_database(db: peewee.Database, target_version: int):
         TelegramChat,
         TelegramUser,
         TapeMember,
-        TapeMemberGPS,
         Claim,
     ]
 

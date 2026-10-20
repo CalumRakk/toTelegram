@@ -3,10 +3,9 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable, List, Optional, Tuple, cast
+from typing import Callable, List, Tuple, cast
 
 import peewee
-from tartape.schemas import EntryState
 
 from totelegram import __VERSION__
 from totelegram.common.helpers import batched
@@ -17,7 +16,6 @@ from totelegram.models import (
     RemotePayload,
     Source,
     TapeMember,
-    TapeMemberGPS,
     TelegramChat,
     TelegramUser,
 )
@@ -113,9 +111,9 @@ class DbMutations:
 class SnapshotInspection:
     path: Path
     status: InspectionStatus
-    manifest: Optional[UploadManifest] = None
-    detected_version: Optional[str] = None
-    error_detail: Optional[str] = None
+    manifest: UploadManifest | None = None
+    detected_version: str | None = None
+    error_detail: str | None = None
 
 
 @dataclass
@@ -129,8 +127,8 @@ class PlanItem:
     total_parts: int
     mutations: DbMutations
     parts_diff: List[PartDiff] = field(default_factory=list)
-    existing_source: Optional[Source] = None
-    existing_job: Optional[Job] = None
+    existing_source: Source | None = None
+    existing_job: Job | None = None
     reason: str = ""
 
     @property
@@ -244,7 +242,7 @@ class SnapshotInspector:
                         sub.name.lower().endswith(ext) for ext in valid_exts
                     ):
                         candidates.append(sub)
-        return sorted(list(set(candidates)))
+        return sorted(set(candidates))
 
 
 class SnapshotImportPlanner:
@@ -278,7 +276,7 @@ class SnapshotImportPlanner:
             existing_source = Source.get_or_none(Source.md5sum == md5)
             source_exists = existing_source is not None or md5 in planned_sources_md5
 
-            existing_job: Optional[Job] = None
+            existing_job: Job | None = None
             if existing_source:
                 existing_job = Job.get_or_none(
                     (Job.source == existing_source)
@@ -371,7 +369,7 @@ class SnapshotImportPlanner:
                 for r in RemotePayload.select(RemotePayload, Payload)
                 .join(Payload)
                 .where(
-                    (Payload.job == existing_job) & (RemotePayload.is_orphaned == False)  # noqa: E712
+                    (Payload.job == existing_job) & (RemotePayload.is_orphaned == False)
                 )
             }
 
@@ -383,7 +381,7 @@ class SnapshotImportPlanner:
                 seq = part.sequence
                 db_payload = existing_payloads.get(seq)
 
-                if db_payload is not None:
+                if db_payload is not None:  # noqa: SIM102
                     if (
                         db_payload.size != part.part_size
                         or db_payload.start_offset != part.start_offset
@@ -507,8 +505,8 @@ class SnapshotImporter:
         cls,
         plan: ImportPlan,
         db: peewee.Database,
-        owner: Optional[TelegramUser] = None,
-        on_progress: Optional[Callable[[int, int, str], None]] = None,
+        owner: TelegramUser | None = None,
+        on_progress: Callable[[int, int, str], None] | None = None,
     ) -> Tuple[int, List[Tuple[str, str]]]:
         actionable = plan.actionable_items
         succeeded = 0
@@ -520,7 +518,7 @@ class SnapshotImporter:
                     cls._apply_item(item, owner)
                 succeeded += 1
             except Exception as e:
-                logger.exception(f"Error importando {item.inspection.path.name}: {e}")
+                logger.exception(f"Error importando {item.inspection.path.name}")
                 errors.append((item.inspection.path.name, str(e)))
 
             if on_progress:
@@ -529,7 +527,7 @@ class SnapshotImporter:
         return succeeded, errors
 
     @classmethod
-    def _apply_item(cls, item: PlanItem, owner: Optional[TelegramUser]):
+    def _apply_item(cls, item: PlanItem, owner: TelegramUser | None):
         manifest = item.manifest
 
         chat, _ = TelegramChat.get_or_create(
@@ -635,75 +633,37 @@ class SnapshotImporter:
                 is_orphaned=False,
             )
 
-        # GESTIÓN DE ARCHIVOS TAR Y GPS
-        if manifest.source.type == SourceType.FOLDER and manifest.source.inventory:
+        # GESTIÓN DE ARCHIVOS TAR
+        if (
+            manifest.source.type == SourceType.FOLDER and manifest.source.inventory
+        ) and item.mutations.members_count > 0:
             # Asegurar TapeMembers si hay miembros faltantes
-            if item.mutations.members_count > 0:
-                member_inserts = [
+            member_inserts = []
+            for m in manifest.source.inventory:
+                start_off = getattr(m, "start_offset", 0)
+
+                # Deducción matemática resiliente para snapshots antiguos sin start_offset
+                if start_off == 0 and getattr(m, "fragments", None):
+                    first = m.fragments[0]
+                    global_content = (
+                        first.vol_idx * manifest.chunk_size
+                    ) + first.volume_offset
+                    start_off = max(0, global_content - 512)
+
+                member_inserts.append(
                     {
                         "source": source,
                         "relative_path": m.relative_path,
                         "size": m.size,
                         "md5sum": m.md5sum,
-                        "start_offset": getattr(m, "start_offset", 0),
+                        "start_offset": start_off,
                     }
-                    for m in manifest.source.inventory
-                ]
-                for batch in batched(member_inserts, 100):
-                    TapeMember.insert_many(batch).on_conflict_ignore().execute()
-
-            # Asegurar TapeMemberGPS para los Payloads de este Job específico
-            has_gps = (
-                TapeMemberGPS.select().join(Payload).where(Payload.job == job).exists()
-            )
-
-            if not has_gps:
-                paths = [m.relative_path for m in manifest.source.inventory]
-                db_members = TapeMember.select(
-                    TapeMember.id, TapeMember.relative_path
-                ).where(
-                    (TapeMember.source == source) & (TapeMember.relative_path << paths)  # type: ignore
                 )
-                path_to_id = {m.relative_path: m.id for m in db_members}
 
-                gps_inserts = []
-                for m in manifest.source.inventory:
-                    member_id = path_to_id.get(m.relative_path)
-                    if not member_id:
-                        continue
-
-                    total_frags = len(m.fragments)
-                    for frag_idx, frag in enumerate(m.fragments):
-                        payload_obj = payload_map.get(frag.vol_idx)
-                        if not payload_obj:
-                            continue
-
-                        # Deducir estado según posición
-                        if total_frags == 1:
-                            frag_state = EntryState.COMPLETE.value
-                        elif frag_idx == 0:
-                            frag_state = EntryState.HEAD.value
-                        elif frag_idx == total_frags - 1:
-                            frag_state = EntryState.TAIL.value
-                        else:
-                            frag_state = EntryState.BODY.value
-
-                        gps_inserts.append(
-                            {
-                                "member": member_id,
-                                "payload": payload_obj,
-                                "state": frag_state,
-                                "offset_in_volume": frag.volume_offset,
-                                "bytes_in_volume": frag.volume_length,
-                                "source_offset": frag.source_offset,
-                            }
-                        )
-
-                for batch in batched(gps_inserts, 200):
-                    TapeMemberGPS.insert_many(batch).execute()
+            for batch in batched(member_inserts, 100):
+                TapeMember.insert_many(batch).on_conflict_ignore().execute()
 
         # Actualizar estado a UPLOADED si no quedan piezas pendientes
-        if Payload.total_pending_for_job(job) == 0:
-            if job.status != JobStatus.UPLOADED:
-                job.status = JobStatus.UPLOADED
-                job.save(only=[Job.status, Job.updated_at])
+        if Payload.total_pending_for_job(job) == 0 and job.status != JobStatus.UPLOADED:
+            job.status = JobStatus.UPLOADED
+            job.save(only=[Job.status, Job.updated_at])

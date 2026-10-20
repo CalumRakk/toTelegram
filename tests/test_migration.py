@@ -143,6 +143,88 @@ class TestDatabaseMigrationAndInspection(unittest.TestCase):
         )
         self.assertEqual(sanitize_database_url(None), "None")
 
+    def test_07_migration_v6_to_v7_backfill_and_drop(self):
+        """
+        Migración v6 -> v7:
+        Verifica que los registros de 'tapemember' con start_offset en 0 sean sanados
+        usando los datos de 'tapemembergps' antes de que la tabla sea eliminada.
+        """
+        # 1. Simular esquema v6 creando las tablas requeridas
+        from totelegram.models import Job, Payload, Source, TelegramChat
+
+        self.db.create_tables([SchemaVersion, Source, Job, Payload, TelegramChat])
+
+        self.db.execute_sql("""
+            CREATE TABLE IF NOT EXISTS tapemember (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source_id INTEGER,
+                relative_path TEXT,
+                size INTEGER,
+                md5sum TEXT,
+                start_offset INTEGER DEFAULT 0
+            );
+        """)
+        self.db.execute_sql("""
+            CREATE TABLE IF NOT EXISTS tapemembergps (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                member_id INTEGER,
+                payload_id INTEGER,
+                state TEXT,
+                offset_in_volume INTEGER,
+                bytes_in_volume INTEGER,
+                source_offset INTEGER DEFAULT 0
+            );
+        """)
+        SchemaVersion.create(version=6)
+
+        # 2. Insertar fixtures simulando datos antiguos desactualizados
+        chat = TelegramChat.create(id=-1001, title="Test", type="channel")
+        source = Source.create(
+            path_str="/tmp/test",
+            md5sum="test_md5",
+            size=2000,
+            mtime=1.0,
+            mimetype="application/x-tar",
+        )
+        job = Job.formalize_intent(source, chat, False, 1000)
+        p1 = Payload.create(
+            job=job,
+            sequence_index=1,
+            start_offset=1000,
+            end_offset=2000,
+            size=1000,
+            filename="part.02",
+            filename_short="p2",
+        )
+
+        # Miembro con start_offset en 0 (típico de v6 antes de poblar)
+        self.db.execute_sql(
+            "INSERT INTO tapemember (id, source_id, relative_path, size, md5sum, start_offset) "
+            "VALUES (10, ?, 'video.mp4', 800, 'hash1', 0);",
+            (source.id,),
+        )
+        # Fragmento en GPS: reside en Payload p1 (offset 1000) en el byte 100 del volumen
+        # calculated_offset = 1000 + 100 - 512 = 588
+        self.db.execute_sql(
+            "INSERT INTO tapemembergps (member_id, payload_id, state, offset_in_volume, bytes_in_volume, source_offset) "
+            "VALUES (10, ?, 'COMPLETE', 100, 800, 0);",
+            (p1.id,),
+        )
+
+        # 3. Ejecutar setup_database_schema para disparar v6 -> v7
+        final_report = setup_database_schema(self.db)
+        self.assertEqual(final_report.current_version, 7)
+
+        # 4. Validar que start_offset fue sanado
+        cursor = self.db.execute_sql(
+            "SELECT start_offset FROM tapemember WHERE id = 10;"
+        )
+        self.assertEqual(cursor.fetchone()[0], 588)
+
+        # 5. Validar que tapemembergps ya no existe
+        tables = [t.lower() for t in self.db.get_tables()]
+        self.assertNotIn("tapemembergps", tables)
+
 
 if __name__ == "__main__":
     unittest.main()

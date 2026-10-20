@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Callable, Generator, List, Optional, Tuple, ca
 import peewee
 import tartape
 from tartape import calculate_file_slices
-from tartape.schemas import EntryState, FileSlice, ManifestEntry
+from tartape.schemas import FileSlice, ManifestEntry
 
 from totelegram import __VERSION__
 from totelegram.common.helpers import is_expired as helpers_is_expired
@@ -447,11 +447,11 @@ class Job(BaseModel):
         virtual_chunks: List[VirtualChunk],
         virtual_members: List[VirtualTapeMember],
     ) -> List["Payload"]:
-        """Guarda la estructura de volúmenes y el índice interno de la carpeta (TapeMembers)."""
+        """Guarda la estructura de volúmenes y el inventario de la carpeta (TapeMembers)."""
         database = self._meta.database
 
         with db_transaction(database):
-            # Inserción de piezas (Payloads)
+            # Inserción de Payloads
             payloads_data = [
                 {
                     "job": self,
@@ -466,15 +466,7 @@ class Job(BaseModel):
             ]
             Payload.insert_many(payloads_data).execute()
 
-            # Mapeo rápido de sequence_index -> objeto Payload
-            payload_map = {
-                p.sequence_index: p
-                for p in cast(
-                    list[Payload], self.payloads.order_by(Payload.sequence_index)
-                )
-            }
-
-            # Inserción masiva de TapeMembers en lotes de 500
+            # Inserción masiva de TapeMembers con su start_offset
             member_inserts = [
                 {
                     "source": self.source,
@@ -488,39 +480,6 @@ class Job(BaseModel):
 
             for batch in batched(member_inserts, 500):
                 TapeMember.insert_many(batch).on_conflict_ignore().execute()
-
-            # Recuperar mapeo (relative_path -> id) consultando por Source
-            # (Evita el límite de variables SQL de 'relative_path << paths')
-            db_members = TapeMember.select(
-                TapeMember.id, TapeMember.relative_path
-            ).where(TapeMember.source == self.source)
-            member_path_to_id = {m.relative_path: m.id for m in db_members}
-
-            # Inserción masiva de fragmentos GPS en lotes de 500
-            gps_inserts = []
-            for vm in virtual_members:
-                member_id = member_path_to_id.get(vm.relative_path)
-                if not member_id:
-                    continue
-
-                for frag in vm.fragments:
-                    payload_obj = payload_map.get(frag.vol_idx)
-                    if not payload_obj:
-                        continue
-
-                    gps_inserts.append(
-                        {
-                            "member": member_id,
-                            "payload": payload_obj,
-                            "state": frag.state,
-                            "offset_in_volume": frag.volume_offset,
-                            "bytes_in_volume": frag.volume_length,
-                            "source_offset": frag.source_offset,
-                        }
-                    )
-
-            for batch in batched(gps_inserts, 500):
-                TapeMemberGPS.insert_many(batch).execute()
 
         return cast(List[Payload], list(self.payloads.order_by(Payload.sequence_index)))
 
@@ -644,8 +603,6 @@ class TapeMember(BaseModel):
     Es el registro lógico para búsquedas.
     """
 
-    fragments: List["TapeMemberGPS"]
-
     id: int
     source = cast("Source", peewee.ForeignKeyField(Source, backref="members"))
     relative_path = cast(str, peewee.CharField())
@@ -692,24 +649,6 @@ class TapeMember(BaseModel):
             file_size=self.size,
             volume_size=volume_size,
         )
-
-
-class TapeMemberGPS(BaseModel):
-    member = cast(TapeMember, peewee.ForeignKeyField(TapeMember, backref="fragments"))
-    payload = cast("Payload", peewee.ForeignKeyField(Payload, backref="fragments"))
-
-    state = cast(EntryState, EnumField(EntryState))  # type: ignore
-    offset_in_volume = cast(int, peewee.BigIntegerField())
-    bytes_in_volume = cast(int, peewee.BigIntegerField())
-    source_offset = cast(int, peewee.BigIntegerField(default=0))
-
-    @property
-    def volume_offset(self) -> int:
-        return self.offset_in_volume
-
-    @property
-    def volume_length(self) -> int:
-        return self.bytes_in_volume
 
 
 class Claim(BaseModel):

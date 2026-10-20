@@ -5,8 +5,6 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import MagicMock, patch
 
-from tartape.schemas import EntryState
-
 from totelegram.database import DatabaseSession
 from totelegram.models import (
     Job,
@@ -14,7 +12,6 @@ from totelegram.models import (
     RemotePayload,
     Source,
     TapeMember,
-    TapeMemberGPS,
     TelegramChat,
     TelegramUser,
 )
@@ -189,25 +186,12 @@ class TestSnapshotService(unittest.TestCase):
         )
 
         # Registrar miembros internos y su GPS
-        member = TapeMember.create(
+        _ = TapeMember.create(
             source=source,
             relative_path="sub/archivo.txt",
-            size=1500,
+            size=800,  # 800 bytes: inicia en 512 y termina en 1312 (cruza exactamente Vol 0 y Vol 1)
             md5sum="file_md5_full",
-        )
-        TapeMemberGPS.create(
-            member=member,
-            payload=p1,
-            state=EntryState.HEAD,
-            offset_in_volume=512,
-            bytes_in_volume=488,
-        )
-        TapeMemberGPS.create(
-            member=member,
-            payload=p2,
-            state=EntryState.TAIL,
-            offset_in_volume=0,
-            bytes_in_volume=1012,
+            start_offset=0,
         )
 
         msg1 = self._create_mock_message(201, self.chat.id, "https://t.me/c/1/201")
@@ -253,6 +237,155 @@ class TestSnapshotService(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             SnapshotService.generate_snapshot(job)
+
+    def test_tape_member_get_slices_atomic_math(self):
+        """Verifica que TapeMember.get_slices calcule fragmentos exactos en O(1)."""
+        source = Source.create(
+            path_str="/tmp/test_tape",
+            md5sum="hash_tape_slices_test",
+            size=5000,
+            mtime=1.0,
+            mimetype="application/x-tar",
+            type=SourceType.FOLDER,
+        )
+
+        # Archivo que empieza en offset 1500 (TAR header) y mide 1200 bytes
+        # Con volúmenes de 1000 bytes:
+        # Contenido raw: [1500 + 512 = 2012] hasta [2012 + 1200 = 3212]
+        # Cruza Volumen 2 (2000-3000) y Volumen 3 (3000-4000)
+        member = TapeMember.create(
+            source=source,
+            relative_path="docs/manual.pdf",
+            size=1200,
+            md5sum="md5_manual",
+            start_offset=1500,
+        )
+
+        slices = member.get_slices(volume_size=1000)
+        self.assertEqual(len(slices), 2)
+
+        # Parte 1 (en volumen 2): del byte 2012 al 3000 -> offset 12, longitud 988
+        self.assertEqual(slices[0].volume_index, 2)
+        self.assertEqual(slices[0].volume_offset, 12)
+        self.assertEqual(slices[0].volume_length, 988)
+        self.assertEqual(slices[0].source_offset, 0)
+
+        # Parte 2 (en volumen 3): del byte 3000 al 3212 -> offset 0, longitud 212
+        self.assertEqual(slices[1].volume_index, 3)
+        self.assertEqual(slices[1].volume_offset, 0)
+        self.assertEqual(slices[1].volume_length, 212)
+        self.assertEqual(slices[1].source_offset, 988)
+
+    def test_import_snapshot_heals_missing_start_offset(self):
+        """Al importar un snapshot antiguo con start_offset en 0, debe sanarlo en BD."""
+        from datetime import datetime, timezone
+
+        from totelegram.packaging.importer import (
+            DbMutations,
+            InspectionStatus,
+            PlanAction,
+            PlanItem,
+            SnapshotImporter,
+            SnapshotInspection,
+        )
+        from totelegram.packaging.schemas import (
+            FileFragment,
+            RemotePart,
+            SourceMetadata,
+            TapeMemberSnapshot,
+            UploadManifest,
+        )
+
+        manifest = UploadManifest(
+            manifest_version="5.1",
+            strategy=Strategy.CHUNKED,
+            chunk_size=1000,
+            created_at=datetime.now(timezone.utc),
+            chat_id=self.chat.id,
+            owner_id=self.user.id,
+            owner_name="Test",
+            parts=[
+                RemotePart(
+                    sequence=0,
+                    message_id=1,
+                    chat_id=self.chat.id,
+                    link="",
+                    part_filename="v.tar.01",
+                    part_size=1000,
+                    part_md5sum="m1",
+                    start_offset=0,
+                    end_offset=1000,
+                ),
+                RemotePart(
+                    sequence=1,
+                    message_id=2,
+                    chat_id=self.chat.id,
+                    link="",
+                    part_filename="v.tar.02",
+                    part_size=500,
+                    part_md5sum="m2",
+                    start_offset=1000,
+                    end_offset=1500,
+                ),
+            ],
+            source=SourceMetadata(
+                filename="backup.tar",
+                size=1500,
+                md5sum="hash_snap_heal_test",
+                mime_type="application/x-tar",
+                mtime=1.0,
+                type=SourceType.FOLDER,
+                inventory=[
+                    # Simula un snapshot viejo: start_offset viene en 0, pero fragments tiene datos
+                    TapeMemberSnapshot(
+                        relative_path="archivo.txt",
+                        size=300,
+                        md5sum="md5_arch",
+                        start_offset=0,  # <--- Antiguo
+                        fragments=[
+                            FileFragment(
+                                vol_idx=0,
+                                volume_offset=600,
+                                volume_length=300,
+                                source_offset=0,
+                            )
+                        ],
+                    )
+                ],
+            ),
+        )
+
+        item = PlanItem(
+            inspection=SnapshotInspection(
+                path=Path("/tmp/fake.json.xz"),
+                status=InspectionStatus.VALID,
+                manifest=manifest,
+            ),
+            manifest=manifest,
+            action=PlanAction.CREATE_NEW,
+            target_chat_id=self.chat.id,
+            total_parts=2,
+            mutations=DbMutations(
+                create_source=True,
+                create_job=True,
+                payloads_count=2,
+                remotes_count=2,
+                members_count=1,
+            ),
+        )
+
+        succeeded, errors = SnapshotImporter.apply_plan(
+            plan=type("MockPlan", (), {"actionable_items": [item]})(),
+            db=self.db,
+            owner=self.user,
+        )
+
+        self.assertEqual(succeeded, 1)
+        self.assertEqual(len(errors), 0)
+
+        # Validar que start_offset fue calculado: (0 * 1000 + 600) - 512 = 88
+        saved_member = TapeMember.get(TapeMember.relative_path == "archivo.txt")
+        self.assertEqual(saved_member.start_offset, 88)
 
 
 if __name__ == "__main__":

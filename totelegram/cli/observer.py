@@ -130,6 +130,16 @@ class RichUploadObserver:
                 current_file=display_name,
             )
 
+    def on_archive_file_end(
+        self, arc_path: str, size: int, checksum: str | None
+    ) -> None:
+        """Limpia el archivo interno activo al finalizar su transmisión."""
+        if self._progress is not None and self._current_task_id is not None:
+            self._progress.update(
+                self._current_task_id,
+                current_file="",
+            )
+
     def on_payload_progress(self, current_bytes: int, total_bytes: int) -> None:
         """Actualiza la barra con la transferencia continua de bytes."""
         if self._progress is not None and self._current_task_id is not None:
@@ -301,13 +311,3 @@ class RichDownloadObserver:
         UI.success(
             f"Extracción completada: [bold]{total_files}[/] archivos validados al 100%."
         )
-
-    def on_archive_file_end(
-        self, arc_path: str, size: int, checksum: str | None
-    ) -> None:
-        """Limpia el archivo interno activo al finalizar su transmisión."""
-        if self._progress is not None and self._current_task_id is not None:
-            self._progress.update(
-                self._current_task_id,
-                current_file="",
-            )

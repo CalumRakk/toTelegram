@@ -4,7 +4,7 @@ import lzma
 from pathlib import Path
 from typing import TYPE_CHECKING, List, Optional
 
-from totelegram.models import Job, Payload, RemotePayload, TapeMember, TapeMemberGPS
+from totelegram.models import Job, Payload, RemotePayload, TapeMember
 from totelegram.packaging.schemas import (
     FileFragment,
     RemotePart,
@@ -68,21 +68,24 @@ class SnapshotService:
         if source.type == SourceType.FOLDER:
             inventory = []
 
+            # Obtenemos los miembros ordenados por su posición en el TAR continuo
             members = (
                 TapeMember.select()
                 .where(TapeMember.source == source)
-                .prefetch(TapeMemberGPS, Payload)
+                .order_by(TapeMember.start_offset)
             )
 
+            chunk_size = job.config.tg_max_size
             for m in members:
+                # Calculamos los fragmentos quirúrgicos en memoria vía O(1)
                 fragments = [
                     FileFragment(
-                        vol_idx=gps.payload.sequence_index,
-                        volume_offset=gps.volume_offset,
-                        volume_length=gps.volume_length,
-                        source_offset=gps.source_offset,
+                        vol_idx=sl.volume_index,
+                        volume_offset=sl.volume_offset,
+                        volume_length=sl.volume_length,
+                        source_offset=sl.source_offset,
                     )
-                    for gps in m.fragments
+                    for sl in m.get_slices(chunk_size)
                 ]
 
                 inventory.append(
@@ -90,7 +93,7 @@ class SnapshotService:
                         relative_path=m.relative_path,
                         size=m.size,
                         md5sum=m.md5sum,
-                        start_offset=getattr(m, "start_offset", 0),
+                        start_offset=m.start_offset,
                         fragments=fragments,
                     )
                 )
