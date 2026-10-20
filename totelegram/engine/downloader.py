@@ -2,7 +2,7 @@ import hashlib
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, List
+from typing import TYPE_CHECKING
 
 from tartape.exceptions import (
     PathConstraintError,
@@ -407,7 +407,7 @@ class DownloadEngine:
                 if not keep_cache and previous_vol_file and previous_vol_file.exists():
                     try:
                         previous_vol_file.unlink()
-                    except Exception:
+                    except Exception:  # noqa: S110
                         pass
 
                 vol_file, bytes_dl = self._download_part(
@@ -424,7 +424,7 @@ class DownloadEngine:
             if not keep_cache and previous_vol_file and previous_vol_file.exists():
                 try:
                     previous_vol_file.unlink()
-                except Exception:
+                except Exception:  # noqa: S110
                     pass
 
         try:

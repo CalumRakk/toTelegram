@@ -1,6 +1,6 @@
 import logging
 from datetime import datetime
-from typing import List, Optional
+from typing import List
 
 from pydantic import AliasChoices, BaseModel, Field
 
@@ -60,8 +60,8 @@ class SourceMetadata(BaseModel):
     mime_type: str
     mtime: float
     type: SourceType
-    tape_catalog: Optional[TapeCatalog] = None
-    inventory: Optional[List[TapeMemberSnapshot]] = None
+    tape_catalog: TapeCatalog | None = None
+    inventory: List[TapeMemberSnapshot] | None = None
 
 
 class RemotePart(BaseModel):
@@ -109,7 +109,7 @@ class VirtualChunk(BaseModel):
     filename_short: str = Field(
         ..., description="Nombre corto o hash propuesto para evadir límites de longitud"
     )
-    md5sum: Optional[str] = Field(
+    md5sum: str | None = Field(
         default=None, description="MD5 del volumen físico (calculado durante la subida)"
     )
 

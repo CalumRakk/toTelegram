@@ -1,7 +1,7 @@
 import logging
 import math
 import time
-from typing import TYPE_CHECKING, List, Union, cast
+from typing import TYPE_CHECKING, List, cast
 
 import peewee
 
@@ -59,16 +59,15 @@ class DiscoveryService:
             remotes = list(
                 RemotePayload.select(RemotePayload, Payload)
                 .join(Payload)
-                .where((Payload.job == hist_job) & (RemotePayload.is_orphaned == False))  # noqa: E712
+                .where((Payload.job == hist_job) & (RemotePayload.is_orphaned == False))
                 .order_by(Payload.sequence_index)
             )
 
             expected_count = self._get_expected_count(hist_job)
 
-            if len(remotes) == expected_count:
-                if self._validate_jit_batch(remotes):
-                    logger.info(f"Espejo íntegro: Job {hist_job.id}")
-                    return remotes
+            if len(remotes) == expected_count and self._validate_jit_batch(remotes):
+                logger.info(f"Espejo íntegro: Job {hist_job.id}")
+                return remotes
         return None
 
     def is_fulfilled_local(self, job: Job) -> bool:
@@ -77,7 +76,7 @@ class DiscoveryService:
         local_remotes = list(
             RemotePayload.select()
             .join(Payload)
-            .where((Payload.job == job) & (RemotePayload.is_orphaned == False))  # noqa: E712
+            .where((Payload.job == job) & (RemotePayload.is_orphaned == False))
             .order_by(Payload.sequence_index)
         )
 
@@ -111,7 +110,7 @@ class DiscoveryService:
         with db_transaction(self.db):
             for batch_ids in batched(msg_ids, 200):
                 messages = cast(
-                    Union[Message, List[Message]],
+                    Message | List[Message],
                     self.client.get_messages(chat_id, batch_ids),
                 )
                 if isinstance(messages, Message):

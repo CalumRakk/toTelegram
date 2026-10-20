@@ -144,7 +144,7 @@ class ChatAccessService:
         except ValueError:
             return False
 
-    def get_chat(self, chat_id: Union[str, int]) -> Optional["Chat"]:
+    def get_chat(self, chat_id: str | int) -> Optional["Chat"]:
         """
         Obtiene el objeto Chat correspondiente al identificador dado.
 
@@ -173,7 +173,7 @@ class ChatAccessService:
         logger.error(f"Error: No se encuentra el chat '{chat_id}'.")
         return None
 
-    def verify_access(self, query: Union[str, int]) -> AccessReport:
+    def verify_access(self, query: str | int) -> AccessReport:
         """
         Evalúa el acceso del usuario a un destino en tres etapas:
 

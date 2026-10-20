@@ -1,8 +1,7 @@
 import logging
 import re
 import sys
-from datetime import datetime
-from typing import Optional
+from datetime import datetime, timezone
 
 import typer
 
@@ -42,14 +41,14 @@ def version_callback(value: bool):
 @app.callback()
 def main(
     ctx: typer.Context,
-    use: Optional[str] = typer.Option(
+    use: str | None = typer.Option(
         None,
         "--use",
         "-u",
         help="Perfil a utilizar para esta operación (ignora el perfil activo).",
         is_eager=True,
     ),
-    version: Optional[bool] = typer.Option(
+    version: bool | None = typer.Option(
         None,
         "--version",
         "-V",
@@ -70,7 +69,7 @@ def main(
     config_manager = SettingsManager(worktable)
 
     cmd_name = ctx.invoked_subcommand or "sys"
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamp = datetime.now(tz=timezone.utc).strftime("%Y%m%d_%H%M%S")
 
     log_dir = worktable / "logs"
     log_path = log_dir / f"{timestamp}_{cmd_name}.log"

@@ -18,7 +18,7 @@ def apply_pyrogram_patches():
     import os
     from hashlib import md5
     from pathlib import PurePath
-    from typing import BinaryIO, Callable, Optional, Union
+    from typing import BinaryIO, Callable
 
     import pyrogram
     from pyrogram import StopTransmission, __license__, __version__, enums, raw
@@ -45,10 +45,10 @@ def apply_pyrogram_patches():
 
     async def save_file_patched(
         self: "pyrogram.client.Client",
-        path: Union[str, BinaryIO],
-        file_id: Optional[int] = None,
+        path: str | BinaryIO,
+        file_id: int | None = None,
         file_part: int = 0,
-        progress: Optional[Callable] = None,
+        progress: Callable | None = None,
         progress_args: tuple = (),
     ):
         async with self.save_file_semaphore:
@@ -74,9 +74,10 @@ def apply_pyrogram_patches():
                             await session.invoke(data)
 
                             # Reemplazamos el status de la barra de progreso
-                            if progress_args and hasattr(progress_args[0], "status"):
-                                if "Limitado" in progress_args[0].status:
-                                    progress_args[0].status = "[blue]Subiendo...[/]"
+                            if (
+                                progress_args and hasattr(progress_args[0], "status")
+                            ) and "Limitado" in progress_args[0].status:
+                                progress_args[0].status = "[blue]Subiendo...[/]"
                             break
                         except FloodWait as e:
                             total_wait = int(e.value) + 1  # type: ignore
@@ -134,7 +135,7 @@ def apply_pyrogram_patches():
             elif isinstance(path, io.IOBase):
                 fp = path
             else:
-                raise ValueError(
+                raise TypeError(
                     "Invalid file. Expected a file path as string or a binary (not text) file pointer"
                 )
 
@@ -155,7 +156,7 @@ def apply_pyrogram_patches():
                     f"Can't upload files bigger than {file_size_limit_mib} MiB"
                 )
 
-            file_total_parts = int(math.ceil(file_size / part_size))
+            file_total_parts = math.ceil(file_size / part_size)
             is_big = file_size > 10 * 1024 * 1024
             workers_count = 1
             is_missing_part = file_id is not None
@@ -227,7 +228,7 @@ def apply_pyrogram_patches():
             except Exception as e:
                 logger.error(f"Error en save_file (parcheado): {e}")
                 # Elevo la excepción para evitar ser silenciada, y con la esperanza que llegue a buen puerto.
-                raise e
+                raise
 
             else:
                 if is_big:
@@ -300,7 +301,7 @@ def apply_pyrogram_patches():
             # excepcion añadida para capturar el error de api_id invalido y advertir al usuario, en lugar de caer en un bucle infinito de intentos
             except ApiIdInvalid as e:
                 print(e.MESSAGE)
-                raise e
+                raise
             except BadRequest as e:
                 print(e.MESSAGE)
                 self.phone_number = None
@@ -336,7 +337,7 @@ def apply_pyrogram_patches():
                 print(e.MESSAGE)
 
                 while True:
-                    print("Password hint: {}".format(await self.get_password_hint()))
+                    print(f"Password hint: {await self.get_password_hint()}")
 
                     if not self.password:
                         self.password = await ainput(
@@ -365,8 +366,8 @@ def apply_pyrogram_patches():
                                         )
                                     except BadRequest as e:
                                         print(e.MESSAGE)
-                                    except Exception as e:
-                                        logger.exception(e)
+                                    except Exception:
+                                        logger.exception("Error recovering password")
                                         raise
                             else:
                                 self.password = None
@@ -405,7 +406,7 @@ def apply_pyrogram_patches():
     # MARCA DE AGUA
 
     _PATCHED = True
-    setattr(pyrogram.client.Client, "_patched_by_totelegram", True)
+    pyrogram.client.Client._patched_by_totelegram = True  # type: ignore
     logger.debug("Core: Pyrogram Runtime Patches aplicados exitosamente.")
     logger.debug("Parches aplicados correctamente.")
 

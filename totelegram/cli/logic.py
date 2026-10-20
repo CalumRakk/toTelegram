@@ -132,9 +132,10 @@ class InventoryEngine:
                     report.found.append(p)
             elif p.is_dir():
                 for sub_p in p.rglob("*"):
-                    if sub_p.is_file():
-                        if self._validate_file(sub_p, report, check_snapshot=True):
-                            report.found.append(sub_p)
+                    if sub_p.is_file() and self._validate_file(
+                        sub_p, report, check_snapshot=True
+                    ):
+                        report.found.append(sub_p)
         return report
 
     def scan_backup_inventory(self, paths: List[Path]) -> ScanReport:
@@ -149,7 +150,6 @@ class InventoryEngine:
         """Filtra el contenido de una carpeta para la cinta."""
         report = ScanReport(exclusion_patterns=self.patterns)
         for p in folder.rglob("*"):
-            if p.is_file():
-                if self._validate_file(p, report, check_snapshot=False):
-                    report.found.append(p)
+            if p.is_file() and self._validate_file(p, report, check_snapshot=False):
+                report.found.append(p)
         return report

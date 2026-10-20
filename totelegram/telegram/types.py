@@ -1,9 +1,5 @@
 from enum import Enum
-from typing import (
-    TYPE_CHECKING,
-    List,
-    Optional,
-)
+from typing import TYPE_CHECKING, List
 
 from pydantic import BaseModel, Field
 
@@ -23,7 +19,7 @@ class ChatMatch(BaseModel):
 
     id: int
     title: str
-    username: Optional[str] = None
+    username: str | None = None
     type: str
 
     @staticmethod
@@ -38,9 +34,9 @@ class ChatMatch(BaseModel):
 
 class AccessReport(BaseModel):
     status: AccessStatus
-    chat: Optional[ChatMatch] = None
+    chat: ChatMatch | None = None
     reason: str  # Mensaje técnico/explicativo
-    hint: Optional[str] = None  # El "Tip" de UX para el usuario
+    hint: str | None = None  # El "Tip" de UX para el usuario
 
     @property
     def is_ready(self) -> bool:
@@ -54,7 +50,7 @@ class ChatResolution(BaseModel):
     search_depth: int
     is_exact_requested: bool
 
-    winner: Optional[ChatMatch] = Field(
+    winner: ChatMatch | None = Field(
         default=None,
         description="El chat que cumple estrictamente los criterios y no tiene rivales.",
     )

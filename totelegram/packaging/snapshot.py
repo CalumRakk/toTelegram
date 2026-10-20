@@ -38,9 +38,7 @@ class SnapshotService:
         remotes_db = list(
             RemotePayload.select(RemotePayload, Payload)
             .join(Payload)
-            .where(
-                (Payload.job == job) & (RemotePayload.is_orphaned == False)  # noqa: E712
-            )
+            .where((Payload.job == job) & (RemotePayload.is_orphaned == False))
             .order_by(Payload.sequence_index)
         )
 
@@ -64,7 +62,7 @@ class SnapshotService:
             for r in remotes_db
         ]
 
-        inventory: Optional[List[TapeMemberSnapshot]] = None
+        inventory: List[TapeMemberSnapshot] | None = None
         if source.type == SourceType.FOLDER:
             inventory = []
 
@@ -145,7 +143,7 @@ class SnapshotService:
                 existing_data = json.load(f)
                 if existing_data.get("source", {}).get("md5sum") == current_md5:
                     return base_target
-        except Exception:
+        except Exception:  # noqa: S110
             pass
 
         counter = 1

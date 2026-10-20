@@ -1,5 +1,4 @@
 import re
-from typing import Union
 
 SELF_CHAT_ALIASES = ["me", "mensajes guardados", "saved messages", "self"]
 VALUE_NOT_SET = (
@@ -12,7 +11,7 @@ def is_potential_username(value: str) -> bool:
     return bool(re.fullmatch(r"[a-zA-Z][a-zA-Z0-9_]{4,31}", str(value).strip()))
 
 
-def is_direct_identifier(chat_id: Union[str, int, None]) -> bool:
+def is_direct_identifier(chat_id: str | int | None) -> bool:
     """Devuelve True si el chat_id es un identificador reconocido por Telegram."""
     if isinstance(chat_id, int):
         return True
@@ -34,13 +33,10 @@ def is_direct_identifier(chat_id: Union[str, int, None]) -> bool:
     if "t.me/" in clean or "telegram.me/" in clean:
         return True
 
-    if clean in SELF_CHAT_ALIASES:
-        return True
-
-    return False
+    return clean in SELF_CHAT_ALIASES
 
 
-def normalize_chat_id(value: Union[str, int]) -> Union[int, str]:
+def normalize_chat_id(value: str | int) -> int | str:
     """Normaliza un chat_id para que sea compatible con las peticiones de Pyrogram."""
     if isinstance(value, int):
         return value

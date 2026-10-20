@@ -16,8 +16,6 @@ logger = logging.getLogger(__name__)
 class JobPlanningError(Exception):
     """Excepción base para errores de planificación de Jobs."""
 
-    pass
-
 
 class PathLengthExceededError(JobPlanningError):
     """Lanzada cuando una carpeta contiene rutas que exceden el estándar TAR."""

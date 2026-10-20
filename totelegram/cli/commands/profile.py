@@ -1,6 +1,6 @@
 import tempfile
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional, Union
+from typing import TYPE_CHECKING
 
 import typer
 
@@ -27,14 +27,14 @@ app = typer.Typer(help="Gestión de perfiles de configuración.")
 
 def _run_destination_wizard(
     state: CLIState, client: "Client", current_depth: int = 100
-) -> Optional[Union[str, int]]:
+) -> str | int | None:
     """
     Inicia el asistente interactivo para determinar y validar el chat destino.
     Devuelve el identificador del chat (int o str) si se resuelve con éxito,
     o None si el usuario decide omitir la configuración.
     """
 
-    def has_write_permission(target: Union[str, int]) -> bool:
+    def has_write_permission(target: str | int) -> bool:
         with UI.loading("Verificando permisos..."):
             report = access_service.verify_access(target)
 
@@ -199,7 +199,7 @@ def create_profile(
     profile_name: str = typer.Option(..., prompt=True),
     api_id: int = typer.Option(..., prompt=True),
     api_hash: str = typer.Option(..., prompt=True),
-    chat_id: Optional[str] = typer.Option(
+    chat_id: str | None = typer.Option(
         VALUE_NOT_SET, help="Chat ID (opcional para saltar asistente)"
     ),
     force: bool = typer.Option(

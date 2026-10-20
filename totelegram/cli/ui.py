@@ -113,7 +113,7 @@ def get_friendly_chat_name(chat_id: str | int, db_url: str) -> str:
                     chat = TelegramChat.get_or_none(TelegramChat.id == chat_int_id)
                     if chat and chat.title:
                         return f"[bold cyan]{chat.title}[/] [dim]({chat.id})[/]"
-    except Exception:
+    except Exception:  # noqa: S110
         pass
 
     return str(chat_id)

@@ -4,7 +4,7 @@ import json
 import locale
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional, cast
+from typing import TYPE_CHECKING, cast
 
 from filelock import FileLock, Timeout
 
@@ -24,7 +24,7 @@ class TelegramSession:
         api_hash: str,
         profiles_dir: Path | str,
     ):
-        self.client: Optional[Client] = None
+        self.client: Client | None = None
         self.name = session_name
         self.api_id = api_id
         self.api_hash = api_hash
@@ -57,7 +57,7 @@ class TelegramSession:
 
         logger.info(f"Iniciando sesión de Telegram: {self.name}")
 
-        lang, encoding = locale.getdefaultlocale()
+        lang, _ = locale.getdefaultlocale()
         iso639 = lang.split("_")[0] if lang else "en"
 
         # Punto de entrada para aplicar parches a Pyrogram antes de iniciar el cliente.
@@ -89,15 +89,15 @@ class TelegramSession:
             )
             return self.client
 
-        except ApiIdInvalid as e:
+        except ApiIdInvalid:
             logger.debug("Error: API ID o Hash inválidos.")
-            raise e
-        except ApiIdPublishedFlood as e:
+            raise
+        except ApiIdPublishedFlood:
             logger.debug("Error: API ID baneado públicamente.")
-            raise e
+            raise
         except Exception as e:
             logger.debug(f"Error: inesperado: {e}")
-            raise e
+            raise
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         if self.client and self.client.is_connected:

@@ -62,11 +62,8 @@ class JobPipeline:
                 try:
                     SnapshotService.generate_snapshot(job)
                     snapshot_generated = True
-                except Exception as e:
-                    logger.error(
-                        f"Error generando snapshot para Job {job.id}: {e}",
-                        exc_info=True,
-                    )
+                except Exception:
+                    logger.exception(f"Error generando snapshot para Job {job.id}")
 
             self.ctx.observer.on_job_complete(job, snapshot_generated)
 

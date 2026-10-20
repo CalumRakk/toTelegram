@@ -11,9 +11,7 @@ from typing import (
     Dict,
     List,
     Literal,
-    Optional,
     Tuple,
-    Union,
     cast,
 )
 
@@ -48,7 +46,7 @@ CommaSeparatedList = Annotated[
 ]
 
 ChatID = Annotated[
-    Union[int, str],
+    int | str,
     BeforeValidator(normalize_chat_id),
 ]
 
@@ -113,7 +111,7 @@ class Settings(BaseSettings):
         json_schema_extra={"is_sensitive": False, "access": AccessLevel.EDITABLE},
     )
 
-    telegram_account_id: Optional[int] = Field(
+    telegram_account_id: int | None = Field(
         default=None,
         description="ID único de la cuenta de Telegram. Usado para locks distribuidos.",
         json_schema_extra={"is_sensitive": False, "access": AccessLevel.DEBUG_READONLY},
@@ -124,7 +122,7 @@ class Settings(BaseSettings):
         description="Trunca automáticamente los nombres largos al empaquetar carpetas en TAR.",
         json_schema_extra={"is_sensitive": False, "access": AccessLevel.EDITABLE},
     )
-    database_url: Optional[str] = Field(
+    database_url: str | None = Field(
         default=None,
         description="URL de conexión a la base de datos (ej: postgresql://user:pass@host/db). Si se omite, se usará SQLite local.",
         json_schema_extra={"is_sensitive": True, "access": AccessLevel.EDITABLE},
@@ -136,7 +134,7 @@ class Settings(BaseSettings):
         env_file=".env", env_file_encoding="utf-8", extra="ignore"
     )
 
-    log_path: Optional[Path] = Field(
+    log_path: Path | None = Field(
         default=None,
         description="Ruta del archivo de log. Si está vacío, se usa la ruta por defecto en la carpeta de trabajo.",
     )
@@ -153,7 +151,7 @@ class Settings(BaseSettings):
         return v
 
     @classmethod
-    def get_info(cls, field_name: str) -> Optional[InfoField]:
+    def get_info(cls, field_name: str) -> InfoField | None:
         """Extrae la informacion de un campo de Settings.
 
         Si un campo no tiene access, se considerárá DEBUG_READONLY.
@@ -313,7 +311,7 @@ class SettingsManager:
         for f in self.profiles_dir.glob("*"):
             if f.suffix in [".env", ".session"]:
                 stems.add(f.stem)
-        return sorted(list(stems))
+        return sorted(stems)
 
     def get_all_profiles(self) -> List[Profile]:
         profiles = []
@@ -324,7 +322,7 @@ class SettingsManager:
             profiles.append(profile)
         return profiles
 
-    def get_profile(self, profile_name: str) -> Optional[Profile]:
+    def get_profile(self, profile_name: str) -> Profile | None:
         """Busca un perfil por su nombre (case-sensitive)"""
         return next(
             (p for p in self.get_all_profiles() if p.name == profile_name), None
@@ -355,9 +353,11 @@ class SettingsManager:
                     related_db.unlink()
                     deleted_files.append(related_db)
 
-        if self.has_active_profile_configured():
-            if self.get_active_profile_name() == profile.name:
-                self.settings_active_path.unlink()
+        if (
+            self.has_active_profile_configured()
+            and self.get_active_profile_name() == profile.name
+        ):
+            self.settings_active_path.unlink()
 
         return deleted_files
 
@@ -379,18 +379,18 @@ class SettingsManager:
         profile = self.get_profile(profile_name)
 
         if profile is None:
-            raise IOError(
+            raise OSError(
                 f"Se intentó activar el perfil '{profile_name}', pero no existe."
             )
         if not profile.is_trinity:
-            raise IOError(
+            raise OSError(
                 f"Se intentó activar el perfil '{profile_name}', pero no es trinity."
             )
 
         self.settings_active_path.parent.mkdir(parents=True, exist_ok=True)
         self.settings_active_path.write_text(profile_name)
 
-    def get_active_profile_name(self) -> Optional[str]:
+    def get_active_profile_name(self) -> str | None:
         if not self.settings_active_path.exists():
             return None
         return self.settings_active_path.read_text().strip()
@@ -408,7 +408,7 @@ class SettingsManager:
 
         settings_path = self.get_settings_path(profile_name)
         if not settings_path.exists():
-            raise IOError(
+            raise OSError(
                 f"El archivo de configuracion '{settings_path.name}' no existe."
             )
 
@@ -422,8 +422,8 @@ class SettingsManager:
             raise ValueError(f"Error de validacion: {e}")
 
     def resolve_profile_name(
-        self, profile_name: Optional[str] = None, strict: bool = True
-    ) -> Optional[str]:
+        self, profile_name: str | None = None, strict: bool = True
+    ) -> str | None:
         """
         Valida y resuelve el perfil de configuración a utilizar.
         La operacion simplifica estos tres escenarios:
@@ -629,7 +629,7 @@ class ConfigService:
             )
 
         if not isinstance(current_list, list):
-            raise ValueError(
+            raise TypeError(
                 f"El campo '{key}' no es una lista, no se puede usar '{action}'."
             )
 

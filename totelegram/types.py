@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING, List
 
 import peewee
 
@@ -37,7 +37,7 @@ class UploadContext:
     observer: UploadObserver = field(default_factory=NullObserver)
 
     @property
-    def account_id(self) -> Optional[int]:
+    def account_id(self) -> int | None:
         return self.settings.telegram_account_id
 
 
@@ -72,7 +72,7 @@ class JobExecutionResult:
 
     job: "Job"
     path: Path
-    strategy_result: Optional[StrategyResult] = None
+    strategy_result: StrategyResult | None = None
     is_completed: bool = False
     snapshot_generated: bool = False
     message: str = ""

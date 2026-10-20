@@ -77,10 +77,7 @@ def is_suspected_glob_expansion(values: List[str]) -> bool:
     if len(values) > 1 and existing_files == len(values):
         return True
 
-    if len(values) == 1 and existing_files == 1:
-        return True
-
-    return False
+    return bool(len(values) == 1 and existing_files == 1)
 
 
 def validate_item(value: str) -> str:

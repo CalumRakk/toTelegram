@@ -1,6 +1,6 @@
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Optional, cast
+from typing import TYPE_CHECKING, cast
 
 from totelegram.database import DatabaseSession, normalize_database_url
 from totelegram.telegram.client import TelegramSession
@@ -12,7 +12,7 @@ if TYPE_CHECKING:
 @dataclass
 class CLIState:
     manager: "SettingsManager"
-    profile_name: Optional[str]
+    profile_name: str | None
     is_debug: bool = False
 
     def get_telegram_session(self, profile_name: str) -> TelegramSession:
@@ -36,6 +36,6 @@ class CLIState:
         )
 
         # auto_init_schema=True asegura que las tablas existan antes de operar
-        with DatabaseSession(db_url, auto_init_schema=True) as db:
+        with DatabaseSession(db_url, auto_init_schema=True) as db:  # noqa: SIM117
             with self.get_telegram_session(profile_name) as client:
                 yield client, db

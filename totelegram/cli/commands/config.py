@@ -98,7 +98,7 @@ def _validate_live_chat_id(
             with DatabaseSession(db_url, auto_init_schema=True):
                 tg_chat_obj = client.get_chat(report.chat.id)
                 TelegramChat.get_or_create_from_chat(tg_chat_obj)  # type: ignore
-        except Exception:
+        except Exception:  # noqa: S110
             pass  # Si la DB aún no está inicializada, no bloqueamos la configuración
 
         title = report.chat.title or "Mensajes Guardados"
@@ -128,10 +128,11 @@ def _command_modify_list(
     updates = service.prepare_updates([key, values])  # type: ignore
     verb = "agregar" if action == "add" else "eliminar"
 
-    if is_suspected_glob_expansion(values):
-        if not DisplayConfig.confirm_expanded_pattern(verb, key, values):
-            UI.info("Operacion cancelada.")
-            raise typer.Exit()
+    if is_suspected_glob_expansion(
+        values
+    ) and not DisplayConfig.confirm_expanded_pattern(verb, key, values):
+        UI.info("Operacion cancelada.")
+        raise typer.Exit()
 
     for k, val in updates.items():
         changed, final_val = service.apply_update(settings_name, k, val, action=action)

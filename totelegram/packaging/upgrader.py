@@ -10,10 +10,10 @@ import mimetypes
 import re
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Tuple
 
 from totelegram.identity import TG_MAX_SIZE_SINGLE_FILE
-from totelegram.packaging.schemas import MANIFEST_VERSION, UploadManifest
+from totelegram.packaging.schemas import UploadManifest
 
 
 def _parse_yaml_text(text: str) -> Any:
@@ -36,7 +36,7 @@ def _parse_yaml_text(text: str) -> Any:
         ):
             SafeObjectLoader.add_multi_constructor(
                 prefix,
-                lambda l, s, n: _construct_mapping(l, n),  # noqa: E741
+                lambda l, s, n: _construct_mapping(l, n),
             )
 
         return yaml.load(text, Loader=SafeObjectLoader)
@@ -77,7 +77,7 @@ def clean_part_suffix(filename: str) -> str:
     return name
 
 
-def build_tg_link(chat_id: int, message_id: int) -> Optional[str]:
+def build_tg_link(chat_id: int, message_id: int) -> str | None:
     s_id = str(chat_id)
     if s_id.startswith("-100"):
         return f"https://t.me/c/{s_id[4:]}/{message_id}"
@@ -202,9 +202,9 @@ class SnapshotUpgrader:
     def load_and_upgrade(cls, path: Path, tg_client: Any = None) -> UploadManifest:
         raw_data = load_raw_snapshot(path)
         if not isinstance(raw_data, dict):
-            raise ValueError(f"El archivo {path.name} no contiene un objeto válido.")
+            raise TypeError(f"El archivo {path.name} no contiene un objeto válido.")
 
-        v5_dict, transition = cls.upgrade_to_dict(raw_data, tg_client=tg_client)
+        v5_dict, _ = cls.upgrade_to_dict(raw_data, tg_client=tg_client)
         return UploadManifest.model_validate(v5_dict)
 
     @staticmethod
@@ -479,7 +479,7 @@ class SnapshotUpgrader:
 
     @staticmethod
     def _upgrade_v0_0_x(
-        data: Dict[str, Any], root_chat_id: Optional[int] = None
+        data: Dict[str, Any], root_chat_id: int | None = None
     ) -> Dict[str, Any]:
         files = data.get("files", [])
         if not files:

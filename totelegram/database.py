@@ -4,7 +4,6 @@ import logging
 import threading
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Optional
 from urllib.parse import urlparse, urlunparse
 
 import peewee
@@ -23,9 +22,7 @@ register_database(
 )
 
 
-def normalize_database_url(
-    url_or_path: Optional[str], default_sqlite_path: Path
-) -> str:
+def normalize_database_url(url_or_path: str | None, default_sqlite_path: Path) -> str:
     """
     Normaliza la configuración de entrada convirtiéndola en una URL de base de datos válida.
     Si recibe una ruta local, la transforma a una URL de conexión de SQLite.
@@ -64,7 +61,7 @@ db_proxy = peewee.Proxy()
 _sqlite_write_lock = threading.RLock()
 
 
-def sanitize_database_url(url: Optional[str]) -> str:
+def sanitize_database_url(url: str | None) -> str:
     """
     Enmascara la contraseña de una URL de base de datos para mostrarla de forma segura en logs y UI.
     Ej: postgresql://admin:secreto123@db.host.com:5432/mibase
@@ -74,11 +71,7 @@ def sanitize_database_url(url: Optional[str]) -> str:
         return "None"
 
     url = url.strip()
-    if not (
-        url.startswith("postgresql://")
-        or url.startswith("postgres://")
-        or url.startswith("psycopg3://")
-    ):
+    if not (url.startswith(("postgresql://", "postgres://", "psycopg3://"))):
         return url
 
     try:
@@ -131,14 +124,14 @@ class DatabaseSession:
     Controla el conteo de referencias para evitar cierres prematuros en llamadas anidadas.
     """
 
-    active_db_url: Optional[str] = None
+    active_db_url: str | None = None
     _ref_count: int = 0
     _lock: threading.Lock = threading.Lock()
 
     def __init__(self, db_url: str, auto_init_schema: bool = False):
         self.db_url = db_url
         self.auto_init_schema = auto_init_schema
-        self.db: Optional[peewee.Database] = None
+        self.db: peewee.Database | None = None
 
     def __enter__(self) -> peewee.Database:
         with DatabaseSession._lock:
@@ -170,7 +163,7 @@ class DatabaseSession:
 
             if isinstance(self.db, peewee.SqliteDatabase):
                 self.db.pragma("journal_mode", "wal")
-                self.db.pragma("cache_size", -1024 * 64)
+                self.db.pragma("cache_size", -1024 * 64)  # type: ignore
                 self.db.pragma("synchronous", "NORMAL")
                 self.db.pragma("busy_timeout", 30000)
                 self.db.pragma("foreign_keys", 1)

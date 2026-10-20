@@ -3,7 +3,7 @@ import os
 import re
 import sys
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable
 
 import filetype
 
@@ -11,7 +11,7 @@ import filetype
 def create_md5sum_by_hashlib(
     path: Path,
     chunk_size: int = 2 * 1024 * 1024,
-    on_progress: Optional[Callable[[int, int], None]] = None,
+    on_progress: Callable[[int, int], None] | None = None,
 ) -> str:
     """Calcula el MD5 de un archivo emitiendo progreso por lotes."""
     hasher = hashlib.md5()

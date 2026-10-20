@@ -4,12 +4,7 @@ import time
 from dataclasses import dataclass, field
 from enum import Enum, IntEnum
 from pathlib import Path
-from typing import (
-    Any,
-    Dict,
-    Literal,
-    Optional,
-)
+from typing import Any, Dict, Literal
 
 from pydantic import BaseModel, Field
 
@@ -81,7 +76,7 @@ class AccessLevel(IntEnum):
 class InfoField(BaseModel):
     level: AccessLevel
     field_name: str
-    description: Optional[str]
+    description: str | None
     default_value: Any
     is_sensitive: bool
     type_annotation: str
@@ -100,7 +95,7 @@ class StrategyConfig(BaseModel):
 class ProfileRegistry(BaseModel):
     """Modelo que representa el archivo config.json global de perfiles"""
 
-    active: Optional[str] = None
+    active: str | None = None
     profiles: Dict[str, str] = Field(default_factory=dict)
 
 

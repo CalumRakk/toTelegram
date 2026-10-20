@@ -1,7 +1,7 @@
 import logging
 from contextlib import contextmanager
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Tuple
 
 import typer
 from rich.table import Table
@@ -19,7 +19,7 @@ app = typer.Typer(help="Herramientas para inspeccionar e importar snapshots.")
 
 
 @contextmanager
-def maybe_telegram_session(state: CLIState, profile_name: Optional[str]):
+def maybe_telegram_session(state: CLIState, profile_name: str | None):
     """Mantiene la sesión de Telegram viva durante toda la migración si hay un perfil disponible."""
     if profile_name:
         try:
@@ -135,7 +135,7 @@ def import_snapshots(
                 me = client.get_me()
                 if me:
                     owner = TelegramUser.get_or_create_from_tg(me)
-            except Exception:
+            except Exception:  # noqa: S110
                 pass
 
         console.print()
@@ -177,7 +177,7 @@ def upgrade_snapshots(
         exists=True,
         help="Rutas a archivos o carpetas con snapshots a migrar hacia v5.0.",
     ),
-    output_dir: Optional[Path] = typer.Option(
+    output_dir: Path | None = typer.Option(
         None,
         "--output-dir",
         "-o",
@@ -254,7 +254,7 @@ def upgrade_snapshots(
                         skipped_already_v5 += 1
                         continue
 
-                    v5_dict, transition = SnapshotUpgrader.upgrade_to_dict(
+                    v5_dict, _ = SnapshotUpgrader.upgrade_to_dict(
                         raw_data, tg_client=tg_client
                     )
 
