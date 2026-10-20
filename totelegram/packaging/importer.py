@@ -286,7 +286,7 @@ class SnapshotImportPlanner:
                     & (Job.deleted_at == 0)
                 )
 
-            # --- AUDITORÍA REAL DE ARCHIVOS DE LA CINTA TAR (TapeMember) ---
+            # AUDITORÍA REAL DE ARCHIVOS DE LA CINTA TAR (TapeMember)
             is_folder = manifest.source.type == SourceType.FOLDER
             total_inventory = (
                 len(manifest.source.inventory)
@@ -635,7 +635,7 @@ class SnapshotImporter:
                 is_orphaned=False,
             )
 
-        # --- GESTIÓN DE ARCHIVOS TAR Y GPS ---
+        # GESTIÓN DE ARCHIVOS TAR Y GPS
         if manifest.source.type == SourceType.FOLDER and manifest.source.inventory:
             # Asegurar TapeMembers si hay miembros faltantes
             if item.mutations.members_count > 0:
@@ -645,6 +645,7 @@ class SnapshotImporter:
                         "relative_path": m.relative_path,
                         "size": m.size,
                         "md5sum": m.md5sum,
+                        "start_offset": getattr(m, "start_offset", 0),
                     }
                     for m in manifest.source.inventory
                 ]

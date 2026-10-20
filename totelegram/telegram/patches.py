@@ -31,13 +31,13 @@ def apply_pyrogram_patches():
     from pyrogram.types import TermsOfService, User
     from pyrogram.utils import ainput
 
-    # --- Modifica Session SLEEP_THRESHOL ---
+    # Modifica Session SLEEP_THRESHOL
     # pyrogram/session/session.py
 
     Session.SLEEP_THRESHOLD = 60  # type: ignore Evita que pyrogram lanzara error con FloodWait cuando telegram pedia periodo corto de espera (11 en vez de menos de 10).
     logger.debug("Parche aplicado: Session.SLEEP_THRESHOLD = 60")
 
-    # --- Reemplazar save_file (Captura de excepciones) ---
+    # Reemplazar save_file (Captura de excepciones)
 
     # pyrogram/methods/advanced/save_file.py
 
@@ -259,7 +259,7 @@ def apply_pyrogram_patches():
 
     logger.debug("Parche aplicado: save_file")
 
-    # --- Client.authorize ---
+    # Client.authorize
 
     # pyrogram/client.py
 
@@ -402,7 +402,7 @@ def apply_pyrogram_patches():
 
     pyrogram.Client.authorize = authorize_patched  # type: ignore
 
-    # --- MARCA DE AGUA  ---
+    # MARCA DE AGUA
 
     _PATCHED = True
     setattr(pyrogram.client.Client, "_patched_by_totelegram", True)

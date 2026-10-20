@@ -7,7 +7,8 @@ from typing import TYPE_CHECKING, Callable, Generator, List, Optional, Tuple, ca
 
 import peewee
 import tartape
-from tartape.schemas import EntryState, ManifestEntry
+from tartape import calculate_file_slices
+from tartape.schemas import EntryState, FileSlice, ManifestEntry
 
 from totelegram import __VERSION__
 from totelegram.common.helpers import is_expired as helpers_is_expired
@@ -450,7 +451,7 @@ class Job(BaseModel):
         database = self._meta.database
 
         with db_transaction(database):
-            # 1. Inserción de piezas (Payloads)
+            # Inserción de piezas (Payloads)
             payloads_data = [
                 {
                     "job": self,
@@ -473,13 +474,14 @@ class Job(BaseModel):
                 )
             }
 
-            # 2. Inserción masiva de TapeMembers en lotes de 500
+            # Inserción masiva de TapeMembers en lotes de 500
             member_inserts = [
                 {
                     "source": self.source,
                     "relative_path": vm.relative_path,
                     "size": vm.size,
                     "md5sum": vm.md5sum,
+                    "start_offset": vm.start_offset,
                 }
                 for vm in virtual_members
             ]
@@ -487,14 +489,14 @@ class Job(BaseModel):
             for batch in batched(member_inserts, 500):
                 TapeMember.insert_many(batch).on_conflict_ignore().execute()
 
-            # 3. Recuperar mapeo (relative_path -> id) consultando por Source
+            # Recuperar mapeo (relative_path -> id) consultando por Source
             # (Evita el límite de variables SQL de 'relative_path << paths')
             db_members = TapeMember.select(
                 TapeMember.id, TapeMember.relative_path
             ).where(TapeMember.source == self.source)
             member_path_to_id = {m.relative_path: m.id for m in db_members}
 
-            # 4. Inserción masiva de fragmentos GPS en lotes de 500
+            # Inserción masiva de fragmentos GPS en lotes de 500
             gps_inserts = []
             for vm in virtual_members:
                 member_id = member_path_to_id.get(vm.relative_path)
@@ -642,27 +644,23 @@ class TapeMember(BaseModel):
     Es el registro lógico para búsquedas.
     """
 
-    fragments: List["TapeMemberGPS"]  # Tipado Fake
+    fragments: List["TapeMemberGPS"]
 
     id: int
     source = cast("Source", peewee.ForeignKeyField(Source, backref="members"))
     relative_path = cast(str, peewee.CharField())
     size = cast(int, peewee.BigIntegerField())
     md5sum = cast(str, peewee.CharField())
+    start_offset = cast(int, peewee.BigIntegerField(default=0))
 
     class Meta:  # type: ignore
-        indexes = (
-            # Un archivo solo puede estar una vez en una carpeta específica
-            (("source", "relative_path"), True),
-        )
+        indexes = ((("source", "relative_path"), True),)
 
     @classmethod
     def register_manifest_entries(
         cls, source: "Source", payload: "Payload", entries: list[ManifestEntry]
     ):
-        """
-        Registra los archivos de un volumen (TapeMembers) y su GPS en el volumen.
-        """
+        """Registra los archivos de un volumen (TapeMembers) y su GPS en el volumen."""
         BATCH_SIZE = 100
 
         for batch in batched(entries, BATCH_SIZE):  # type: ignore
@@ -673,51 +671,12 @@ class TapeMember(BaseModel):
                     "relative_path": e.info.arc_path,
                     "size": e.info.size,
                     "md5sum": e.info.md5sum,
+                    "start_offset": e.global_window.start,
                 }
                 for e in batch
                 if not e.info.is_dir
             ]
             cls.insert_many(member_data).on_conflict_ignore().execute()
-
-        path_to_id = {}
-        for batch in batched(entries, BATCH_SIZE):  # type: ignore
-            paths = [e.info.arc_path for e in batch]
-
-            # `<<` (operador IN de Peewee)
-            query = cls.select(cls.id, cls.relative_path).where(
-                (cls.source == source) & (cls.relative_path << paths)  # type: ignore
-            )
-
-            for member in query:
-                path_to_id[member.relative_path] = member.id
-
-        # Registra el GPS de cada archivo en el volumen usando e.slice
-        for batch in batched(entries, BATCH_SIZE):  # type: ignore
-            gps_data = []
-            for e in batch:
-                if e.info.is_dir:
-                    continue
-                # Si no tiene slice y tiene tamaño > 0, significa que solo cayó el header en este volumen
-                if e.slice is None and e.info.size > 0:
-                    continue
-
-                vol_off = e.slice.volume_offset if e.slice else 0
-                vol_len = e.slice.volume_length if e.slice else 0
-                src_off = e.slice.source_offset if e.slice else 0
-
-                gps_data.append(
-                    {
-                        "member": path_to_id[e.info.arc_path],
-                        "payload": payload,
-                        "state": e.state.value,
-                        "offset_in_volume": vol_off,
-                        "bytes_in_volume": vol_len,
-                        "source_offset": src_off,
-                    }
-                )
-
-            if gps_data:
-                TapeMemberGPS.insert_many(gps_data).execute()
 
 
 class TapeMemberGPS(BaseModel):
@@ -736,6 +695,21 @@ class TapeMemberGPS(BaseModel):
     @property
     def volume_length(self) -> int:
         return self.bytes_in_volume
+
+    def get_slices(self, volume_size: int) -> list[FileSlice]:
+        """Calcula los fragmentos quirúrgicos del archivo usando las matemáticas de TarTape.
+
+        Args:
+            volume_size: Tamaño de partición de los volúmenes en bytes.
+
+        Returns:
+            list[FileSlice]: Lista de fragmentos calculados con aritmética O(1).
+        """
+        return calculate_file_slices(
+            start_offset=self.start_offset,
+            file_size=self.size,
+            volume_size=volume_size,
+        )
 
 
 class Claim(BaseModel):

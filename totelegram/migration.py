@@ -344,6 +344,26 @@ def _step_v4_to_v5(db: peewee.Database):
         )
 
 
+def _step_v5_to_v6(db: peewee.Database):
+    """Paso v5 -> v6: Agregar start_offset a tapemember para cálculo O(1) de fragmentos."""
+    migrator = _get_migrator(db)
+    existing_tables = {t.lower() for t in db.get_tables()}
+
+    if "tapemember" in existing_tables:
+        try:
+            migrate(
+                migrator.add_column(
+                    "tapemember", "start_offset", peewee.BigIntegerField(default=0)
+                ),
+            )
+        except Exception as e:
+            logger.debug(f"Aviso agregando start_offset en v5->v6: {e}")
+    else:
+        logger.debug(
+            "La tabla 'tapemember' no existe en esta versión. Omitiendo migración v5->v6."
+        )
+
+
 # Registrar en MIGRATION_REGISTRY:
 MIGRATION_REGISTRY: Dict[int, Callable[[peewee.Database], None]] = {
     0: _step_v0_to_v1,
@@ -351,6 +371,7 @@ MIGRATION_REGISTRY: Dict[int, Callable[[peewee.Database], None]] = {
     2: _step_v2_to_v3,
     3: _step_v3_to_v4,
     4: _step_v4_to_v5,
+    5: _step_v5_to_v6,
 }
 
 

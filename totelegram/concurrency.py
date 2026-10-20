@@ -3,7 +3,7 @@ import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import timedelta
-from typing import Generator, List, Optional, cast
+from typing import Generator, List, cast
 
 import peewee
 
@@ -20,13 +20,11 @@ logger = logging.getLogger(__name__)
 class ConcurrencyError(Exception):
     """Excepción base para conflictos de concurrencia."""
 
-    pass
-
 
 class AccountBusyError(ConcurrencyError):
     """Lanzada cuando una cuenta de Telegram está en uso por otro nodo/terminal."""
 
-    def __init__(self, account_id: int, holder_node_id: Optional[str] = None):
+    def __init__(self, account_id: int, holder_node_id: str | None = None):
         self.account_id = account_id
         self.holder_node_id = holder_node_id
         super().__init__(
@@ -37,13 +35,9 @@ class AccountBusyError(ConcurrencyError):
 class PayloadClaimError(ConcurrencyError):
     """Lanzada cuando ocurre un error al reclamar una pieza."""
 
-    pass
-
 
 class SystemSuspendedError(ConcurrencyError):
     """Lanzada cuando se detecta que el sistema entró en suspensión/hibernación."""
-
-    pass
 
 
 # DTOs Y CONTROLADOR DE LATIDOS (HEARTBEAT)
@@ -153,13 +147,12 @@ class ConcurrencyCoordinator:
         except peewee.IntegrityError:
             # Colisión: verificar si el claim existente pertenece a este nodo o ya expiró
             claim = cast(Claim, Claim.get_or_none(Claim.resource_id == resource_id))
-            if claim:
-                if is_expired(claim.expires_at):
-                    claim.node_id = self.node_id
-                    claim.expires_at = expires_at
-                    claim.save(only=[Claim.node_id, Claim.expires_at, Claim.updated_at])
-                    logger.debug(f"Lease expirado recuperado: {resource_id}")
-                    return True
+            if claim and is_expired(claim.expires_at):
+                claim.node_id = self.node_id
+                claim.expires_at = expires_at
+                claim.save(only=[Claim.node_id, Claim.expires_at, Claim.updated_at])
+                logger.debug(f"Lease expirado recuperado: {resource_id}")
+                return True
 
             return False
 
@@ -201,7 +194,7 @@ class ConcurrencyCoordinator:
 
     @contextmanager
     def guard_account(
-        self, account_id: Optional[int], ttl_seconds: int = 300
+        self, account_id: int | None, ttl_seconds: int = 300
     ) -> Generator[str, None, None]:
         """
         Garantiza exclusividad global sobre una cuenta de Telegram durante el bloque `with`.
@@ -232,9 +225,9 @@ class ConcurrencyCoordinator:
     def claim_next_payload(
         self,
         job: Job,
-        account_id: Optional[int] = None,
+        account_id: int | None = None,
         ttl_seconds: int = 300,
-    ) -> Generator[Optional[PayloadClaim], None, None]:
+    ) -> Generator[PayloadClaim | None, None, None]:
         """
         Busca y bloquea atómicamente la siguiente pieza libre de un Job.
         Al salir del bloque `with`, el lease de la pieza se libera automáticamente.
@@ -245,9 +238,7 @@ class ConcurrencyCoordinator:
         fulfilled_ids = [
             r.payload_id
             for r in RemotePayload.select(RemotePayload.payload_id).where(
-                (
-                    RemotePayload.is_orphaned == False  # noqa: E712
-                )
+                RemotePayload.is_orphaned == False
             )
         ]
 
@@ -259,8 +250,8 @@ class ConcurrencyCoordinator:
         )
 
         candidates = list(query)
-        selected_payload: Optional[Payload] = None
-        selected_resource_id: Optional[str] = None
+        selected_payload: Payload | None = None
+        selected_resource_id: str | None = None
 
         # Reclamo atómico: intentar adquirir la primera pieza disponible
         for candidate in candidates:

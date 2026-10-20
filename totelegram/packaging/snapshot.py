@@ -90,6 +90,7 @@ class SnapshotService:
                         relative_path=m.relative_path,
                         size=m.size,
                         md5sum=m.md5sum,
+                        start_offset=getattr(m, "start_offset", 0),
                         fragments=fragments,
                     )
                 )

@@ -34,6 +34,6 @@ prompt.md
 # github/
 # .pre-commit-config.yaml
 # README.md
-docs/
+docs/debate
 *.backup
 # .github/

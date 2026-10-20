@@ -98,7 +98,7 @@ class StatelessPartitioner:
             exclude_patterns=str(exclude_patterns),
         )
 
-        # 1. Calcular segmentos de volúmenes directamente sin crear FileObjects en disco
+        # Calcular segmentos de volúmenes directamente sin crear FileObjects en disco
         segments = list(calculate_segments(tape.total_size, max_chunk_size))
         total_parts = len(segments)
 
@@ -122,7 +122,7 @@ class StatelessPartitioner:
                 )
             )
 
-        # 2. Transmisión streaming de coordenadas GPS en una sola pasada SQL O(1)
+        # Transmisión streaming de coordenadas GPS en una sola pasada SQL O(1)
         members = []
         for track_gps in tape.iter_gps(tag_or_size=max_chunk_size):
             if track_gps.is_dir:
@@ -138,7 +138,6 @@ class StatelessPartitioner:
             frags = []
 
             for frag_idx, sl in enumerate(track_gps.fragments):
-                # Deducción determinista del estado según la posición del fragmento
                 if total_frags == 1:
                     frag_state = EntryState.COMPLETE.value
                 elif frag_idx == 0:
@@ -163,6 +162,7 @@ class StatelessPartitioner:
                     relative_path=track_gps.arc_path,
                     size=track_gps.size,
                     md5sum=checksum_val,
+                    start_offset=track_gps.start_offset,
                     fragments=frags,
                 )
             )

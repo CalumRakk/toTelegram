@@ -47,6 +47,9 @@ class TapeMemberSnapshot(BaseModel):
     relative_path: str
     size: int
     md5sum: str
+    start_offset: int = Field(
+        default=0, description="Offset de inicio en el TAR continuo"
+    )
     fragments: List[FileFragment]
 
 
@@ -146,16 +149,16 @@ class VirtualFileFragment(BaseModel):
 
 
 class VirtualTapeMember(BaseModel):
-    """
-    Representación lógica de un archivo individual contenido dentro de una carpeta archivada.
-    Esto se convertirá posteriormente en registros de 'TapeMember' y 'TapeMemberGPS'.
-    """
+    """Representación lógica de un archivo individual contenido dentro de una carpeta archivada."""
 
     relative_path: str = Field(
-        ..., description="Ruta relativa del archivo dentro de la carpeta de origen"
+        ..., description="Ruta relativa del archivo dentro de la carpeta"
     )
-    size: int = Field(..., description="Tamaño real en bytes del archivo desarchivado")
+    size: int = Field(..., description="Tamaño real en bytes del archivo")
     md5sum: str = Field(..., description="Firma MD5 única del archivo")
+    start_offset: int = Field(
+        default=0, description="Offset de inicio en el TAR continuo"
+    )
     fragments: List[VirtualFileFragment] = Field(
         default_factory=list,
         description="Lista de fragmentos lógicos que componen el archivo físico",
