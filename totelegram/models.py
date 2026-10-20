@@ -678,6 +678,21 @@ class TapeMember(BaseModel):
             ]
             cls.insert_many(member_data).on_conflict_ignore().execute()
 
+    def get_slices(self, volume_size: int) -> list[FileSlice]:
+        """Calcula los fragmentos quirúrgicos del archivo usando las matemáticas de TarTape.
+
+        Args:
+            volume_size: Tamaño de partición de los volúmenes en bytes.
+
+        Returns:
+            list[FileSlice]: Lista de fragmentos calculados con aritmética O(1).
+        """
+        return calculate_file_slices(
+            start_offset=self.start_offset,
+            file_size=self.size,
+            volume_size=volume_size,
+        )
+
 
 class TapeMemberGPS(BaseModel):
     member = cast(TapeMember, peewee.ForeignKeyField(TapeMember, backref="fragments"))
@@ -695,21 +710,6 @@ class TapeMemberGPS(BaseModel):
     @property
     def volume_length(self) -> int:
         return self.bytes_in_volume
-
-    def get_slices(self, volume_size: int) -> list[FileSlice]:
-        """Calcula los fragmentos quirúrgicos del archivo usando las matemáticas de TarTape.
-
-        Args:
-            volume_size: Tamaño de partición de los volúmenes en bytes.
-
-        Returns:
-            list[FileSlice]: Lista de fragmentos calculados con aritmética O(1).
-        """
-        return calculate_file_slices(
-            start_offset=self.start_offset,
-            file_size=self.size,
-            volume_size=volume_size,
-        )
 
 
 class Claim(BaseModel):

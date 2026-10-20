@@ -24,6 +24,7 @@ script.py
 NOTES.md
 .contextignore
 prompt.md
+*.code-workspace
 
 # EXCLUSIONES TEMPORALES DE PROJECT_CONTEXT
 
