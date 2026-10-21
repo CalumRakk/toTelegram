@@ -2,21 +2,22 @@ import json
 import logging
 import lzma
 from pathlib import Path
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING, Optional
 
-from totelegram.models import Job, Payload, RemotePayload, TapeMember
+import tartape
+
+from totelegram.models import Job, Payload, RemotePayload
 from totelegram.packaging.schemas import (
-    FileFragment,
+    TTAPE_EXTENSION,
     RemotePart,
     SourceMetadata,
-    TapeMemberSnapshot,
     UploadManifest,
 )
+from totelegram.packaging.ttape import TapeContainer
 from totelegram.schemas import SourceType
 
 if TYPE_CHECKING:
     from pyrogram.client import Client
-
 
 logger = logging.getLogger(__name__)
 
@@ -24,17 +25,26 @@ logger = logging.getLogger(__name__)
 class SnapshotService:
     @staticmethod
     def load_snapshot(path: Path, client: Optional["Client"] = None) -> UploadManifest:
-        """Carga y valida un snapshot, auto-migrándolo transparentemente a v5.0 si es antiguo."""
+        """Carga y valida un snapshot de forma polimórfica (.ttape o .json.xz)."""
+        target = Path(path).resolve()
+        if not target.exists():
+            raise FileNotFoundError(f"Snapshot no encontrado en: {target}")
+
+        if target.suffix == TTAPE_EXTENSION or target.name.endswith(TTAPE_EXTENSION):
+            return TapeContainer.read_manifest(target)
+
+        # Para formatos antiguos o .json.xz, delegamos en el upgrader
         from totelegram.packaging.upgrader import SnapshotUpgrader
 
-        return SnapshotUpgrader.load_and_upgrade(path, tg_client=client)
+        return SnapshotUpgrader.load_and_upgrade(target, tg_client=client)
 
     @staticmethod
     def generate_snapshot(job: Job) -> UploadManifest:
+        """Genera el snapshot en disco bifurcando entre .json.xz (archivo) y .ttape (carpeta)."""
         source = job.source
         original_file_path = Path(source.path_str)
 
-        # Recuperar remotos existentes y activos uniendo con Payload
+        # 1. Recuperar piezas remotas activas
         remotes_db = list(
             RemotePayload.select(RemotePayload, Payload)
             .join(Payload)
@@ -62,43 +72,9 @@ class SnapshotService:
             for r in remotes_db
         ]
 
-        inventory: List[TapeMemberSnapshot] | None = None
-        if source.type == SourceType.FOLDER:
-            inventory = []
-
-            # Obtenemos los miembros ordenados por su posición en el TAR continuo
-            members = (
-                TapeMember.select()
-                .where(TapeMember.source == source)
-                .order_by(TapeMember.start_offset)
-            )
-
-            chunk_size = job.config.tg_max_size
-            for m in members:
-                # Calculamos los fragmentos quirúrgicos en memoria vía O(1)
-                fragments = [
-                    FileFragment(
-                        vol_idx=sl.volume_index,
-                        volume_offset=sl.volume_offset,
-                        volume_length=sl.volume_length,
-                        source_offset=sl.source_offset,
-                    )
-                    for sl in m.get_slices(chunk_size)
-                ]
-
-                inventory.append(
-                    TapeMemberSnapshot(
-                        relative_path=m.relative_path,
-                        size=m.size,
-                        md5sum=m.md5sum,
-                        start_offset=m.start_offset,
-                        fragments=fragments,
-                    )
-                )
-
         owner = remotes_db[0].owner
 
-        # Mapeamos a los metadatos independientes de la base de datos
+        # 2. Metadatos del Source (en v6.0 el inventario JSON es None)
         source_meta = SourceMetadata(
             filename=original_file_path.name,
             size=source.size,
@@ -107,7 +83,7 @@ class SnapshotService:
             mtime=source.mtime,
             type=source.type,
             tape_catalog=source.tape_catalog,
-            inventory=inventory,
+            inventory=None,
         )
 
         manifest = UploadManifest(
@@ -121,35 +97,76 @@ class SnapshotService:
             parts=parts,
         )
 
-        # Escritura física y atómica en disco
+        # 3. Bifurcación física de almacenamiento
         output_path = SnapshotService._resolve_snapshot_path(
-            original_file_path, source.md5sum
+            original_file_path, source.md5sum, source.type
         )
 
-        with lzma.open(output_path, "wt", encoding="utf-8") as f:
-            f.write(manifest.model_dump_json(indent=2))
+        if source.type == SourceType.FOLDER:
+            # Localizar el catálogo SQLite generado por tartape en T0
+            catalog_file = tartape.discover(original_file_path)
+            if not catalog_file or not catalog_file.exists():
+                raise FileNotFoundError(
+                    f"No se encontró el catálogo .tartape para la carpeta '{original_file_path.name}'."
+                )
 
+            # Construir contenedor híbrido .ttape (ZIP: manifest.json + catalog.tartape)
+            TapeContainer.build(
+                output_path=output_path,
+                manifest=manifest,
+                catalog_path=catalog_file,
+                overwrite=True,
+            )
+
+            # Cero residuos en disco: se absorbe y se elimina el .tartape suelto
+            try:
+                catalog_file.unlink(missing_ok=True)
+                logger.debug(
+                    f"Catálogo residual eliminado tras absorción: {catalog_file.name}"
+                )
+            except OSError as e:
+                logger.warning(
+                    f"No se pudo eliminar el catálogo temporal {catalog_file}: {e}"
+                )
+
+        else:
+            # Archivo individual: formato ligero .json.xz
+            with lzma.open(output_path, "wt", encoding="utf-8") as f:
+                f.write(manifest.model_dump_json(indent=2))
+
+        logger.info(f"Snapshot generado exitosamente: {output_path.name}")
         return manifest
 
     @staticmethod
-    def _resolve_snapshot_path(file_path: Path, current_md5: str) -> Path:
-        base_target = file_path.with_name(f"{file_path.name}.json.xz")
+    def _resolve_snapshot_path(
+        file_path: Path, current_md5: str, source_type: SourceType
+    ) -> Path:
+        """Resuelve la ruta final del snapshot evitando colisiones y asignando la extensión correcta."""
+        extension = TTAPE_EXTENSION if source_type == SourceType.FOLDER else ".json.xz"
+        base_target = file_path.with_name(f"{file_path.name}{extension}")
 
         if not base_target.exists():
             return base_target
 
+        # Si ya existe y es del mismo MD5, reutilizamos la misma ruta
         try:
-            with lzma.open(base_target, "rt", encoding="utf-8") as f:
-                existing_data = json.load(f)
-                if existing_data.get("source", {}).get("md5sum") == current_md5:
+            if source_type == SourceType.FOLDER:
+                existing_manifest = TapeContainer.read_manifest(base_target)
+                if existing_manifest.source.md5sum == current_md5:
                     return base_target
+            else:
+                with lzma.open(base_target, "rt", encoding="utf-8") as f:
+                    existing_data = json.load(f)
+                    if existing_data.get("source", {}).get("md5sum") == current_md5:
+                        return base_target
         except Exception:  # noqa: S110
             pass
 
+        # Generador de nombres incrementales si hay colisión
         counter = 1
         while True:
             new_target = file_path.with_name(
-                f"{file_path.stem} ({counter}){file_path.suffix}.json.xz"
+                f"{file_path.stem} ({counter}){file_path.suffix}{extension}"
             )
             if not new_target.exists():
                 return new_target

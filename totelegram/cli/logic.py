@@ -84,6 +84,9 @@ class InventoryEngine:
         if path.suffix == ".tartape" or path.name.endswith(".tartape"):
             return False
 
+        if path.suffix == ".ttape" or path.name.endswith(".ttape"):
+            return False
+
         if check_snapshot and has_snapshot(path) and not self.force:
             report.log_skip(path, "snapshot")
             return False

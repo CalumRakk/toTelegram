@@ -128,28 +128,23 @@ class TestSnapshotService(unittest.TestCase):
             self.assertEqual(disk_data["parts"][0]["part_md5sum"], "hash_pdf_12345")
 
     def test_generate_snapshot_for_folder_with_tape_inventory(self):
-        """Genera y valida un snapshot completo para una carpeta empaquetada (TAR)."""
+        """Genera y valida un snapshot contenedor (.ttape) para una carpeta archivada."""
+        import tartape
+
+        from totelegram.packaging.schemas import TTAPE_EXTENSION
+        from totelegram.packaging.ttape import TapeContainer
+
         folder_path = self.base_path / "mis_documentos"
         folder_path.mkdir()
+        sub_dir = folder_path / "sub"
+        sub_dir.mkdir()
+        (sub_dir / "archivo.txt").write_bytes(b"A" * 800)
 
-        catalog = TapeCatalog(
-            fingerprint="fingerprint_folder_abc",
-            total_size=1500,
-            total_files=2,
-            created_at=1700000000.0,
-            tartape_version="2.2.0",
-            exclude_patterns="[]",
-        )
+        # 1. tartape genera el catálogo SQLite T0 (.tartape)
+        tape = tartape.record(folder_path, checksum="md5", overwrite=True)
+        self.assertTrue(tape.catalog_path.exists())
 
-        source = Source.create(
-            path_str=str(folder_path),
-            md5sum=catalog.fingerprint,
-            size=catalog.total_size,
-            mtime=catalog.created_at,
-            mimetype="application/x-tar",
-            tape_catalog=catalog,
-            type=SourceType.FOLDER,
-        )
+        source = Source.create_from_tape(tape, exclusion_patterns=[])
 
         job = Job.create(
             source=source,
@@ -159,11 +154,11 @@ class TestSnapshotService(unittest.TestCase):
             config=StrategyConfig(
                 tg_max_size=1000,
                 user_is_premium=False,
-                app_version="0.9.15",
+                app_version="0.9.25",
             ),
         )
 
-        # Crear 2 payloads (volúmenes de la cinta)
+        # Crear 2 payloads simulando volúmenes
         p1 = Payload.create(
             job=job,
             sequence_index=0,
@@ -178,20 +173,11 @@ class TestSnapshotService(unittest.TestCase):
             job=job,
             sequence_index=1,
             start_offset=1000,
-            end_offset=1500,
-            size=500,
+            end_offset=source.size,
+            size=max(0, source.size - 1000),
             filename="mis_documentos.tar.02-02",
             filename_short="fp_abc.tar.02-02",
             md5sum="vol2_md5",
-        )
-
-        # Registrar miembros internos y su GPS
-        _ = TapeMember.create(
-            source=source,
-            relative_path="sub/archivo.txt",
-            size=800,  # 800 bytes: inicia en 512 y termina en 1312 (cruza exactamente Vol 0 y Vol 1)
-            md5sum="file_md5_full",
-            start_offset=0,
         )
 
         msg1 = self._create_mock_message(201, self.chat.id, "https://t.me/c/1/201")
@@ -204,13 +190,27 @@ class TestSnapshotService(unittest.TestCase):
             RemotePayload.register_upload(payload=p2, tg_message=msg2, owner=self.user)
             manifest = SnapshotService.generate_snapshot(job)
 
-        self.assertIsNotNone(manifest.source.inventory)
-        assert manifest.source.inventory is not None
-        self.assertEqual(len(manifest.source.inventory), 1)
-        self.assertEqual(manifest.source.inventory[0].relative_path, "sub/archivo.txt")
-        self.assertEqual(len(manifest.source.inventory[0].fragments), 2)
-        self.assertEqual(manifest.source.inventory[0].fragments[0].vol_idx, 0)
-        self.assertEqual(manifest.source.inventory[0].fragments[1].vol_idx, 1)
+        # 2. Validaciones bajo el estándar v6.0 (.ttape)
+        # En v6.0, el JSON ya NO tiene el array inventory (RAM O(1))
+        self.assertIsNone(manifest.source.inventory)
+        self.assertEqual(len(manifest.parts), 2)
+
+        # Debe generar físicamente el contenedor .ttape
+        expected_ttape = folder_path.with_name(f"{folder_path.name}{TTAPE_EXTENSION}")
+        self.assertTrue(
+            expected_ttape.exists(), "El contenedor .ttape no fue creado en disco"
+        )
+
+        # Cero residuos: el catálogo suelto .tartape debe haber sido absorbido y eliminado
+        self.assertFalse(
+            tape.catalog_path.exists(), "El catálogo suelto .tartape no fue limpiado"
+        )
+
+        # El catálogo SQLite dentro del .ttape debe ser legible y contener los archivos
+        with TapeContainer.open_catalog(expected_ttape) as cat:
+            self.assertEqual(cat.fingerprint, tape.fingerprint)
+            track = cat.locate("mis_documentos/sub/archivo.txt")
+            self.assertEqual(track.file_size, 800)
 
     def test_snapshot_fails_without_remotes(self):
         """Debe lanzar ValueError si se intenta generar un snapshot de un Job sin piezas subidas."""

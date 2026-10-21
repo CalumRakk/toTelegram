@@ -40,23 +40,27 @@ def is_excluded(path: Path, patterns: List[str]) -> bool:
 
 
 def has_snapshot(file_path: Path) -> bool:
-    filename_plus_ext = file_path.with_name(f"{file_path.name}.json.xz")
-    stem_plus_ext = file_path.with_name(f"{file_path.stem}.json.xz")
-    return filename_plus_ext.exists() or stem_plus_ext.exists()
-
-
-def delete_snapshot(file_path: Path):
-    """Elimina los posibles archivos de snapshot y sidecars asociados a una ruta."""
     targets = [
         file_path.with_name(f"{file_path.name}.json.xz"),
         file_path.with_name(f"{file_path.stem}.json.xz"),
+        file_path.with_name(f"{file_path.name}.ttape"),
+        file_path.with_name(f"{file_path.stem}.ttape"),
+    ]
+    return any(t.exists() for t in targets)
+
+
+def delete_snapshot(file_path: Path):
+    targets = [
+        file_path.with_name(f"{file_path.name}.json.xz"),
+        file_path.with_name(f"{file_path.stem}.json.xz"),
+        file_path.with_name(f"{file_path.name}.ttape"),
+        file_path.with_name(f"{file_path.stem}.ttape"),
         file_path.with_name(f"{file_path.name}.tartape"),
         file_path.with_name(f"{file_path.stem}.tartape"),
     ]
     for target in targets:
         if target.exists() and target.is_file():
             target.unlink()
-            logger.debug(f"Archivo eliminado físicamente: {target.name}")
 
 
 def is_valid_profile_name(profile_name: str) -> bool:

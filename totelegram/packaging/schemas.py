@@ -1,15 +1,18 @@
-import logging
 from datetime import datetime
-from typing import List
+from pathlib import Path
 
 from pydantic import AliasChoices, BaseModel, Field
 
 from totelegram import __VERSION__
 from totelegram.schemas import SourceType, Strategy, TapeCatalog
 
-logger = logging.getLogger(__name__)
+# Versión del esquema del manifiesto
+MANIFEST_VERSION = "6.0"
 
-MANIFEST_VERSION = "5.1"
+# Constantes del contenedor híbrido para cintas de datos (.ttape)
+TTAPE_EXTENSION = ".ttape"
+TTAPE_MANIFEST_FILENAME = "manifest.json"
+TTAPE_CATALOG_FILENAME = "catalog.tartape"
 
 
 class FileFragment(BaseModel):
@@ -31,7 +34,6 @@ class FileFragment(BaseModel):
         description="Offset de inicio dentro del archivo original reconstruido",
     )
 
-    # Propiedades de retrocompatibilidad
     @property
     def offset_in_vol(self) -> int:
         return self.volume_offset
@@ -42,7 +44,7 @@ class FileFragment(BaseModel):
 
 
 class TapeMemberSnapshot(BaseModel):
-    """Representación de un archivo dentro de una carpeta archivada."""
+    """Representación de un archivo dentro de una carpeta archivada (utilizado en v5.x / migración)."""
 
     relative_path: str
     size: int
@@ -50,7 +52,7 @@ class TapeMemberSnapshot(BaseModel):
     start_offset: int = Field(
         default=0, description="Offset de inicio en el TAR continuo"
     )
-    fragments: List[FileFragment]
+    fragments: list[FileFragment] = Field(default_factory=list)
 
 
 class SourceMetadata(BaseModel):
@@ -61,7 +63,8 @@ class SourceMetadata(BaseModel):
     mtime: float
     type: SourceType
     tape_catalog: TapeCatalog | None = None
-    inventory: List[TapeMemberSnapshot] | None = None
+    # En v6.0 (.ttape), inventory es None porque el inventario reside en catalog.tartape
+    inventory: list[TapeMemberSnapshot] | None = None
 
 
 class RemotePart(BaseModel):
@@ -86,15 +89,22 @@ class UploadManifest(BaseModel):
     owner_id: int
     owner_name: str
     source: SourceMetadata
-    parts: List[RemotePart]
+    parts: list[RemotePart]
 
 
+class TapeContainerInfo(BaseModel):
+    """DTO de inspección para contenedores híbridos .ttape."""
+
+    path: Path
+    manifest: UploadManifest
+    manifest_size_bytes: int
+    catalog_compressed_bytes: int
+    catalog_uncompressed_bytes: int
+    total_container_bytes: int
+
+
+# Modelos virtuales para particionado en memoria
 class VirtualChunk(BaseModel):
-    """
-    Representación lógica y pura de un fragmento o volumen físico.
-    Esto se convertirá posteriormente en un registro de la tabla 'Payload'.
-    """
-
     sequence_index: int = Field(
         ..., description="Índice secuencial de la pieza (0, 1, 2...)"
     )
@@ -102,43 +112,21 @@ class VirtualChunk(BaseModel):
         ..., description="Offset de byte inicial en el recurso de origen"
     )
     end_offset: int = Field(
-        ..., description="Offset de byte final (exclusivo) en el recurso de origen"
+        ..., description="Offset de byte final en el recurso de origen"
     )
     size: int = Field(..., description="Tamaño total en bytes de esta partición")
     filename: str = Field(..., description="Nombre amigable propuesto para Telegram")
-    filename_short: str = Field(
-        ..., description="Nombre corto o hash propuesto para evadir límites de longitud"
-    )
-    md5sum: str | None = Field(
-        default=None, description="MD5 del volumen físico (calculado durante la subida)"
-    )
+    filename_short: str = Field(..., description="Nombre corto o hash propuesto")
+    md5sum: str | None = Field(default=None, description="MD5 del volumen físico")
 
 
 class VirtualFileFragment(BaseModel):
-    """
-    GPS de un fragmento de archivo interno dentro de una cinta.
-    Mapea cómo se distribuyen los bytes de un archivo dentro de los volúmenes virtuales.
-    """
+    vol_idx: int
+    volume_offset: int
+    volume_length: int
+    source_offset: int = 0
+    state: str
 
-    vol_idx: int = Field(
-        ..., description="Índice del volumen (VirtualChunk) donde reside este fragmento"
-    )
-    volume_offset: int = Field(
-        ..., description="Offset de inicio dentro del volumen .tar"
-    )
-    volume_length: int = Field(
-        ..., description="Cantidad de bytes útiles en este volumen"
-    )
-    source_offset: int = Field(
-        default=0,
-        description="Offset de inicio dentro del archivo original reconstruido",
-    )
-    state: str = Field(
-        ...,
-        description="Estado de integridad del fragmento según tartape (ej: COMPLETED)",
-    )
-
-    # Propiedades de retrocompatibilidad
     @property
     def offset_in_vol(self) -> int:
         return self.volume_offset
@@ -149,41 +137,17 @@ class VirtualFileFragment(BaseModel):
 
 
 class VirtualTapeMember(BaseModel):
-    """Representación lógica de un archivo individual contenido dentro de una carpeta archivada."""
-
-    relative_path: str = Field(
-        ..., description="Ruta relativa del archivo dentro de la carpeta"
-    )
-    size: int = Field(..., description="Tamaño real en bytes del archivo")
-    md5sum: str = Field(..., description="Firma MD5 única del archivo")
-    start_offset: int = Field(
-        default=0, description="Offset de inicio en el TAR continuo"
-    )
-    fragments: List[VirtualFileFragment] = Field(
-        default_factory=list,
-        description="Lista de fragmentos lógicos que componen el archivo físico",
-    )
+    relative_path: str
+    size: int
+    md5sum: str
+    start_offset: int = 0
+    fragments: list[VirtualFileFragment] = Field(default_factory=list)
 
 
 class VirtualTapeCatalog(BaseModel):
-    """
-    Metadatos globales de la cinta generada para una carpeta.
-    Esto se almacenará en la columna JSON de la tabla 'Source'.
-    """
-
-    fingerprint: str = Field(
-        ..., description="Firma única del estado actual del directorio"
-    )
-    total_size: int = Field(
-        ..., description="Suma de los tamaños de todos los archivos contenidos"
-    )
-    total_files: int = Field(
-        ..., description="Cantidad de archivos indexados en la cinta"
-    )
-    tartape_version: str = Field(
-        ..., description="Versión de tartape utilizada para generar la estructura"
-    )
-    created_at: float = Field(..., description="Timestamp Unix de creación del índice")
-    exclude_patterns: str = Field(
-        ..., description="Lista de exclusión serializada aplicada durante el escaneo"
-    )
+    fingerprint: str
+    total_size: int
+    total_files: int
+    tartape_version: str
+    created_at: float
+    exclude_patterns: str

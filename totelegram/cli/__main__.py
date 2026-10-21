@@ -19,7 +19,7 @@ logging.getLogger("dotenv").setLevel(logging.CRITICAL)
 logger = logging.getLogger(__name__)
 
 app = typer.Typer(
-    help="Herramienta para subir archivos a Telegram sin límite de tamaño.",
+    help="Herramienta para subir archivos a Telegram sin límite de tamaño.#",
     add_completion=False,
     no_args_is_help=True,
 )

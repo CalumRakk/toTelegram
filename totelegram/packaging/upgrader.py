@@ -157,7 +157,7 @@ class SnapshotUpgrader:
     def detect_version(data: Dict[str, Any]) -> str:
         if "manifest_version" in data:
             ver = str(data["manifest_version"])
-            if ver in ("5.1", "5.0"):
+            if ver in ("6.0", "5.1", "5.0"):
                 return ver
         if "version" in data and data["version"] is not None:
             return str(data["version"])
@@ -173,8 +173,8 @@ class SnapshotUpgrader:
     ) -> Tuple[Dict[str, Any], str]:
         ver = cls.detect_version(data)
 
-        if ver == "5.1":
-            return data, "5.1 (nativo)"
+        if ver in ("6.0", "5.1"):
+            return data, f"{ver} (nativo)"
         if ver == "5.0":
             return cls._upgrade_v5_0_to_v5_1(data), "5.0 -> 5.1"
         if ver == "4.0":

@@ -20,6 +20,7 @@ from totelegram.models import (
     TelegramUser,
 )
 from totelegram.packaging.schemas import MANIFEST_VERSION, UploadManifest
+from totelegram.packaging.ttape import TapeContainer
 from totelegram.packaging.upgrader import SnapshotUpgrader, load_raw_snapshot
 from totelegram.schemas import JobStatus, SourceType, StrategyConfig
 
@@ -188,6 +189,30 @@ class ImportPlan:
 class SnapshotInspector:
     @classmethod
     def inspect_file(cls, path: Path) -> SnapshotInspection:
+        # Soporte Nativo para Contenedores Híbridos .ttape (O(1))
+        if path.suffix == ".ttape" or path.name.endswith(".ttape"):
+            try:
+                if not TapeContainer.is_valid(path):
+                    return SnapshotInspection(
+                        path=path,
+                        status=InspectionStatus.CORRUPTED,
+                        error_detail="Contenedor .ttape inválido o faltan artefactos requeridos.",
+                    )
+                manifest = TapeContainer.read_manifest(path)
+                return SnapshotInspection(
+                    path=path,
+                    status=InspectionStatus.VALID,
+                    manifest=manifest,
+                    detected_version=manifest.manifest_version,
+                )
+            except Exception as e:
+                return SnapshotInspection(
+                    path=path,
+                    status=InspectionStatus.CORRUPTED,
+                    error_detail=f"Error leyendo contenedor .ttape: {e}",
+                )
+
+        # Flujo existente para .json.xz / yaml
         try:
             raw_data = load_raw_snapshot(path)
         except Exception as e:
@@ -231,7 +256,15 @@ class SnapshotInspector:
 
     @classmethod
     def find_all_candidates(cls, paths: List[Path]) -> List[Path]:
-        valid_exts = (".json", ".json.xz", ".yaml", ".yml", ".yaml.xz", ".yml.xz")
+        valid_exts = (
+            ".json",
+            ".json.xz",
+            ".yaml",
+            ".yml",
+            ".yaml.xz",
+            ".yml.xz",
+            ".ttape",
+        )
         candidates = []
         for p in paths:
             if p.is_file() and any(p.name.lower().endswith(ext) for ext in valid_exts):
@@ -528,8 +561,12 @@ class SnapshotImporter:
 
     @classmethod
     def _apply_item(cls, item: PlanItem, owner: TelegramUser | None):
+        """Aplica las mutaciones planificadas para un snapshot en la base de datos local."""
         manifest = item.manifest
 
+        # TODO: ESTA FUNCION MONSTRUO CUESTA SEGUIRLA. REFACTORIZAR URGENTE!
+
+        # Asegurar la existencia del chat de destino
         chat, _ = TelegramChat.get_or_create(
             id=item.target_chat_id,
             defaults={
@@ -540,6 +577,7 @@ class SnapshotImporter:
             },
         )
 
+        # Asegurar el usuario propietario del contenido
         owner_obj = owner
         if owner_obj is None:
             owner_obj, _ = TelegramUser.get_or_create(
@@ -551,6 +589,7 @@ class SnapshotImporter:
                 },
             )
 
+        # Obtener o crear el registro Source (identidad del archivo/carpeta)
         source = item.existing_source
         if source is None:
             source = Source.get_or_none(Source.md5sum == manifest.source.md5sum)
@@ -566,6 +605,7 @@ class SnapshotImporter:
                 tape_catalog=manifest.source.tape_catalog,
             )
 
+        # Obtener o formalizar el Job en este chat
         job = item.existing_job
         if job is None:
             job = Job.get_or_none(
@@ -587,6 +627,7 @@ class SnapshotImporter:
                 deleted_at=0,
             )
 
+        # Asegurar la existencia de todos los Payloads (piezas físicas)
         payload_map = {p.sequence_index: p for p in cast(list[Payload], job.payloads)}
 
         for part in manifest.parts:
@@ -604,6 +645,7 @@ class SnapshotImporter:
                 )
                 payload_map[part.sequence] = payload
 
+        # Vincular los RemotePayloads faltantes según el diff del plan
         will_link_sequences = {
             pd.sequence for pd in item.parts_diff if pd.action == PartAction.WILL_LINK
         }
@@ -633,35 +675,66 @@ class SnapshotImporter:
                 is_orphaned=False,
             )
 
-        # GESTIÓN DE ARCHIVOS TAR
+        # GESTIÓN DE ARCHIVOS DE LA CINTA TAR (TapeMember)
         if (
-            manifest.source.type == SourceType.FOLDER and manifest.source.inventory
-        ) and item.mutations.members_count > 0:
-            # Asegurar TapeMembers si hay miembros faltantes
-            member_inserts = []
-            for m in manifest.source.inventory:
-                start_off = getattr(m, "start_offset", 0)
+            manifest.source.type == SourceType.FOLDER
+            and item.mutations.members_count > 0
+        ):
+            snapshot_path = item.inspection.path
 
-                # Deducción matemática resiliente para snapshots antiguos sin start_offset
-                if start_off == 0 and getattr(m, "fragments", None):
-                    first = m.fragments[0]
-                    global_content = (
-                        first.vol_idx * manifest.chunk_size
-                    ) + first.volume_offset
-                    start_off = max(0, global_content - 512)
+            # CASO A: Contenedor híbrido .ttape (Volcado masivo directo desde SQLite)
+            if snapshot_path.suffix == ".ttape" or snapshot_path.name.endswith(
+                ".ttape"
+            ):
+                from totelegram.packaging.ttape import TapeContainer
 
-                member_inserts.append(
-                    {
-                        "source": source,
-                        "relative_path": m.relative_path,
-                        "size": m.size,
-                        "md5sum": m.md5sum,
-                        "start_offset": start_off,
-                    }
-                )
+                with TapeContainer.open_catalog(snapshot_path) as cat:  # noqa: SIM117
+                    with cat.db_session:
+                        cursor = cat.db_session.db.execute_sql(
+                            "SELECT arc_path, size, checksum, start_offset FROM track WHERE is_dir = 0"
+                        )
+                        tracks = cursor.fetchall()
 
-            for batch in batched(member_inserts, 100):
-                TapeMember.insert_many(batch).on_conflict_ignore().execute()
+                        member_inserts = [
+                            {
+                                "source": source,
+                                "relative_path": row[0],
+                                "size": row[1],
+                                "md5sum": row[2] or "",
+                                "start_offset": row[3] or 0,
+                            }
+                            for row in tracks
+                        ]
+
+                        for batch in batched(member_inserts, 500):
+                            TapeMember.insert_many(batch).on_conflict_ignore().execute()
+
+            # CASO B: Manifiesto legacy (.json.xz) con array inventory
+            elif manifest.source.inventory:
+                member_inserts = []
+                for m in manifest.source.inventory:
+                    start_off = getattr(m, "start_offset", 0)
+
+                    # Deducción matemática resiliente para snapshots antiguos sin start_offset
+                    if start_off == 0 and getattr(m, "fragments", None):
+                        first = m.fragments[0]
+                        global_content = (
+                            first.vol_idx * manifest.chunk_size
+                        ) + first.volume_offset
+                        start_off = max(0, global_content - 512)
+
+                    member_inserts.append(
+                        {
+                            "source": source,
+                            "relative_path": m.relative_path,
+                            "size": m.size,
+                            "md5sum": m.md5sum,
+                            "start_offset": start_off,
+                        }
+                    )
+
+                for batch in batched(member_inserts, 500):
+                    TapeMember.insert_many(batch).on_conflict_ignore().execute()
 
         # Actualizar estado a UPLOADED si no quedan piezas pendientes
         if Payload.total_pending_for_job(job) == 0 and job.status != JobStatus.UPLOADED:
