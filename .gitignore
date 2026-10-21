@@ -36,5 +36,7 @@ prompt.md
 # .pre-commit-config.yaml
 # README.md
 docs/debate
+docs/snapshot-hibrido-cintas-datos.md
+docs/Adquisición con Read-After-Write.md
 *.backup
 # .github/

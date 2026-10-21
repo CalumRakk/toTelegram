@@ -3,7 +3,7 @@ import time
 import unittest
 from datetime import datetime, timedelta, timezone
 from typing import cast
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from totelegram.concurrency import (
     AccountBusyError,
@@ -111,70 +111,79 @@ class TestConcurrencyCoordinator(unittest.TestCase):
 
     # PRUEBAS DE EXCLUSIÓN MUTUA DE CUENTA (guard_account)
 
-    def test_guard_account_lifecycle(self):
-        """Valida que guard_account adquiera el lease y lo libere al salir del bloque."""
+    @patch("totelegram.concurrency.TelegramAccountLock")
+    def test_guard_account_lifecycle(self, mock_lock_cls):
+        """Valida que guard_account adquiera el lock en Telegram y lo libere al salir del bloque."""
+        mock_lock_instance = MagicMock()
+        mock_lock_cls.return_value = mock_lock_instance
+
+        # Proveer cliente simulado al coordinador
+        self.coord_a.client = MagicMock()
         account_id = self.user.id
         resource_id = f"account:{account_id}"
 
-        self.assertIsNone(Claim.get_or_none(Claim.resource_id == resource_id))
-
         with self.coord_a.guard_account(account_id, ttl_seconds=60) as res:
             self.assertEqual(res, resource_id)
+            mock_lock_cls.assert_called_once_with(
+                client=self.coord_a.client,
+                account_id=account_id,
+                node_id=self.node_a,
+                ttl_seconds=60,
+            )
+            mock_lock_instance.acquire.assert_called_once()
 
-            # Verificar que el registro existe en la DB
-            claim = cast(Claim, Claim.get_or_none(Claim.resource_id == resource_id))
-            self.assertIsNotNone(claim)
-            self.assertEqual(claim.node_id, self.node_a)
-            self.assertEqual(claim.resource_type, ResourceType.ACCOUNT)
+        mock_lock_instance.release.assert_called_once()
+        self.assertIsNone(self.coord_a._active_account_lock)
 
-        # Al salir del bloque `with`, debe haberse eliminado
-        self.assertIsNone(Claim.get_or_none(Claim.resource_id == resource_id))
+    @patch("totelegram.concurrency.TelegramAccountLock")
+    def test_guard_account_collision_raises_busy_error(self, mock_lock_cls):
+        """Si Telegram indica que la cuenta está ocupada, propaga AccountBusyError."""
+        mock_lock_cls.return_value.acquire.side_effect = AccountBusyError(
+            self.user.id, self.node_a
+        )
+        self.coord_b.client = MagicMock()
 
-    def test_guard_account_collision_raises_busy_error(self):
-        """Si un nodo tiene bloqueada una cuenta, otro nodo debe recibir AccountBusyError."""
-        account_id = self.user.id
+        with self.assertRaises(AccountBusyError) as ctx:
+            with self.coord_b.guard_account(self.user.id):
+                pass
 
-        with self.coord_a.guard_account(account_id, ttl_seconds=60):
-            # El nodo B intenta usar la misma cuenta mientras A la tiene activa
-            with self.assertRaises(AccountBusyError) as ctx:
-                with self.coord_b.guard_account(account_id):
-                    pass
-
-            self.assertEqual(ctx.exception.account_id, account_id)
-            self.assertEqual(ctx.exception.holder_node_id, self.node_a)
+        self.assertEqual(ctx.exception.account_id, self.user.id)
+        self.assertEqual(ctx.exception.holder_node_id, self.node_a)
 
     def test_guard_account_anonymous_noop(self):
-        """Si account_id es None, guard_account debe operar sin crear claims en DB."""
+        """Si account_id es None, guard_account debe operar sin crear claims ni locks."""
         with self.coord_a.guard_account(account_id=None) as res:
             self.assertEqual(res, "account:anonymous")
 
         self.assertEqual(Claim.select().count(), 0)
 
-    # PRUEBAS DE EXPIRACIÓN Y RECUPERACIÓN DE LEASES (TTL)
+    # PRUEBAS DE EXPIRACIÓN Y RECUPERACIÓN DE LEASES LOCALES (TTL)
 
     def test_lease_expiration_and_recovery_by_another_node(self):
-        """Un lease expirado de Node A debe poder ser reclamado/sobreescrito por Node B."""
-        resource_id = f"account:{self.user.id}"
+        """Un lease de payload expirado de Node A debe poder ser reclamado por Node B."""
+        resource_id = "payload:999"
 
         # Crear un claim manualmente ya vencido en el pasado
         expired_time = datetime.now(timezone.utc) - timedelta(seconds=120)
         Claim.create(
             resource_id=resource_id,
-            resource_type=ResourceType.ACCOUNT,
+            resource_type=ResourceType.PAYLOAD,
             node_id=self.node_a,
             expires_at=expired_time,
         )
 
         # Node B debe ser capaz de tomar posesión del recurso porque el de A expiró
-        with self.coord_b.guard_account(self.user.id, ttl_seconds=100) as res:
-            self.assertEqual(res, resource_id)
-            claim = Claim.get(Claim.resource_id == resource_id)
-            self.assertEqual(claim.node_id, self.node_b)
-            self.assertGreater(claim.expires_at, datetime.now(timezone.utc))
+        acquired = self.coord_b._acquire_resource(
+            resource_id, ResourceType.PAYLOAD, ttl_seconds=100
+        )
+        self.assertTrue(acquired)
+        claim = Claim.get(Claim.resource_id == resource_id)
+        self.assertEqual(claim.node_id, self.node_b)
+        self.assertGreater(claim.expires_at, datetime.now(timezone.utc))
 
     def test_renew_resources_batch(self):
-        """Valida la renovación de vigencia en lote de múltiples recursos."""
-        res_ids = ["payload:101", "payload:102", f"account:{self.user.id}"]
+        """Valida la renovación de vigencia en lote de múltiples recursos locales (payloads)."""
+        res_ids = ["payload:101", "payload:102", "payload:103"]
 
         for rid in res_ids:
             self.coord_a._acquire_resource(rid, ResourceType.PAYLOAD, ttl_seconds=10)

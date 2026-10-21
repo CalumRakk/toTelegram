@@ -48,7 +48,11 @@ def prepare_upload_context(
             raise typer.Exit(1)
 
     discovery = DiscoveryService(client, db)
-    coordinator = ConcurrencyCoordinator(db, node_id=state.manager.node_id)
+    coordinator = ConcurrencyCoordinator(
+        db=db,
+        node_id=state.manager.node_id,
+        client=client,
+    )
     observer = RichUploadObserver()
 
     return UploadContext(

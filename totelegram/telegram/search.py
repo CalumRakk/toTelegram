@@ -1,3 +1,4 @@
+# pyright: reportGeneralTypeIssues=false
 import logging
 from typing import TYPE_CHECKING, Generator, List
 
@@ -5,9 +6,45 @@ from totelegram.telegram.types import ChatMatch, ChatResolution
 
 if TYPE_CHECKING:
     from pyrogram.client import Client
+    from pyrogram.types import Message
 
 
 logger = logging.getLogger(__name__)
+
+
+def find_messages_with_history_fallback(
+    client: "Client",
+    chat_id: int | str,
+    query: str,
+    search_limit: int = 25,
+    history_limit: int = 5,
+) -> list["Message"]:
+    """
+    Busca mensajes combinando el motor de búsqueda de Telegram con una
+    inspección del historial reciente para evitar falsos negativos por
+    latencia de indexación asíncrona.
+    """
+    from pyrogram.errors import RPCError
+
+    found_by_id: dict[int, "Message"] = {}
+
+    try:
+        for msg in client.search_messages(chat_id, query=query, limit=search_limit):
+            if msg and msg.id:
+                found_by_id[msg.id] = msg
+    except RPCError as e:
+        logger.warning(f"Error en búsqueda indexada en {chat_id}: {e}")
+
+    try:
+        for msg in client.get_chat_history(chat_id, limit=history_limit):
+            if not msg or not msg.text:
+                continue
+            if query.lower() in msg.text.lower():
+                found_by_id[msg.id] = msg
+    except RPCError as e:
+        logger.warning(f"Error consultando historial reciente en {chat_id}: {e}")
+
+    return sorted(found_by_id.values(), key=lambda m: m.id)
 
 
 class ChatSearchService:

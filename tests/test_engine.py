@@ -35,7 +35,9 @@ class TestEnginePipelineAndComponents(unittest.TestCase):
 
         self.mock_client = MagicMock()
         self.mock_observer = MagicMock(spec=UploadObserver)
-        self.coordinator = ConcurrencyCoordinator(self.db, node_id="test_pipeline_node")
+        self.coordinator = ConcurrencyCoordinator(
+            self.db, node_id="test_pipeline_node", client=self.mock_client
+        )
 
         self.chat = TelegramChat.create(
             id=-100123456, title="Canal Pipeline", type="channel"
@@ -66,7 +68,12 @@ class TestEnginePipelineAndComponents(unittest.TestCase):
             observer=self.mock_observer,
         )
 
+        # Evitar llamadas de red en el lock de cuenta durante pruebas de pipeline
+        self.patcher_lock = patch("totelegram.concurrency.TelegramAccountLock")
+        self.mock_account_lock = self.patcher_lock.start()
+
     def tearDown(self):
+        self.patcher_lock.stop()
         self.db_session.close()
 
     # --- PRUEBAS DE FACTORY & MULTIPLEXER ---

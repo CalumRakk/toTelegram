@@ -341,7 +341,7 @@ class TestSnapshotService(unittest.TestCase):
                         relative_path="archivo.txt",
                         size=300,
                         md5sum="md5_arch",
-                        start_offset=0,  # <--- Antiguo
+                        start_offset=0,
                         fragments=[
                             FileFragment(
                                 vol_idx=0,
