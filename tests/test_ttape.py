@@ -217,7 +217,7 @@ class TestTapeContainerAndBifurcation(unittest.TestCase):
         mock_msg = self._create_mock_message(101, self.chat.id, "https://t.me/c/1/101")
         RemotePayload.register_upload(payload, mock_msg, self.user)
 
-        manifest = SnapshotService.generate_snapshot(job)
+        _, _ = SnapshotService.generate_snapshot(job)
 
         # Debe generar reporte.pdf.json.xz
         expected_snap = file_path.with_name(f"{file_path.name}.json.xz")
@@ -252,7 +252,7 @@ class TestTapeContainerAndBifurcation(unittest.TestCase):
         RemotePayload.register_upload(payload, mock_msg, self.user)
 
         # 2. Generar snapshot
-        manifest = SnapshotService.generate_snapshot(job)
+        manifest, _ = SnapshotService.generate_snapshot(job)
 
         # 3. Comprobaciones de almacenamiento
         expected_ttape = folder.with_name(f"{folder.name}{TTAPE_EXTENSION}")

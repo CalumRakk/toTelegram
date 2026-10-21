@@ -328,6 +328,9 @@ class Job(BaseModel):
 
     deleted_at = cast(float, peewee.FloatField(default=0))
 
+    snapshot_message_id = cast(int | None, peewee.BigIntegerField(null=True))
+    last_verified_at = cast(datetime | None, peewee.DateTimeField(null=True))
+
     @property
     def path(self) -> Path:
         return Path(self.source.path_str)
@@ -482,6 +485,20 @@ class Job(BaseModel):
                 TapeMember.insert_many(batch).on_conflict_ignore().execute()
 
         return cast(List[Payload], list(self.payloads.order_by(Payload.sequence_index)))
+
+    def set_snapshot_published(self, message_id: int):
+        """Registra el mensaje del snapshot en Telegram y marca el Job como UPLOADED."""
+        self.snapshot_message_id = message_id
+        self.last_verified_at = get_utc_now()
+        self.status = JobStatus.UPLOADED
+        self.save(
+            only=[
+                Job.snapshot_message_id,
+                Job.last_verified_at,
+                Job.status,
+                Job.updated_at,
+            ]
+        )
 
 
 # El índice compuesto único impide que existan dos jobs activos (deleted_at == 0) para el mismo archivo en el mismo chat.

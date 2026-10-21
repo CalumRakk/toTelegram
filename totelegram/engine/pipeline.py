@@ -7,6 +7,7 @@ from totelegram.database import db_transaction
 from totelegram.engine.planner import JobPlanner
 from totelegram.engine.strategies.base import StrategyResolver
 from totelegram.models import Payload
+from totelegram.packaging.publisher import SnapshotPublicationError, SnapshotPublisher
 from totelegram.packaging.snapshot import SnapshotService
 from totelegram.schemas import JobStatus
 from totelegram.types import JobExecutionResult, UploadContext
@@ -51,19 +52,49 @@ class JobPipeline:
             is_completed = False
             snapshot_generated = False
 
-            with db_transaction(self.ctx.db):
-                pending_pieces = Payload.total_pending_for_job(job)
-                if pending_pieces == 0:
-                    is_completed = True
-                    if job.status != JobStatus.UPLOADED:
-                        job.set_uploaded()
+            # Verificamos si todas las partes físicas están en Telegram
+            pending_pieces = Payload.total_pending_for_job(job)
 
-            if is_completed:
-                try:
-                    SnapshotService.generate_snapshot(job)
-                    snapshot_generated = True
-                except Exception:
-                    logger.exception(f"Error generando snapshot para Job {job.id}")
+            if pending_pieces == 0:
+                is_completed = True
+
+                # IDEMPOTENCIA: Si el snapshot aún no se ha publicado en Telegram
+                if job.snapshot_message_id is None:
+                    try:
+                        # 1. Generar snapshot local (.json.xz o .ttape)
+                        manifest, snapshot_path = SnapshotService.generate_snapshot(job)
+                        snapshot_generated = True
+
+                        # 2. Publicar snapshot en Telegram con caption estructurado
+                        self.ctx.observer.on_pause_start(
+                            0, "Publicando snapshot en Telegram"
+                        )  # Notificación visual
+                        sent_msg = SnapshotPublisher.publish(
+                            client=self.ctx.client,
+                            chat_id=self.ctx.tg_chat.id,
+                            snapshot_path=snapshot_path,
+                            manifest=manifest,
+                        )
+
+                        # 3. Transacción atómica: vincular snapshot y sellar Job
+                        with db_transaction(self.ctx.db):
+                            job.set_snapshot_published(sent_msg.id)
+                            logger.info(
+                                f"Job {job.id} completado y sellado con snapshot Msg ID: {sent_msg.id}"
+                            )
+
+                    except SnapshotPublicationError as e:
+                        logger.error(f"Fallo al publicar snapshot en Telegram: {e}")
+                        # Los chunks ya están en Telegram y DB; en la próxima ejecución solo reintentará publicar el snapshot
+                    except Exception:
+                        logger.exception(
+                            f"Error inesperado en cierre de snapshot para Job {job.id}"
+                        )
+                else:
+                    # El snapshot ya estaba publicado (ej. reanudación o re-ejecución)
+                    if job.status != JobStatus.UPLOADED:
+                        with db_transaction(self.ctx.db):
+                            job.set_uploaded()
 
             self.ctx.observer.on_job_complete(job, snapshot_generated)
 

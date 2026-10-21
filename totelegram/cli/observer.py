@@ -191,7 +191,11 @@ class RichUploadObserver:
 
     def on_job_complete(self, job: "Job", snapshot_created: bool) -> None:
         """Notifica el cierre de un Job."""
-        if snapshot_created:
+        if job.snapshot_message_id:
+            UI.success(
+                f"Snapshot publicado en Telegram [bold cyan](Msg ID: {job.snapshot_message_id})[/]"
+            )
+        elif snapshot_created:
             UI.info("Snapshot local generado e indexado.")
 
 

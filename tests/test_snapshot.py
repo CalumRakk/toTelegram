@@ -105,7 +105,7 @@ class TestSnapshotService(unittest.TestCase):
             RemotePayload.register_upload(
                 payload=payload, tg_message=mock_msg, owner=self.user
             )
-            manifest = SnapshotService.generate_snapshot(job)
+            manifest, _ = SnapshotService.generate_snapshot(job)
 
         # Validar retorno en memoria
         self.assertEqual(manifest.manifest_version, MANIFEST_VERSION)
@@ -188,7 +188,7 @@ class TestSnapshotService(unittest.TestCase):
         ):
             RemotePayload.register_upload(payload=p1, tg_message=msg1, owner=self.user)
             RemotePayload.register_upload(payload=p2, tg_message=msg2, owner=self.user)
-            manifest = SnapshotService.generate_snapshot(job)
+            manifest, _ = SnapshotService.generate_snapshot(job)
 
         # 2. Validaciones bajo el estándar v6.0 (.ttape)
         # En v6.0, el JSON ya NO tiene el array inventory (RAM O(1))

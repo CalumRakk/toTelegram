@@ -9,4 +9,4 @@ Ver: docs/VISION.md
 """
 
 __VERSION__ = "0.9.25"
-__CURRENT_DB_VERSION__ = 7
+__CURRENT_DB_VERSION__ = 8

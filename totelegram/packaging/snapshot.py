@@ -39,8 +39,11 @@ class SnapshotService:
         return SnapshotUpgrader.load_and_upgrade(target, tg_client=client)
 
     @staticmethod
-    def generate_snapshot(job: Job) -> UploadManifest:
-        """Genera el snapshot en disco bifurcando entre .json.xz (archivo) y .ttape (carpeta)."""
+    def generate_snapshot(job: Job) -> tuple[UploadManifest, Path]:
+        """Genera el snapshot en disco bifurcando entre .json.xz (archivo) y .ttape (carpeta).
+
+        Retorna una tupla (UploadManifest, Path del archivo generado).
+        """
         source = job.source
         original_file_path = Path(source.path_str)
 
@@ -98,19 +101,17 @@ class SnapshotService:
         )
 
         # 3. Bifurcación física de almacenamiento
-        output_path = SnapshotService._resolve_snapshot_path(
+        output_path = SnapshotService.resolve_snapshot_path(
             original_file_path, source.md5sum, source.type
         )
 
         if source.type == SourceType.FOLDER:
-            # Localizar el catálogo SQLite generado por tartape en T0
             catalog_file = tartape.discover(original_file_path)
             if not catalog_file or not catalog_file.exists():
                 raise FileNotFoundError(
                     f"No se encontró el catálogo .tartape para la carpeta '{original_file_path.name}'."
                 )
 
-            # Construir contenedor híbrido .ttape (ZIP: manifest.json + catalog.tartape)
             TapeContainer.build(
                 output_path=output_path,
                 manifest=manifest,
@@ -118,27 +119,22 @@ class SnapshotService:
                 overwrite=True,
             )
 
-            # Cero residuos en disco: se absorbe y se elimina el .tartape suelto
             try:
                 catalog_file.unlink(missing_ok=True)
-                logger.debug(
-                    f"Catálogo residual eliminado tras absorción: {catalog_file.name}"
-                )
             except OSError as e:
                 logger.warning(
                     f"No se pudo eliminar el catálogo temporal {catalog_file}: {e}"
                 )
 
         else:
-            # Archivo individual: formato ligero .json.xz
             with lzma.open(output_path, "wt", encoding="utf-8") as f:
                 f.write(manifest.model_dump_json(indent=2))
 
         logger.info(f"Snapshot generado exitosamente: {output_path.name}")
-        return manifest
+        return manifest, output_path
 
     @staticmethod
-    def _resolve_snapshot_path(
+    def resolve_snapshot_path(
         file_path: Path, current_md5: str, source_type: SourceType
     ) -> Path:
         """Resuelve la ruta final del snapshot evitando colisiones y asignando la extensión correcta."""
@@ -148,7 +144,6 @@ class SnapshotService:
         if not base_target.exists():
             return base_target
 
-        # Si ya existe y es del mismo MD5, reutilizamos la misma ruta
         try:
             if source_type == SourceType.FOLDER:
                 existing_manifest = TapeContainer.read_manifest(base_target)
@@ -162,7 +157,6 @@ class SnapshotService:
         except Exception:  # noqa: S110
             pass
 
-        # Generador de nombres incrementales si hay colisión
         counter = 1
         while True:
             new_target = file_path.with_name(

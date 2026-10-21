@@ -103,7 +103,8 @@ class TestEnginePipelineAndComponents(unittest.TestCase):
             p_short, max_filename_len=55
         )
         self.assertEqual(name, "foto_vacaciones.jpg")
-        self.assertEqual(caption, "")
+        self.assertIn("#totelegram_chunk", caption)
+        self.assertIn("#src_hash1", caption)
 
         # Caso largo (> 55 caracteres)
         long_name = "a" * 60 + ".jpg"
@@ -120,7 +121,9 @@ class TestEnginePipelineAndComponents(unittest.TestCase):
             p_long, max_filename_len=55
         )
         self.assertEqual(name_res, "short_hash.jpg")
-        self.assertEqual(caption_res, long_name)
+        self.assertIn("#totelegram_chunk", caption_res)
+        self.assertIn("#src_hash1", caption_res)
+        self.assertIn("a" * 30, caption_res)
 
     def test_payload_stream_factory_creates_file_volume(self):
         """Para SourceType.FILE, create_stream debe retornar un UploadStream conteniendo FileVolume."""
@@ -236,13 +239,21 @@ class TestEnginePipelineAndComponents(unittest.TestCase):
             )
 
             pipeline = JobPipeline(self.ctx)
-
+            mock_sent_msg = MagicMock(id=98765)
             with (
                 patch(
                     "totelegram.engine.pipeline.StrategyResolver.resolve",
                     return_value=mock_strategy,
                 ),
-                patch.object(SnapshotService, "generate_snapshot") as mock_snapshot,
+                patch.object(
+                    SnapshotService,
+                    "generate_snapshot",
+                    return_value=(MagicMock(), tmp_path),
+                ) as mock_snapshot,
+                patch(
+                    "totelegram.engine.pipeline.SnapshotPublisher.publish",
+                    return_value=mock_sent_msg,
+                ) as mock_publish,
                 patch.object(Payload, "total_pending_for_job", return_value=0),
             ):
                 result = pipeline.process(tmp_path, is_last_in_batch=True)
@@ -250,11 +261,13 @@ class TestEnginePipelineAndComponents(unittest.TestCase):
             self.assertTrue(result.is_completed)
             self.assertTrue(result.snapshot_generated)
             self.assertEqual(Job.get_by_id(result.job.id).status, JobStatus.UPLOADED)
+            self.assertEqual(Job.get_by_id(result.job.id).snapshot_message_id, 98765)
 
             # Notificaciones recibidas por el Observer
             self.mock_observer.on_job_start.assert_called_once()
             self.mock_observer.on_job_complete.assert_called_once_with(result.job, True)
             mock_snapshot.assert_called_once_with(result.job)
+            mock_publish.assert_called_once()
         finally:
             if tmp_path.exists():
                 tmp_path.unlink()

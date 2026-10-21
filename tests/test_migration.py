@@ -213,7 +213,7 @@ class TestDatabaseMigrationAndInspection(unittest.TestCase):
 
         # 3. Ejecutar setup_database_schema para disparar v6 -> v7
         final_report = setup_database_schema(self.db)
-        self.assertEqual(final_report.current_version, 7)
+        self.assertEqual(final_report.current_version, __CURRENT_DB_VERSION__)
 
         # 4. Validar que start_offset fue sanado
         cursor = self.db.execute_sql(
@@ -224,6 +224,41 @@ class TestDatabaseMigrationAndInspection(unittest.TestCase):
         # 5. Validar que tapemembergps ya no existe
         tables = [t.lower() for t in self.db.get_tables()]
         self.assertNotIn("tapemembergps", tables)
+
+    def test_08_migration_v7_to_v8_snapshot_columns(self):
+        """
+        Migración v7 -> v8:
+        Verifica que se agreguen 'snapshot_message_id' y 'last_verified_at' a 'job'.
+        """
+        from totelegram.models import Job, Source, TelegramChat
+
+        self.db.create_tables([SchemaVersion, Source, Job, TelegramChat])
+        SchemaVersion.create(version=7)
+
+        chat = TelegramChat.create(id=-10099, title="Test V7", type="channel")
+        source = Source.create(
+            path_str="/tmp/test_v7.txt",
+            md5sum="hash_v7_test",
+            size=100,
+            mtime=1.0,
+            mimetype="text/plain",
+        )
+        job = Job.formalize_intent(source, chat, False, 1000)
+
+        # Migrar a v8
+        report = setup_database_schema(self.db)
+        self.assertEqual(report.current_version, 8)
+
+        # Validar campos nuevos
+        job_refreshed = Job.get_by_id(job.id)
+        self.assertIsNone(job_refreshed.snapshot_message_id)
+        self.assertIsNone(job_refreshed.last_verified_at)
+
+        job_refreshed.set_snapshot_published(message_id=98765)
+        job_updated = Job.get_by_id(job.id)
+        self.assertEqual(job_updated.snapshot_message_id, 98765)
+        self.assertIsNotNone(job_updated.last_verified_at)
+        self.assertEqual(job_updated.status, "UPLOADED")
 
 
 if __name__ == "__main__":

@@ -442,6 +442,30 @@ def _step_v6_to_v7(db: peewee.Database):
             db.execute_sql(drop_sql)
 
 
+def _step_v7_to_v8(db: peewee.Database):
+    """Paso v7 -> v8: Agregar snapshot_message_id y last_verified_at a la tabla Job."""
+    migrator = _get_migrator(db)
+    existing_tables = {t.lower() for t in db.get_tables()}
+
+    if "job" in existing_tables:
+        try:
+            migrate(
+                migrator.add_column(
+                    "job", "snapshot_message_id", peewee.BigIntegerField(null=True)
+                ),
+                migrator.add_column(
+                    "job", "last_verified_at", peewee.DateTimeField(null=True)
+                ),
+            )
+            logger.info(
+                "Columnas 'snapshot_message_id' y 'last_verified_at' añadidas a 'job'."
+            )
+        except Exception as e:
+            logger.debug(f"Aviso agregando columnas de snapshot en v7->v8: {e}")
+    else:
+        logger.debug("La tabla 'job' no existe. Omitiendo migración v7->v8.")
+
+
 # Registrar en MIGRATION_REGISTRY:
 MIGRATION_REGISTRY: Dict[int, Callable[[peewee.Database], None]] = {
     0: _step_v0_to_v1,
@@ -451,6 +475,7 @@ MIGRATION_REGISTRY: Dict[int, Callable[[peewee.Database], None]] = {
     4: _step_v4_to_v5,
     5: _step_v5_to_v6,
     6: _step_v6_to_v7,
+    7: _step_v7_to_v8,
 }
 
 
