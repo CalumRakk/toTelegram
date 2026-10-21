@@ -8,7 +8,7 @@ from typing import Callable, List, Tuple, cast
 import peewee
 
 from totelegram import __VERSION__
-from totelegram.common.helpers import batched
+from totelegram.common.helpers import batched, get_utc_now
 from totelegram.database import db_transaction
 from totelegram.models import (
     Job,
@@ -319,11 +319,15 @@ class SnapshotImportPlanner:
 
             # AUDITORÍA REAL DE ARCHIVOS DE LA CINTA TAR (TapeMember)
             is_folder = manifest.source.type == SourceType.FOLDER
-            total_inventory = (
-                len(manifest.source.inventory)
-                if (is_folder and manifest.source.inventory)
-                else 0
-            )
+            if is_folder:
+                if manifest.source.inventory:
+                    total_inventory = len(manifest.source.inventory)
+                elif manifest.source.tape_catalog:
+                    total_inventory = manifest.source.tape_catalog.total_files
+                else:
+                    total_inventory = 0
+            else:
+                total_inventory = 0
 
             existing_members_count = 0
             if existing_source:
@@ -540,6 +544,7 @@ class SnapshotImporter:
         db: peewee.Database,
         owner: TelegramUser | None = None,
         on_progress: Callable[[int, int, str], None] | None = None,
+        snapshot_message_id: int | None = None,  # <-- Nuevo parámetro opcional
     ) -> Tuple[int, List[Tuple[str, str]]]:
         actionable = plan.actionable_items
         succeeded = 0
@@ -548,7 +553,9 @@ class SnapshotImporter:
         for idx, item in enumerate(actionable, 1):
             try:
                 with db_transaction(db):
-                    cls._apply_item(item, owner)
+                    cls._apply_item(
+                        item, owner, snapshot_message_id=snapshot_message_id
+                    )
                 succeeded += 1
             except Exception as e:
                 logger.exception(f"Error importando {item.inspection.path.name}")
@@ -560,7 +567,12 @@ class SnapshotImporter:
         return succeeded, errors
 
     @classmethod
-    def _apply_item(cls, item: PlanItem, owner: TelegramUser | None):
+    def _apply_item(
+        cls,
+        item: PlanItem,
+        owner: TelegramUser | None,
+        snapshot_message_id: int | None = None,
+    ):
         """Aplica las mutaciones planificadas para un snapshot en la base de datos local."""
         manifest = item.manifest
 
@@ -625,7 +637,17 @@ class SnapshotImporter:
                 config=config,
                 status=JobStatus.UPLOADED,
                 deleted_at=0,
+                snapshot_message_id=snapshot_message_id,
+                last_verified_at=get_utc_now() if snapshot_message_id else None,
             )
+        else:
+            # Si el job ya existía pero no tenía el snapshot_message_id registrado
+            if snapshot_message_id and not job.snapshot_message_id:
+                job.snapshot_message_id = snapshot_message_id
+                job.last_verified_at = get_utc_now()
+                job.save(
+                    only=[Job.snapshot_message_id, Job.last_verified_at, Job.updated_at]
+                )
 
         # Asegurar la existencia de todos los Payloads (piezas físicas)
         payload_map = {p.sequence_index: p for p in cast(list[Payload], job.payloads)}
@@ -688,26 +710,25 @@ class SnapshotImporter:
             ):
                 from totelegram.packaging.ttape import TapeContainer
 
-                with TapeContainer.open_catalog(snapshot_path) as cat:  # noqa: SIM117
-                    with cat.db_session:
-                        cursor = cat.db_session.db.execute_sql(
-                            "SELECT arc_path, size, checksum, start_offset FROM track WHERE is_dir = 0"
-                        )
-                        tracks = cursor.fetchall()
+                with TapeContainer.open_catalog(snapshot_path) as cat, cat.db_session:
+                    cursor = cat.db_session.db.execute_sql(
+                        "SELECT arc_path, size, checksum, start_offset FROM track WHERE is_dir = 0"
+                    )
+                    tracks = cursor.fetchall()
 
-                        member_inserts = [
-                            {
-                                "source": source,
-                                "relative_path": row[0],
-                                "size": row[1],
-                                "md5sum": row[2] or "",
-                                "start_offset": row[3] or 0,
-                            }
-                            for row in tracks
-                        ]
+                    member_inserts = [
+                        {
+                            "source": source,
+                            "relative_path": row[0],
+                            "size": row[1],
+                            "md5sum": row[2] or "",
+                            "start_offset": row[3] or 0,
+                        }
+                        for row in tracks
+                    ]
 
-                        for batch in batched(member_inserts, 500):
-                            TapeMember.insert_many(batch).on_conflict_ignore().execute()
+                    for batch in batched(member_inserts, 500):
+                        TapeMember.insert_many(batch).on_conflict_ignore().execute()
 
             # CASO B: Manifiesto legacy (.json.xz) con array inventory
             elif manifest.source.inventory:

@@ -8,6 +8,7 @@ from totelegram.cli.observer import RichDownloadObserver
 from totelegram.cli.state import CLIState
 from totelegram.cli.ui import UI
 from totelegram.engine.downloader import DownloadEngine, DownloadIntegrityError
+from totelegram.packaging.schemas import TTAPE_EXTENSION
 from totelegram.packaging.snapshot import SnapshotService
 from totelegram.schemas import SourceType
 
@@ -23,7 +24,7 @@ def download_snapshot(
         file_okay=True,
         dir_okay=False,
         readable=True,
-        help="Ruta al archivo snapshot (.json.xz)",
+        help="Ruta al archivo snapshot (.json.xz o .ttape)",
     ),
     output_dir: Path | None = typer.Option(
         None,
@@ -49,14 +50,14 @@ def download_snapshot(
         help="Extracción quirúrgica: Ruta interna del archivo específico a restaurar (omite el resto del backup).",
     ),
 ):
-    """
-    Descarga y restaura un archivo o carpeta archivada a partir de su Snapshot (.json.xz).
+    """Descarga y restaura un archivo o carpeta archivada a partir de su Snapshot (.json.xz o .ttape).
+
     Verifica la integridad de cada pieza y archivo on-the-fly con soporte de reanudación.
     """
     state: CLIState = ctx.obj
     profile_name, _ = _get_config_tools(ctx)
 
-    # Cargar y deserializar el Snapshot (auto-migra v5.0 a v5.1 si es antiguo)
+    # Cargar y deserializar el Snapshot de forma polimórfica (.ttape o .json.xz)
     with UI.loading(f"Cargando snapshot: [bold]{snapshot_path.name}[/]..."):
         try:
             manifest = SnapshotService.load_snapshot(snapshot_path)
@@ -70,6 +71,9 @@ def download_snapshot(
 
     source = manifest.source
     is_folder = source.type == SourceType.FOLDER
+    is_ttape = snapshot_path.suffix == TTAPE_EXTENSION or snapshot_path.name.endswith(
+        TTAPE_EXTENSION
+    )
 
     UI.separator()
 
@@ -81,9 +85,15 @@ def download_snapshot(
             )
             raise typer.Exit(1)
 
+        format_badge = (
+            "[dim](Contenedor .ttape)[/dim]"
+            if is_ttape
+            else "[dim](Snapshot v5.x)[/dim]"
+        )
         UI.print(f"Extrayendo archivo puntual: [bold cyan]{file_path}[/]")
         UI.info(
-            f"Desde backup: [bold]{source.filename}[/] ({len(manifest.parts)} partes totales en Telegram)"
+            f"Desde backup: [bold]{source.filename}[/] {format_badge} "
+            f"({len(manifest.parts)} partes totales en Telegram)"
         )
         UI.info(f"Destino: [bold green]{target_output_dir / file_path}[/]")
 
@@ -96,6 +106,7 @@ def download_snapshot(
                     manifest=manifest,
                     relative_path=file_path,
                     output_dir=target_output_dir,
+                    snapshot_path=snapshot_path,
                     force=force,
                     keep_cache=keep_cache,
                 )
@@ -126,8 +137,6 @@ def download_snapshot(
         f"Estrategia: [bold]{manifest.strategy.value}[/] ({len(manifest.parts)} partes en Telegram)"
     )
     UI.info(f"Destino: [bold green]{target_output_dir / source.filename}[/]")
-    if is_folder and source.inventory:
-        UI.info(f"Contenido: [bold]{len(source.inventory)}[/] archivos indexados")
 
     if force:
         UI.warn(
@@ -144,6 +153,7 @@ def download_snapshot(
             report = engine.restore(
                 manifest=manifest,
                 output_dir=target_output_dir,
+                snapshot_path=snapshot_path,
                 force=force,
                 keep_cache=keep_cache,
             )

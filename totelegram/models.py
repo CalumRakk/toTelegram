@@ -500,6 +500,21 @@ class Job(BaseModel):
             ]
         )
 
+    def is_fresh(self) -> bool:
+        """Determina si la verificación JIT del Job aún es confiable (30 minutos por defecto)."""
+        if (
+            not self.last_verified_at
+            or self.status == JobStatus.DELETED
+            or self.deleted_at > 0
+        ):
+            return False
+        return not helpers_is_expired(self.last_verified_at, grace_period_seconds=1800)
+
+    def mark_verified(self):
+        """Actualiza la fecha de verificación JIT del Job."""
+        self.last_verified_at = get_utc_now()
+        self.save(only=[Job.last_verified_at, Job.updated_at])
+
 
 # El índice compuesto único impide que existan dos jobs activos (deleted_at == 0) para el mismo archivo en el mismo chat.
 Job.add_index(Job.source, Job.chat, Job.deleted_at, unique=True)

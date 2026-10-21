@@ -989,3 +989,23 @@ class DisplaySnapshotPlan:
                 console.print(f"      [dim]... y {count - 5} archivos más.[/dim]")
                 ui_logger.error(f"      ... y {count - 5} archivos más.")
             console.print()
+
+
+class DisplayIndexer:
+    @staticmethod
+    def show_unindexed_notice(count: int):
+        """Muestra un panel informativo sugiriendo ejecutar totelegram index."""
+        plural = "cintas archivadas" if count > 1 else "cinta archivada"
+        message = (
+            f"Detectadas [bold yellow]{count}[/] {plural} en Telegram que aún no están indexadas localmente.\n"
+            "Para habilitar la búsqueda quirúrgica de sus archivos internos, ejecuta:"
+        )
+        UI.educational_tip(
+            message=message,
+            title="Catálogo desincronizado",
+            commands=[
+                f"{Commands.CLI_BIN if hasattr(Commands, 'CLI_BIN') else 'totelegram'} index"
+            ],
+            spacing="block",
+            border_style="yellow",
+        )

@@ -6,7 +6,13 @@ from typing import TYPE_CHECKING, List, Literal, Tuple, cast
 import typer
 
 from totelegram.cli.state import CLIState
-from totelegram.cli.ui import UI, DisplayConfig, DisplayGeneric, DisplayProfile
+from totelegram.cli.ui import (
+    UI,
+    DisplayConfig,
+    DisplayGeneric,
+    DisplayIndexer,
+    DisplayProfile,
+)
 from totelegram.database import DatabaseSession, normalize_database_url
 from totelegram.identity import ConfigService
 from totelegram.migration import DatabaseState, inspect_database
@@ -365,6 +371,22 @@ def check_config(ctx: typer.Context):
             if access_report.hint:
                 UI.info(access_report.hint)
             raise typer.Exit(code=1)
+
+        from totelegram.database import DatabaseSession, normalize_database_url
+        from totelegram.packaging.indexer import TapeIndexService
+
+        db_url = normalize_database_url(settings.database_url, manager.database_path)
+        with DatabaseSession(db_url, auto_init_schema=False) as db:
+            indexer = TapeIndexService(client, db)
+            with UI.loading("Comprobando catálogo de cintas archivadas..."):
+                tape_report = indexer.auto_heal_or_report(settings.chat_id)
+
+            if tape_report.auto_healed:
+                UI.info(
+                    f"Auto-sanadas [bold]{tape_report.healed_count}[/] cintas no indexadas en segundo plano."
+                )
+            elif tape_report.needs_manual_sync:
+                DisplayIndexer.show_unindexed_notice(tape_report.unindexed_count)
 
         UI.success(f"Perfil '{profile_name}' verificado y listo para operar.")
         if access_report.chat:

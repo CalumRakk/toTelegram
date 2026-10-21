@@ -6,7 +6,15 @@ from datetime import datetime, timezone
 import typer
 
 from totelegram import __VERSION__
-from totelegram.cli.commands import backup, config, download, profile, send, snapshot
+from totelegram.cli.commands import (
+    backup,
+    config,
+    download,
+    index,
+    profile,
+    send,
+    snapshot,
+)
 from totelegram.cli.state import CLIState
 from totelegram.cli.ui import console
 from totelegram.common.files import get_user_config_dir
@@ -30,6 +38,7 @@ app.command(name="send")(send.send_files)
 app.add_typer(snapshot.app, name="snapshot")
 app.command(name="backup")(backup.backup_folders)
 app.command(name="download")(download.download_snapshot)
+app.command(name="index")(index.index_tapes)  # <-- REGISTRAR AQUÍ
 
 
 def version_callback(value: bool):

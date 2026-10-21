@@ -7,10 +7,11 @@ import typer
 from totelegram.cli.commands.config import _get_config_tools
 from totelegram.cli.logic import InventoryEngine, prepare_upload_context
 from totelegram.cli.state import CLIState
-from totelegram.cli.ui import UI, DisplayUpload, console
+from totelegram.cli.ui import UI, DisplayIndexer, DisplayUpload, console
 from totelegram.concurrency import AccountBusyError
 from totelegram.engine.pipeline import JobPipeline
 from totelegram.engine.planner import PathLengthExceededError
+from totelegram.packaging.indexer import TapeIndexService
 from totelegram.schemas import VALUE_NOT_SET, Commands
 
 
@@ -71,6 +72,17 @@ def backup_folders(
     with state.scope() as (client, db):
         u_ctx = prepare_upload_context(state, client, db, settings)
         pipeline = JobPipeline(u_ctx)
+
+        # Comprobación adaptativa del catálogo de cintas (Fase 4 & 5)
+        indexer = TapeIndexService(client, db)
+        tape_report = indexer.auto_heal_or_report(u_ctx.tg_chat.id)
+
+        if tape_report.auto_healed:
+            UI.info(
+                f"Auto-sanadas [bold]{tape_report.healed_count}[/] cintas no indexadas en segundo plano."
+            )
+        elif tape_report.needs_manual_sync:
+            DisplayIndexer.show_unindexed_notice(tape_report.unindexed_count)
 
         from totelegram.telegram.patches import get_patch_status
 

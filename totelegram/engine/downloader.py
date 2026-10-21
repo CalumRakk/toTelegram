@@ -4,15 +4,18 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from tartape import calculate_file_slices
 from tartape.exceptions import (
     PathConstraintError,
     TarIntegrityError,
     VolumeChecksumMismatchError,
 )
+from tartape.models import Track
 from tartape.restore import reassemble_file, unpack_volumes
 from tartape.schemas import FileSlice
 
-from totelegram.packaging.schemas import RemotePart, UploadManifest
+from totelegram.packaging.schemas import TTAPE_EXTENSION, RemotePart, UploadManifest
+from totelegram.packaging.ttape import TapeContainer
 from totelegram.schemas import SourceType
 
 if TYPE_CHECKING:
@@ -23,12 +26,12 @@ logger = logging.getLogger(__name__)
 
 
 class DownloadIntegrityError(Exception):
-    """Raised when an extracted file or volume does not match its expected checksum or structure."""
+    """Lanzada cuando un archivo o volumen no coincide con su checksum o estructura esperada."""
 
 
 @dataclass
 class DownloadReport:
-    """Consolidated summary of a restore operation."""
+    """Resumen consolidado de una operación de restauración."""
 
     source_filename: str
     output_path: Path
@@ -39,7 +42,7 @@ class DownloadReport:
 
 
 class DownloadObserver:
-    """Base interface for observing download and restore progress."""
+    """Interfaz base para observar el progreso de descarga y restauración."""
 
     def on_part_download_start(
         self, part_index: int, total_parts: int, filename: str, total_bytes: int
@@ -68,13 +71,13 @@ class DownloadObserver:
 
 
 class NullDownloadObserver(DownloadObserver):
-    """No-op observer implementation."""
+    """Implementación no-op para tests o ejecución desatendida."""
 
 
 class DownloadEngine:
-    """Engine responsible for downloading and reconstructing files or folders
+    """Motor encargado de descargar y reconstruir archivos o carpetas desde
 
-    from an UploadManifest (Snapshot) leveraging TarTape restore primitives.
+    un UploadManifest o contenedor .ttape aprovechando las primitivas de TarTape.
     """
 
     def __init__(self, client: "Client", observer: DownloadObserver | None = None):
@@ -85,16 +88,23 @@ class DownloadEngine:
         self,
         manifest: UploadManifest,
         output_dir: Path,
+        snapshot_path: Path | None = None,
         force: bool = False,
         keep_cache: bool = False,
     ) -> DownloadReport:
         output_dir.mkdir(parents=True, exist_ok=True)
         source = manifest.source
 
-        logger.info(f"Starting restoration of '{source.filename}' into '{output_dir}'")
+        logger.info(f"Iniciando restauración de '{source.filename}' en '{output_dir}'")
 
         if source.type == SourceType.FOLDER:
-            return self._restore_folder(manifest, output_dir, force, keep_cache)
+            return self._restore_folder(
+                manifest=manifest,
+                output_dir=output_dir,
+                snapshot_path=snapshot_path,
+                force=force,
+                keep_cache=keep_cache,
+            )
         else:
             return self._restore_file(manifest, output_dir, force, keep_cache)
 
@@ -103,48 +113,108 @@ class DownloadEngine:
         manifest: UploadManifest,
         relative_path: str,
         output_dir: Path,
+        snapshot_path: Path | None = None,
         force: bool = False,
         keep_cache: bool = False,
     ) -> DownloadReport:
-        """Surgically downloads ONLY the Telegram parts containing slices of the requested
+        """Descarga quirúrgicamente ÚNICAMENTE las partes de Telegram que contienen
 
-        file and reassembles it directly using tartape.restore.reassemble_file.
+        fragmentos del archivo solicitado y lo reensambla mediante tartape.restore.reassemble_file.
         """
         source = manifest.source
-        if source.type != SourceType.FOLDER or not source.inventory:
+        if source.type != SourceType.FOLDER:
             raise ValueError(
-                "Surgical extraction by file is only available for archived folders (TAR tapes)."
-            )
-
-        member = next(
-            (m for m in source.inventory if m.relative_path == relative_path),
-            None,
-        )
-        if not member:
-            raise FileNotFoundError(
-                f"File '{relative_path}' was not found in the inventory of this snapshot."
+                "La extracción quirúrgica por archivo solo está disponible para carpetas archivadas (TAR)."
             )
 
         target_file = output_dir / relative_path
         if target_file.exists() and not force:
             raise FileExistsError(
-                f"File '{target_file.name}' already exists at destination. Use --force to overwrite."
+                f"El archivo destino '{target_file.name}' ya existe. Usa --force para sobrescribir."
             )
 
         target_file.parent.mkdir(parents=True, exist_ok=True)
 
-        # Asigna fragmentos a instancias de TarTape FileSlice
-        tartape_slices = [
-            FileSlice(
-                volume_index=frag.vol_idx,
-                volume_offset=frag.volume_offset,
-                volume_length=frag.volume_length,
-                source_offset=frag.source_offset,
-            )
-            for frag in member.fragments
-        ]
+        # 1. Resolución de Metadatos del Archivo (Híbrida: .ttape SQLite o Legacy v5.x JSON)
+        is_ttape = snapshot_path and (
+            snapshot_path.suffix == TTAPE_EXTENSION
+            or snapshot_path.name.endswith(TTAPE_EXTENSION)
+        )
 
-        # Identifica y descarga ÚNICAMENTE las partes necesarias para este archivo en concreto.
+        file_size: int = 0
+        start_offset: int = 0
+        expected_checksum: str | None = None
+        tartape_slices: list[FileSlice] = []
+
+        if is_ttape and snapshot_path:
+            # CASO A: Contenedor híbrido .ttape (Consulta O(1) en catalog.tartape)
+            with TapeContainer.open_catalog(snapshot_path) as cat, cat.db_session:
+                try:
+                    track = Track.get(Track.arc_path == relative_path)
+                except Track.DoesNotExist:  # type: ignore
+                    raise FileNotFoundError(
+                        f"El archivo '{relative_path}' no fue encontrado en el catálogo de la cinta."
+                    )
+
+                if track.is_dir:
+                    raise ValueError(
+                        f"'{relative_path}' es un directorio, no un archivo regular."
+                    )
+
+                file_size = track.size
+                start_offset = track.start_offset or 0
+                expected_checksum = track.checksum
+
+            # Proyección matemática dinámica O(1) de fragmentos (ADR 009)
+            tartape_slices = calculate_file_slices(
+                start_offset=start_offset,
+                file_size=file_size,
+                volume_size=manifest.chunk_size,
+            )
+
+        elif source.inventory:
+            # CASO B: Snapshot antiguo v5.x (Fallback en array JSON)
+            member = next(
+                (m for m in source.inventory if m.relative_path == relative_path),
+                None,
+            )
+            if not member:
+                raise FileNotFoundError(
+                    f"El archivo '{relative_path}' no fue encontrado en el inventario del snapshot."
+                )
+
+            file_size = member.size
+            expected_checksum = member.md5sum
+
+            # Si el miembro antiguo tiene start_offset, usamos la proyección moderna O(1)
+            if getattr(member, "start_offset", 0) > 0:
+                tartape_slices = calculate_file_slices(
+                    start_offset=member.start_offset,
+                    file_size=file_size,
+                    volume_size=manifest.chunk_size,
+                )
+            else:
+                # Fallback estático a fragmentos pre-calculados de v5.x
+                tartape_slices = [
+                    FileSlice(
+                        volume_index=frag.vol_idx,
+                        volume_offset=frag.volume_offset,
+                        volume_length=frag.volume_length,
+                        source_offset=frag.source_offset,
+                    )
+                    for frag in member.fragments
+                ]
+        else:
+            raise FileNotFoundError(
+                f"No se pudo resolver el catálogo de la cinta para '{relative_path}'."
+            )
+
+        if not tartape_slices:
+            raise DownloadIntegrityError(
+                f"No se pudieron proyectar fragmentos para '{relative_path}' ({file_size} bytes)."
+            )
+
+        # 2. Identificación y descarga exclusiva de los volúmenes necesarios
         needed_vol_indices = sorted({s.volume_index for s in tartape_slices})
         needed_parts_map = {
             p.sequence: p for p in manifest.parts if p.sequence in needed_vol_indices
@@ -156,7 +226,7 @@ class DownloadEngine:
         downloaded_vol_paths: dict[int, Path] = {}
 
         logger.info(
-            f"Extrayendo quirúrgicamente '{relative_path}' ({member.size} bytes). "
+            f"Extrayendo quirúrgicamente '{relative_path}' ({file_size} bytes). "
             f"Requiere {len(needed_vol_indices)} de {total_parts} volúmenes de Telegram."
         )
 
@@ -183,13 +253,13 @@ class DownloadEngine:
             return vol_path
 
         try:
-            # Delega la reconstrucción y hashing en vuelo a TarTape pasando el Callable
+            # 3. Delegación de reensamblado en vuelo a TarTape
             reassemble_file(
                 output_path=target_file,
                 slices=tartape_slices,
                 volumes=lazy_volume_provider,
-                expected_size=member.size,
-                expected_checksum=member.md5sum,
+                expected_size=file_size,
+                expected_checksum=expected_checksum,
                 checksum_algorithm="md5",
                 overwrite=force,
             )
@@ -197,7 +267,7 @@ class DownloadEngine:
         except (VolumeChecksumMismatchError, TarIntegrityError) as e:
             target_file.unlink(missing_ok=True)
             raise DownloadIntegrityError(
-                f"Fallo en verificación de integridad: {e}"
+                f"Fallo en verificación de integridad quirúrgica: {e}"
             ) from e
         finally:
             if not keep_cache:
@@ -213,8 +283,8 @@ class DownloadEngine:
             files_extracted=1,
             is_success=True,
             message=(
-                f"File '{relative_path}' surgically extracted and verified "
-                f"using {len(needed_vol_indices)} of {total_parts} volumes."
+                f"Archivo '{relative_path}' extraído quirúrgicamente y verificado "
+                f"utilizando {len(needed_vol_indices)} de {total_parts} volúmenes."
             ),
         )
 
@@ -230,7 +300,7 @@ class DownloadEngine:
         staging_dir: Path,
         total_parts: int = 1,
     ) -> tuple[Path, int]:
-        """Downloads a volume part from Telegram with fast-skip cache validation."""
+        """Descarga una parte de volumen desde Telegram con validación de caché local."""
         part_file = staging_dir / part.part_filename
         part_tmp = staging_dir / f"{part.part_filename}.downloading"
 
@@ -246,7 +316,7 @@ class DownloadEngine:
                     return part_file, 0
                 else:
                     logger.warning(
-                        f"Cached segment '{part_file.name}' is corrupt. Re-downloading..."
+                        f"Segmento en caché '{part_file.name}' está corrupto. Re-descargando..."
                     )
                     part_file.unlink(missing_ok=True)
             else:
@@ -261,11 +331,11 @@ class DownloadEngine:
             total_bytes=part.part_size,
         )
 
-        msg: "Message" | None = self.client.get_messages(part.chat_id, part.message_id)  # type: ignore  # noqa: UP037
+        msg: "Message" | None = self.client.get_messages(part.chat_id, part.message_id)  # type: ignore
         if not msg or getattr(msg, "empty", False) or not msg.document:
             raise FileNotFoundError(
-                f"Telegram message (Chat: {part.chat_id}, Msg: {part.message_id}) "
-                f"for part '{part.part_filename}' does not exist or was deleted."
+                f"Mensaje de Telegram (Chat: {part.chat_id}, Msg: {part.message_id}) "
+                f"para la parte '{part.part_filename}' no existe o fue borrado."
             )
 
         def _progress(current: int, total: int):
@@ -279,15 +349,15 @@ class DownloadEngine:
 
         if not downloaded_file:
             raise RuntimeError(
-                f"Failed to download piece '{part.part_filename}' from Telegram."
+                f"Fallo al descargar la pieza '{part.part_filename}' desde Telegram."
             )
 
         computed_md5 = self._compute_file_md5(part_tmp)
         if part.part_md5sum and computed_md5 != part.part_md5sum:
             part_tmp.unlink(missing_ok=True)
             raise DownloadIntegrityError(
-                f"Invalid MD5 checksum for downloaded part '{part.part_filename}'. "
-                f"Expected: {part.part_md5sum}, Computed: {computed_md5}"
+                f"MD5 inválido para la pieza descargada '{part.part_filename}'. "
+                f"Esperado: {part.part_md5sum}, Calculado: {computed_md5}"
             )
 
         part_tmp.replace(part_file)
@@ -301,12 +371,12 @@ class DownloadEngine:
         force: bool,
         keep_cache: bool,
     ) -> DownloadReport:
-        """Restores a monolithic or split regular file."""
+        """Restaura un archivo individual monolítico o particionado."""
         target_file = output_dir / manifest.source.filename
 
         if target_file.exists() and not force:
             raise FileExistsError(
-                f"File '{target_file.name}' already exists at destination. Use --force to overwrite."
+                f"El archivo '{target_file.name}' ya existe en el destino. Usa --force para sobrescribir."
             )
 
         staging_dir = self._get_staging_dir(output_dir, manifest.source.md5sum)
@@ -341,8 +411,8 @@ class DownloadEngine:
         if manifest.source.md5sum and final_md5 != manifest.source.md5sum:
             target_file.unlink(missing_ok=True)
             raise DownloadIntegrityError(
-                f"Final file MD5 checksum mismatch. "
-                f"Expected: {manifest.source.md5sum}, Computed: {final_md5}"
+                f"Discrepancia de checksum MD5 en archivo final. "
+                f"Esperado: {manifest.source.md5sum}, Calculado: {final_md5}"
             )
 
         if not keep_cache:
@@ -357,17 +427,18 @@ class DownloadEngine:
             total_bytes_downloaded=total_bytes_transferred,
             files_extracted=1,
             is_success=True,
-            message="Regular file downloaded, reassembled, and verified successfully.",
+            message="Archivo regular descargado, reensamblado y verificado exitosamente.",
         )
 
     def _restore_folder(
         self,
         manifest: UploadManifest,
         output_dir: Path,
+        snapshot_path: Path | None,
         force: bool,
         keep_cache: bool,
     ) -> DownloadReport:
-        """Restaura una carpeta archivada extrayendo los volúmenes de forma secuencial en cascada."""
+        """Restaura una carpeta archivada extrayendo los volúmenes secuencialmente en cascada."""
         target_folder = output_dir / manifest.source.filename
 
         if target_folder.exists() and not force:
@@ -380,9 +451,28 @@ class DownloadEngine:
         total_parts = len(sorted_parts)
         total_bytes_transferred = 0
 
-        # Preparar observador y callbacks de extracción
-        inventory = manifest.source.inventory or []
-        total_expected_files = len(inventory) if inventory else 0
+        # Obtención de inventario para observador y validación post-extracción
+        is_ttape = snapshot_path and (
+            snapshot_path.suffix == TTAPE_EXTENSION
+            or snapshot_path.name.endswith(TTAPE_EXTENSION)
+        )
+
+        total_expected_files = 0
+        expected_checksums: dict[str, str] = {}
+
+        if is_ttape and snapshot_path:
+            with TapeContainer.open_catalog(snapshot_path) as cat, cat.db_session:
+                tracks = list(Track.select().where(Track.is_dir == False))
+                total_expected_files = len(tracks)
+                for t in tracks:
+                    if t.checksum:
+                        expected_checksums[t.arc_path] = t.checksum
+        elif manifest.source.inventory:
+            total_expected_files = len(manifest.source.inventory)
+            for m in manifest.source.inventory:
+                if m.md5sum:
+                    expected_checksums[m.relative_path] = m.md5sum
+
         self.observer.on_extraction_start(total_expected_files)
 
         extracted_files_count = 0
@@ -397,13 +487,11 @@ class DownloadEngine:
                 total_files=total_expected_files or extracted_files_count,
             )
 
-        # Generador perezoso que descarga y abre cada volumen secuencialmente
         def volume_stream_generator():
             nonlocal total_bytes_transferred
             previous_vol_file: Path | None = None
 
             for part in sorted_parts:
-                # Si no se desea conservar la caché, liberar el volumen anterior antes de descargar el siguiente
                 if not keep_cache and previous_vol_file and previous_vol_file.exists():
                     try:
                         previous_vol_file.unlink()
@@ -416,11 +504,9 @@ class DownloadEngine:
                 total_bytes_transferred += bytes_dl
                 previous_vol_file = vol_file
 
-                # Abre el archivo para lectura; ChainedVolumeStream se encargará de cerrarlo al agotarlo
                 f = open(vol_file, "rb")  # noqa: SIM115
                 yield f
 
-            # Limpieza del último archivo al finalizar el generador
             if not keep_cache and previous_vol_file and previous_vol_file.exists():
                 try:
                     previous_vol_file.unlink()
@@ -452,18 +538,16 @@ class DownloadEngine:
 
         self.observer.on_extraction_complete(extracted_files_count)
 
-        # Validación opcional de hashes de archivos extraídos contra el inventario
-        if inventory:
-            for member in inventory:
-                if not member.md5sum:
-                    continue
-                extracted_file = output_dir / member.relative_path
+        # Validación opcional de hashes de archivos extraídos contra el catálogo
+        if expected_checksums:
+            for arc_path, exp_hash in expected_checksums.items():
+                extracted_file = output_dir / arc_path
                 if extracted_file.is_file():
-                    computed_md5 = self._compute_file_md5(extracted_file)
-                    if computed_md5 != member.md5sum:
+                    computed = self._compute_file_md5(extracted_file)
+                    if computed != exp_hash:
                         raise DownloadIntegrityError(
-                            f"Discrepancia de checksum para archivo extraído '{member.relative_path}'. "
-                            f"Esperado: {member.md5sum}, Calculado: {computed_md5}"
+                            f"Discrepancia de checksum para archivo extraído '{arc_path}'. "
+                            f"Esperado: {exp_hash}, Calculado: {computed}"
                         )
 
         return DownloadReport(

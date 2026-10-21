@@ -27,6 +27,7 @@ class Commands:
     CONFIG_ADD_LIST = f"{CLI_BIN} config add"
     CONFIG_REMOVE_LIST = f"{CLI_BIN} config remove"
     PROFILE_SWITCH = f"{CLI_BIN} profile switch"
+    CLI_BIN = None
 
 
 class COLORS:
