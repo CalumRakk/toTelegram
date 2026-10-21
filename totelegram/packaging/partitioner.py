@@ -3,11 +3,9 @@ from typing import List, Tuple
 
 import tartape
 from tartape.chunker import calculate_segments
-from tartape.schemas import EntryState
 
 from totelegram.packaging.schemas import (
     VirtualChunk,
-    VirtualFileFragment,
     VirtualTapeCatalog,
     VirtualTapeMember,
 )
@@ -98,7 +96,6 @@ class StatelessPartitioner:
             exclude_patterns=str(exclude_patterns),
         )
 
-        # Calcular segmentos de volúmenes directamente sin crear FileObjects en disco
         segments = list(calculate_segments(tape.total_size, max_chunk_size))
         total_parts = len(segments)
 
@@ -122,7 +119,7 @@ class StatelessPartitioner:
                 )
             )
 
-        # Transmisión streaming de coordenadas GPS en una sola pasada SQL O(1)
+        # Transmisión streaming de metadatos GPS directos sin calcular fragmentos redundantes
         members = []
         for track_gps in tape.iter_gps(tag_or_size=max_chunk_size):
             if track_gps.is_dir:
@@ -131,30 +128,7 @@ class StatelessPartitioner:
             checksum_val = track_gps.checksum
             if checksum_val is None:
                 raise ValueError(
-                    f"File '{track_gps.arc_path}' has no recorded checksum in catalog"
-                )
-
-            total_frags = len(track_gps.fragments)
-            frags = []
-
-            for frag_idx, sl in enumerate(track_gps.fragments):
-                if total_frags == 1:
-                    frag_state = EntryState.COMPLETE.value
-                elif frag_idx == 0:
-                    frag_state = EntryState.HEAD.value
-                elif frag_idx == total_frags - 1:
-                    frag_state = EntryState.TAIL.value
-                else:
-                    frag_state = EntryState.BODY.value
-
-                frags.append(
-                    VirtualFileFragment(
-                        vol_idx=sl.volume_index,
-                        volume_offset=sl.volume_offset,
-                        volume_length=sl.volume_length,
-                        source_offset=sl.source_offset,
-                        state=frag_state,
-                    )
+                    f"El archivo '{track_gps.arc_path}' no tiene checksum registrado en el catálogo."
                 )
 
             members.append(
@@ -163,7 +137,6 @@ class StatelessPartitioner:
                     size=track_gps.size,
                     md5sum=checksum_val,
                     start_offset=track_gps.start_offset,
-                    fragments=frags,
                 )
             )
 

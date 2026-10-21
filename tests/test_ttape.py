@@ -88,7 +88,7 @@ class TestTapeContainerAndBifurcation(unittest.TestCase):
         tape = tartape.record(folder, checksum="md5", overwrite=True)
         self.assertTrue(tape.catalog_path.exists())
 
-        # 2. Construir un UploadManifest de prueba (v6.0 sin inventory)
+        # 2. Construir un UploadManifest de prueba (v6.0)
         manifest = UploadManifest(
             manifest_version=MANIFEST_VERSION,
             created_at=datetime.now(timezone.utc),
@@ -104,7 +104,6 @@ class TestTapeContainerAndBifurcation(unittest.TestCase):
                 mime_type="application/x-tar",
                 mtime=1700000000.0,
                 type=SourceType.FOLDER,
-                inventory=None,
             ),
             parts=[
                 RemotePart(
@@ -138,7 +137,6 @@ class TestTapeContainerAndBifurcation(unittest.TestCase):
         loaded_manifest = TapeContainer.read_manifest(built_path)
         self.assertEqual(loaded_manifest.manifest_version, MANIFEST_VERSION)
         self.assertEqual(loaded_manifest.source.filename, "proyecto_codigo")
-        self.assertIsNone(loaded_manifest.source.inventory)
         self.assertEqual(len(loaded_manifest.parts), 1)
         self.assertEqual(loaded_manifest.parts[0].message_id, 501)
 
@@ -225,7 +223,8 @@ class TestTapeContainerAndBifurcation(unittest.TestCase):
 
         loaded = SnapshotService.load_snapshot(expected_snap)
         self.assertEqual(loaded.source.filename, "reporte.pdf")
-        self.assertIsNone(loaded.source.inventory)
+        self.assertEqual(loaded.source.type, SourceType.FILE)
+        self.assertIsNone(loaded.source.tape_catalog)
 
     def test_snapshot_service_bifurcation_folder_generates_ttape_and_cleans_residues(
         self,
@@ -261,11 +260,12 @@ class TestTapeContainerAndBifurcation(unittest.TestCase):
         # Cero residuos en disco: el .tartape suelto debe haber sido absorbido y eliminado
         self.assertFalse(catalog_path.exists())
 
-        # El manifest en memoria y en .ttape debe tener inventory en None
-        self.assertIsNone(manifest.source.inventory)
+        # El manifest en memoria y en .ttape debe tener tipo FOLDER y catalog
+        self.assertEqual(manifest.source.type, SourceType.FOLDER)
         loaded = SnapshotService.load_snapshot(expected_ttape)
         self.assertEqual(loaded.source.filename, "album_fotos")
-        self.assertIsNone(loaded.source.inventory)
+        self.assertEqual(loaded.source.type, SourceType.FOLDER)
+        self.assertIsNotNone(loaded.source.tape_catalog)
 
     # 3. PRUEBAS DE INTEGRACIÓN: INSPECTOR & IMPORTADOR
 

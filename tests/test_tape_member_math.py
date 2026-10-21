@@ -11,7 +11,7 @@ from totelegram.packaging.partitioner import StatelessPartitioner
 class TestTapeMemberMath(unittest.TestCase):
     def test_calculate_file_slices_matches_partitioner_fragments(self):
         """Verifica que calculate_file_slices() produce exactamente las mismas
-        coordenadas que los fragmentos generados para TapeMemberGPS."""
+        coordenadas que el catálogo TarTape usando el start_offset del VirtualTapeMember."""
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir) / "test_folder"
             root.mkdir()
@@ -30,7 +30,7 @@ class TestTapeMemberMath(unittest.TestCase):
             (root / "empty.txt").write_bytes(b"")
 
             # 2. Registrar la cinta con tartape
-            tartape.record(root, checksum="md5", overwrite=True)
+            tape = tartape.record(root, checksum="md5", overwrite=True)
 
             # 3. Particionar usando el motor de toTelegram con chunks de 10 KB (10240 bytes)
             chunk_size = 10 * 1024
@@ -44,7 +44,6 @@ class TestTapeMemberMath(unittest.TestCase):
             for vm in virtual_members:
                 # Caso archivo vacío (0 bytes)
                 if vm.size == 0:
-                    self.assertEqual(len(vm.fragments), 0)
                     slices = tartape.calculate_file_slices(
                         start_offset=vm.start_offset,
                         file_size=vm.size,
@@ -60,22 +59,25 @@ class TestTapeMemberMath(unittest.TestCase):
                     volume_size=chunk_size,
                 )
 
+                # Coordenadas esperadas resueltas por TarTape para este layout
+                expected_gps = tape.locate(vm.relative_path, tag_or_size=chunk_size)
+
                 # Debe haber exactamente la misma cantidad de partes
                 self.assertEqual(
                     len(calculated_slices),
-                    len(vm.fragments),
+                    len(expected_gps.fragments),
                     f"Discrepancia en cantidad de fragmentos para '{vm.relative_path}': "
-                    f"Matemática={len(calculated_slices)}, GPS={len(vm.fragments)}",
+                    f"Matemática={len(calculated_slices)}, GPS={len(expected_gps.fragments)}",
                 )
 
                 # Comparación campo por campo
                 for idx, (calc, frag) in enumerate(
-                    zip(calculated_slices, vm.fragments)
+                    zip(calculated_slices, expected_gps.fragments)
                 ):
                     self.assertEqual(
                         calc.volume_index,
-                        frag.vol_idx,
-                        f"Fallo en {vm.relative_path} parte {idx}: volume_index {calc.volume_index} != {frag.vol_idx}",
+                        frag.volume_index,
+                        f"Fallo en {vm.relative_path} parte {idx}: volume_index {calc.volume_index} != {frag.volume_index}",
                     )
                     self.assertEqual(
                         calc.volume_offset,

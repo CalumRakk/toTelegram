@@ -44,7 +44,7 @@ class TapeIndexService:
         cuántos no tienen sus archivos indexados en la tabla TapeMember.
         """
         try:
-            # 1. Búsqueda nativa de solo carpetas/cintas en Telegram
+            # Búsqueda nativa de solo carpetas/cintas en Telegram
             messages: List["Message"] = list(
                 self.client.search_messages(
                     chat_id=int(chat_id),
@@ -59,7 +59,7 @@ class TapeIndexService:
 
         unindexed_messages = []
 
-        # 2. Obtener los MD5 que ya tienen TapeMembers registrados en local
+        # Obtener los MD5 que ya tienen TapeMembers registrados en local
         indexed_sources = set(
             Source.select(Source.md5sum).join(TapeMember).distinct().scalars()
         )

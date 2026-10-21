@@ -91,9 +91,6 @@ class TapeContainer:
 
         # Aseguramos que el manifest no contenga el inventario masivo en JSON
         clean_manifest = manifest.model_copy(deep=True)
-        if clean_manifest.source.inventory is not None:
-            clean_manifest.source.inventory = None
-
         manifest_bytes = clean_manifest.model_dump_json(indent=2).encode("utf-8")
 
         try:
@@ -103,9 +100,9 @@ class TapeContainer:
                 compression=zipfile.ZIP_DEFLATED,
                 compresslevel=6,
             ) as zf:
-                # 1. Capa de red / transporte
+                # Capa de red / transporte
                 zf.writestr(TTAPE_MANIFEST_FILENAME, manifest_bytes)
-                # 2. Capa de datos / SQLite
+                # Capa de datos / SQLite
                 zf.write(cat_file, arcname=TTAPE_CATALOG_FILENAME)
 
             temp_dest.replace(dest)

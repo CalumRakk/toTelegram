@@ -1,12 +1,12 @@
 from datetime import datetime
 from pathlib import Path
 
-from pydantic import AliasChoices, BaseModel, Field
+from pydantic import BaseModel, Field
 
 from totelegram import __VERSION__
 from totelegram.schemas import SourceType, Strategy, TapeCatalog
 
-# Versión del esquema del manifiesto
+# Versión canónica del esquema del manifiesto en la rama principal
 MANIFEST_VERSION = "6.0"
 
 # Constantes del contenedor híbrido para cintas de datos (.ttape)
@@ -15,47 +15,9 @@ TTAPE_MANIFEST_FILENAME = "manifest.json"
 TTAPE_CATALOG_FILENAME = "catalog.tartape"
 
 
-class FileFragment(BaseModel):
-    """GPS exacto de un archivo dentro de un volumen (Payload)."""
-
-    vol_idx: int  # sequence_index del Payload
-    volume_offset: int = Field(
-        ...,
-        validation_alias=AliasChoices("volume_offset", "offset_in_vol"),
-        description="Offset de inicio dentro del archivo .tar del volumen",
-    )
-    volume_length: int = Field(
-        ...,
-        validation_alias=AliasChoices("volume_length", "bytes_in_volume"),
-        description="Cantidad de bytes útiles en este volumen",
-    )
-    source_offset: int = Field(
-        default=0,
-        description="Offset de inicio dentro del archivo original reconstruido",
-    )
-
-    @property
-    def offset_in_vol(self) -> int:
-        return self.volume_offset
-
-    @property
-    def bytes_in_volume(self) -> int:
-        return self.volume_length
-
-
-class TapeMemberSnapshot(BaseModel):
-    """Representación de un archivo dentro de una carpeta archivada (utilizado en v5.x / migración)."""
-
-    relative_path: str
-    size: int
-    md5sum: str
-    start_offset: int = Field(
-        default=0, description="Offset de inicio en el TAR continuo"
-    )
-    fragments: list[FileFragment] = Field(default_factory=list)
-
-
 class SourceMetadata(BaseModel):
+    """Metadatos del recurso original (archivo o carpeta)."""
+
     filename: str
     size: int
     md5sum: str
@@ -63,11 +25,11 @@ class SourceMetadata(BaseModel):
     mtime: float
     type: SourceType
     tape_catalog: TapeCatalog | None = None
-    # En v6.0 (.ttape), inventory es None porque el inventario reside en catalog.tartape
-    inventory: list[TapeMemberSnapshot] | None = None
 
 
 class RemotePart(BaseModel):
+    """Metadatos de cada volumen o trozo subido físicamente a Telegram."""
+
     sequence: int
     message_id: int
     chat_id: int
@@ -75,11 +37,13 @@ class RemotePart(BaseModel):
     part_filename: str
     part_size: int
     part_md5sum: str
-    start_offset: int  # Offset global en el Source (virtualización)
-    end_offset: int  # Offset global en el Source (virtualización)
+    start_offset: int  # Offset global en el Source continuo
+    end_offset: int  # Offset global en el Source continuo
 
 
 class UploadManifest(BaseModel):
+    """Manifiesto de navegación y disponibilidad v6.0."""
+
     manifest_version: str = MANIFEST_VERSION
     app_version: str = __VERSION__
     created_at: datetime
@@ -93,7 +57,7 @@ class UploadManifest(BaseModel):
 
 
 class TapeContainerInfo(BaseModel):
-    """DTO de inspección para contenedores híbridos .ttape."""
+    """DTO de inspección técnica para contenedores híbridos .ttape."""
 
     path: Path
     manifest: UploadManifest
@@ -103,7 +67,7 @@ class TapeContainerInfo(BaseModel):
     total_container_bytes: int
 
 
-# Modelos virtuales para particionado en memoria
+# Modelos virtuales para el particionado en memoria
 class VirtualChunk(BaseModel):
     sequence_index: int = Field(
         ..., description="Índice secuencial de la pieza (0, 1, 2...)"
@@ -120,28 +84,13 @@ class VirtualChunk(BaseModel):
     md5sum: str | None = Field(default=None, description="MD5 del volumen físico")
 
 
-class VirtualFileFragment(BaseModel):
-    vol_idx: int
-    volume_offset: int
-    volume_length: int
-    source_offset: int = 0
-    state: str
-
-    @property
-    def offset_in_vol(self) -> int:
-        return self.volume_offset
-
-    @property
-    def bytes_in_volume(self) -> int:
-        return self.volume_length
-
-
 class VirtualTapeMember(BaseModel):
+    """Representación ligera de un archivo de la carpeta durante la indexación inicial."""
+
     relative_path: str
     size: int
     md5sum: str
     start_offset: int = 0
-    fragments: list[VirtualFileFragment] = Field(default_factory=list)
 
 
 class VirtualTapeCatalog(BaseModel):

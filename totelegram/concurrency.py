@@ -471,7 +471,7 @@ class TelegramAccountLock:
         current_time = int(time.time())
         existing_locks = self._find_locks_in_saved_messages()
 
-        # 1. Comprobar si hay un lock vigente ocupado por otro nodo
+        # Comprobar si hay un lock vigente ocupado por otro nodo
         for lock in existing_locks:
             if not lock.is_expired(current_time):
                 if not lock.is_held_by(self.node_id):
@@ -493,7 +493,7 @@ class TelegramAccountLock:
                 except RPCError:
                     pass
 
-        # 2. Enviar el mensaje provisional de reclamo
+        # Enviar el mensaje provisional de reclamo
         provisional_payload = AccountLockPayload(
             account_id=self.account_id,
             node_id=self.node_id,
@@ -528,7 +528,7 @@ class TelegramAccountLock:
         except RPCError:
             pass
 
-        # 3. Consenso Anti-Carrera: Read-After-Write
+        # Consenso Anti-Carrera: Read-After-Write
         # Pequeña pausa para permitir que mensajes concurrentes se asienten en el servidor
         time.sleep(0.4)
 

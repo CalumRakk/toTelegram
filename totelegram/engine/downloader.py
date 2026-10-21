@@ -135,7 +135,7 @@ class DownloadEngine:
 
         target_file.parent.mkdir(parents=True, exist_ok=True)
 
-        # 1. Resolución de Metadatos del Archivo (Híbrida: .ttape SQLite o Legacy v5.x JSON)
+        # Resolución de Metadatos del Archivo (Híbrida: .ttape SQLite o Legacy v5.x JSON)
         is_ttape = snapshot_path and (
             snapshot_path.suffix == TTAPE_EXTENSION
             or snapshot_path.name.endswith(TTAPE_EXTENSION)
@@ -147,7 +147,7 @@ class DownloadEngine:
         tartape_slices: list[FileSlice] = []
 
         if is_ttape and snapshot_path:
-            # CASO A: Contenedor híbrido .ttape (Consulta O(1) en catalog.tartape)
+            # Consulta O(1) en catalog.tartape dentro de .ttape
             with TapeContainer.open_catalog(snapshot_path) as cat, cat.db_session:
                 try:
                     track = Track.get(Track.arc_path == relative_path)
@@ -165,48 +165,14 @@ class DownloadEngine:
                 start_offset = track.start_offset or 0
                 expected_checksum = track.checksum
 
-            # Proyección matemática dinámica O(1) de fragmentos (ADR 009)
             tartape_slices = calculate_file_slices(
                 start_offset=start_offset,
                 file_size=file_size,
                 volume_size=manifest.chunk_size,
             )
-
-        elif source.inventory:
-            # CASO B: Snapshot antiguo v5.x (Fallback en array JSON)
-            member = next(
-                (m for m in source.inventory if m.relative_path == relative_path),
-                None,
-            )
-            if not member:
-                raise FileNotFoundError(
-                    f"El archivo '{relative_path}' no fue encontrado en el inventario del snapshot."
-                )
-
-            file_size = member.size
-            expected_checksum = member.md5sum
-
-            # Si el miembro antiguo tiene start_offset, usamos la proyección moderna O(1)
-            if getattr(member, "start_offset", 0) > 0:
-                tartape_slices = calculate_file_slices(
-                    start_offset=member.start_offset,
-                    file_size=file_size,
-                    volume_size=manifest.chunk_size,
-                )
-            else:
-                # Fallback estático a fragmentos pre-calculados de v5.x
-                tartape_slices = [
-                    FileSlice(
-                        volume_index=frag.vol_idx,
-                        volume_offset=frag.volume_offset,
-                        volume_length=frag.volume_length,
-                        source_offset=frag.source_offset,
-                    )
-                    for frag in member.fragments
-                ]
         else:
             raise FileNotFoundError(
-                f"No se pudo resolver el catálogo de la cinta para '{relative_path}'."
+                f"No se pudo resolver el catálogo de la cinta para '{relative_path}'. Se requiere un archivo .ttape válido."
             )
 
         if not tartape_slices:
@@ -214,7 +180,7 @@ class DownloadEngine:
                 f"No se pudieron proyectar fragmentos para '{relative_path}' ({file_size} bytes)."
             )
 
-        # 2. Identificación y descarga exclusiva de los volúmenes necesarios
+        # Identificación y descarga exclusiva de los volúmenes necesarios
         needed_vol_indices = sorted({s.volume_index for s in tartape_slices})
         needed_parts_map = {
             p.sequence: p for p in manifest.parts if p.sequence in needed_vol_indices
@@ -253,7 +219,7 @@ class DownloadEngine:
             return vol_path
 
         try:
-            # 3. Delegación de reensamblado en vuelo a TarTape
+            # Delegación de reensamblado en vuelo a TarTape
             reassemble_file(
                 output_path=target_file,
                 slices=tartape_slices,
@@ -467,11 +433,6 @@ class DownloadEngine:
                 for t in tracks:
                     if t.checksum:
                         expected_checksums[t.arc_path] = t.checksum
-        elif manifest.source.inventory:
-            total_expected_files = len(manifest.source.inventory)
-            for m in manifest.source.inventory:
-                if m.md5sum:
-                    expected_checksums[m.relative_path] = m.md5sum
 
         self.observer.on_extraction_start(total_expected_files)
 

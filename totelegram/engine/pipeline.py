@@ -61,11 +61,11 @@ class JobPipeline:
                 # IDEMPOTENCIA: Si el snapshot aún no se ha publicado en Telegram
                 if job.snapshot_message_id is None:
                     try:
-                        # 1. Generar snapshot local (.json.xz o .ttape)
+                        # Generar snapshot local (.json.xz o .ttape)
                         manifest, snapshot_path = SnapshotService.generate_snapshot(job)
                         snapshot_generated = True
 
-                        # 2. Publicar snapshot en Telegram con caption estructurado
+                        # Publicar snapshot en Telegram con caption estructurado
                         self.ctx.observer.on_pause_start(
                             0, "Publicando snapshot en Telegram"
                         )  # Notificación visual
@@ -76,7 +76,7 @@ class JobPipeline:
                             manifest=manifest,
                         )
 
-                        # 3. Transacción atómica: vincular snapshot y sellar Job
+                        # Transacción atómica: vincular snapshot y sellar Job
                         with db_transaction(self.ctx.db):
                             job.set_snapshot_published(sent_msg.id)
                             logger.info(

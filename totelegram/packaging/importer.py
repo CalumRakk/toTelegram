@@ -1,5 +1,7 @@
 import enum
+import json
 import logging
+import lzma
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -19,9 +21,13 @@ from totelegram.models import (
     TelegramChat,
     TelegramUser,
 )
-from totelegram.packaging.schemas import MANIFEST_VERSION, UploadManifest
+from totelegram.packaging.schemas import (
+    MANIFEST_VERSION,
+    RemotePart,
+    SourceMetadata,
+    UploadManifest,
+)
 from totelegram.packaging.ttape import TapeContainer
-from totelegram.packaging.upgrader import SnapshotUpgrader, load_raw_snapshot
 from totelegram.schemas import JobStatus, SourceType, StrategyConfig
 
 logger = logging.getLogger(__name__)
@@ -30,9 +36,9 @@ logger = logging.getLogger(__name__)
 
 
 class InspectionStatus(str, enum.Enum):
-    VALID = "valid"  # UploadManifest v5.0 íntegro
-    NEEDS_UPGRADE = "needs_upgrade"  # Versión antigua (requiere comando upgrade)
-    CORRUPTED = "corrupted"  # JSON/YAML roto o schema inválido
+    VALID = "valid"  # UploadManifest v6.0 íntegro
+    NEEDS_UPGRADE = "needs_upgrade"  # Versión legacy (requiere rama de migración)
+    CORRUPTED = "corrupted"  # Archivo corrupto o JSON/ZIP inválido
 
 
 class PartAction(str, enum.Enum):
@@ -187,9 +193,11 @@ class ImportPlan:
 
 
 class SnapshotInspector:
+    """Inspecciona y valida archivos snapshot v6.0 (.ttape y .json.xz)."""
+
     @classmethod
     def inspect_file(cls, path: Path) -> SnapshotInspection:
-        # Soporte Nativo para Contenedores Híbridos .ttape (O(1))
+        # Caso 1: Contenedor híbrido .ttape (Carpetas)
         if path.suffix == ".ttape" or path.name.endswith(".ttape"):
             try:
                 if not TapeContainer.is_valid(path):
@@ -212,59 +220,60 @@ class SnapshotInspector:
                     error_detail=f"Error leyendo contenedor .ttape: {e}",
                 )
 
-        # Flujo existente para .json.xz / yaml
-        try:
-            raw_data = load_raw_snapshot(path)
-        except Exception as e:
-            return SnapshotInspection(
-                path=path,
-                status=InspectionStatus.CORRUPTED,
-                error_detail=f"Error leyendo archivo: {e}",
-            )
-
-        if not isinstance(raw_data, dict):
-            return SnapshotInspection(
-                path=path,
-                status=InspectionStatus.CORRUPTED,
-                error_detail="El contenido no es un diccionario JSON/YAML válido.",
-            )
-
-        version = SnapshotUpgrader.detect_version(raw_data)
-
-        if version == MANIFEST_VERSION:
+        # Caso 2: Snapshot de archivo individual (.json.xz)
+        if path.suffix == ".xz" or path.name.endswith(".json.xz"):
             try:
-                manifest = UploadManifest.model_validate(raw_data)
-                return SnapshotInspection(
-                    path=path,
-                    status=InspectionStatus.VALID,
-                    manifest=manifest,
-                    detected_version=version,
-                )
+                with lzma.open(path, "rt", encoding="utf-8") as f:
+                    raw_data = json.load(f)
             except Exception as e:
                 return SnapshotInspection(
                     path=path,
                     status=InspectionStatus.CORRUPTED,
-                    error_detail=f"Esquema v{MANIFEST_VERSION} inválido: {e}",
-                    detected_version=version,
+                    error_detail=f"Error descomprimiendo archivo .json.xz: {e}",
                 )
+
+            if not isinstance(raw_data, dict):
+                return SnapshotInspection(
+                    path=path,
+                    status=InspectionStatus.CORRUPTED,
+                    error_detail="El contenido no es un objeto JSON válido.",
+                )
+
+            ver = str(raw_data.get("manifest_version", "unknown"))
+            if ver == MANIFEST_VERSION:
+                try:
+                    manifest = UploadManifest.model_validate(raw_data)
+                    return SnapshotInspection(
+                        path=path,
+                        status=InspectionStatus.VALID,
+                        manifest=manifest,
+                        detected_version=ver,
+                    )
+                except Exception as e:
+                    return SnapshotInspection(
+                        path=path,
+                        status=InspectionStatus.CORRUPTED,
+                        error_detail=f"Esquema v{MANIFEST_VERSION} inválido: {e}",
+                        detected_version=ver,
+                    )
+
+            # Versiones distintas a v6.0 se delegan a la rama de migración
+            return SnapshotInspection(
+                path=path,
+                status=InspectionStatus.NEEDS_UPGRADE,
+                detected_version=ver,
+                error_detail=f"Versión '{ver}' incompatible. Usa la rama de migración para actualizar a v{MANIFEST_VERSION}.",
+            )
 
         return SnapshotInspection(
             path=path,
-            status=InspectionStatus.NEEDS_UPGRADE,
-            detected_version=version,
+            status=InspectionStatus.CORRUPTED,
+            error_detail="Extensión no reconocida. Se requiere .ttape o .json.xz.",
         )
 
     @classmethod
     def find_all_candidates(cls, paths: List[Path]) -> List[Path]:
-        valid_exts = (
-            ".json",
-            ".json.xz",
-            ".yaml",
-            ".yml",
-            ".yaml.xz",
-            ".yml.xz",
-            ".ttape",
-        )
+        valid_exts = (".json.xz", ".ttape")
         candidates = []
         for p in paths:
             if p.is_file() and any(p.name.lower().endswith(ext) for ext in valid_exts):
@@ -279,6 +288,8 @@ class SnapshotInspector:
 
 
 class SnapshotImportPlanner:
+    """Calcula un plan determinista de importación cruzando los snapshots con el estado actual de la BD."""
+
     @classmethod
     def plan(cls, inspections: List[SnapshotInspection]) -> ImportPlan:
         plan = ImportPlan()
@@ -317,17 +328,13 @@ class SnapshotImportPlanner:
                     & (Job.deleted_at == 0)
                 )
 
-            # AUDITORÍA REAL DE ARCHIVOS DE LA CINTA TAR (TapeMember)
+            # Auditoría de archivos de cinta TAR: en v6.0 proviene exclusivamente de tape_catalog
             is_folder = manifest.source.type == SourceType.FOLDER
-            if is_folder:
-                if manifest.source.inventory:
-                    total_inventory = len(manifest.source.inventory)
-                elif manifest.source.tape_catalog:
-                    total_inventory = manifest.source.tape_catalog.total_files
-                else:
-                    total_inventory = 0
-            else:
-                total_inventory = 0
+            total_inventory = (
+                manifest.source.tape_catalog.total_files
+                if (is_folder and manifest.source.tape_catalog)
+                else 0
+            )
 
             existing_members_count = 0
             if existing_source:
@@ -337,7 +344,6 @@ class SnapshotImportPlanner:
                     .count()
                 )
             elif md5 in planned_sources_md5:
-                # Ya fue planificado en este mismo lote
                 existing_members_count = total_inventory
 
             missing_members = (
@@ -493,7 +499,7 @@ class SnapshotImportPlanner:
                 1 for pd in parts_diff if pd.action == PartAction.WILL_LINK
             )
 
-            # CRITERIO DE SINCRONIZACIÓN TOTAL: Solo si están todas las piezas Y todos los archivos del TAR
+            # Criterio de sincronización total: partes remotas, payloads e inventario de cinta al día
             if missing_remotes == 0 and missing_payloads == 0 and missing_members == 0:
                 plan.synced_count += 1
                 planned_jobs.add(job_key)
@@ -537,6 +543,8 @@ class SnapshotImportPlanner:
 
 
 class SnapshotImporter:
+    """Ejecutor transaccional del plan de importación sobre la base de datos local."""
+
     @classmethod
     def apply_plan(
         cls,
@@ -544,7 +552,7 @@ class SnapshotImporter:
         db: peewee.Database,
         owner: TelegramUser | None = None,
         on_progress: Callable[[int, int, str], None] | None = None,
-        snapshot_message_id: int | None = None,  # <-- Nuevo parámetro opcional
+        snapshot_message_id: int | None = None,
     ) -> Tuple[int, List[Tuple[str, str]]]:
         actionable = plan.actionable_items
         succeeded = 0
@@ -572,87 +580,155 @@ class SnapshotImporter:
         item: PlanItem,
         owner: TelegramUser | None,
         snapshot_message_id: int | None = None,
-    ):
-        """Aplica las mutaciones planificadas para un snapshot en la base de datos local."""
+    ) -> None:
+        """Aplica las mutaciones planificadas coordinando submétodos atómicos."""
         manifest = item.manifest
 
-        # TODO: ESTA FUNCION MONSTRUO CUESTA SEGUIRLA. REFACTORIZAR URGENTE!
+        chat = cls._ensure_destination_chat(item.target_chat_id)
+        owner_obj = cls._ensure_owner_user(owner, manifest)
+        source = cls._upsert_source(item.existing_source, manifest.source)
+        job = cls._upsert_job(
+            existing_job=item.existing_job,
+            source=source,
+            chat=chat,
+            manifest=manifest,
+            snapshot_message_id=snapshot_message_id,
+        )
 
-        # Asegurar la existencia del chat de destino
+        payload_map = cls._sync_payloads(job, manifest.parts)
+
+        will_link_sequences = {
+            pd.sequence for pd in item.parts_diff if pd.action == PartAction.WILL_LINK
+        }
+        cls._link_remotes(
+            payload_map=payload_map,
+            parts=manifest.parts,
+            will_link_sequences=will_link_sequences,
+            owner=owner_obj,
+            mime_type=manifest.source.mime_type,
+        )
+
+        # Ingesta masiva B-Tree de archivos si es contenedor .ttape
+        if (
+            manifest.source.type == SourceType.FOLDER
+            and item.mutations.members_count > 0
+        ):
+            cls._bulk_ingest_tape_members(source, item.inspection.path)
+
+        # Actualizar estado a UPLOADED si todas las partes están completas
+        if Payload.total_pending_for_job(job) == 0 and job.status != JobStatus.UPLOADED:
+            job.status = JobStatus.UPLOADED
+            job.save(only=[Job.status, Job.updated_at])
+
+    @staticmethod
+    def _ensure_destination_chat(chat_id: int) -> TelegramChat:
         chat, _ = TelegramChat.get_or_create(
-            id=item.target_chat_id,
+            id=chat_id,
             defaults={
-                "title": f"Chat {item.target_chat_id}",
+                "title": f"Chat {chat_id}",
                 "type": "channel",
                 "is_public": False,
                 "last_verified": datetime.now(timezone.utc),
             },
         )
+        return chat
 
-        # Asegurar el usuario propietario del contenido
-        owner_obj = owner
-        if owner_obj is None:
-            owner_obj, _ = TelegramUser.get_or_create(
-                id=manifest.owner_id,
-                defaults={
-                    "first_name": manifest.owner_name or "Unknown",
-                    "username": None,
-                    "is_premium": False,
-                },
-            )
+    @staticmethod
+    def _ensure_owner_user(
+        owner: TelegramUser | None, manifest: UploadManifest
+    ) -> TelegramUser:
+        if owner is not None:
+            return owner
 
-        # Obtener o crear el registro Source (identidad del archivo/carpeta)
-        source = item.existing_source
-        if source is None:
-            source = Source.get_or_none(Source.md5sum == manifest.source.md5sum)
+        owner_obj, _ = TelegramUser.get_or_create(
+            id=manifest.owner_id,
+            defaults={
+                "first_name": manifest.owner_name or "Unknown",
+                "username": None,
+                "is_premium": False,
+            },
+        )
+        return owner_obj
 
-        if source is None:
-            source = Source.create(
-                path_str=manifest.source.filename,
-                md5sum=manifest.source.md5sum,
-                size=manifest.source.size,
-                mtime=manifest.source.mtime,
-                mimetype=manifest.source.mime_type,
-                type=manifest.source.type,
-                tape_catalog=manifest.source.tape_catalog,
-            )
+    @staticmethod
+    def _upsert_source(
+        existing_source: Source | None, source_meta: SourceMetadata
+    ) -> Source:
+        if existing_source is not None:
+            return existing_source
 
-        # Obtener o formalizar el Job en este chat
-        job = item.existing_job
-        if job is None:
-            job = Job.get_or_none(
-                (Job.source == source) & (Job.chat == chat) & (Job.deleted_at == 0)
-            )
+        source = Source.get_or_none(Source.md5sum == source_meta.md5sum)
+        if source is not None:
+            return source
 
-        if job is None:
-            config = StrategyConfig(
-                tg_max_size=manifest.chunk_size,
-                user_is_premium=False,
-                app_version=f"imported-{__VERSION__}",
-            )
-            job = Job.create(
-                source=source,
-                chat=chat,
-                strategy=manifest.strategy,
-                config=config,
-                status=JobStatus.UPLOADED,
-                deleted_at=0,
-                snapshot_message_id=snapshot_message_id,
-                last_verified_at=get_utc_now() if snapshot_message_id else None,
-            )
-        else:
-            # Si el job ya existía pero no tenía el snapshot_message_id registrado
+        return Source.create(
+            path_str=source_meta.filename,
+            md5sum=source_meta.md5sum,
+            size=source_meta.size,
+            mtime=source_meta.mtime,
+            mimetype=source_meta.mime_type,
+            type=source_meta.type,
+            tape_catalog=source_meta.tape_catalog,
+        )
+
+    @staticmethod
+    def _upsert_job(
+        existing_job: Job | None,
+        source: Source,
+        chat: TelegramChat,
+        manifest: UploadManifest,
+        snapshot_message_id: int | None,
+    ) -> Job:
+        if existing_job is not None:
+            if snapshot_message_id and not existing_job.snapshot_message_id:
+                existing_job.snapshot_message_id = snapshot_message_id
+                existing_job.last_verified_at = get_utc_now()
+                existing_job.save(
+                    only=[
+                        Job.snapshot_message_id,
+                        Job.last_verified_at,
+                        Job.updated_at,
+                    ]
+                )
+            return existing_job
+
+        job = Job.get_or_none(
+            (Job.source == source) & (Job.chat == chat) & (Job.deleted_at == 0)
+        )
+        if job is not None:
             if snapshot_message_id and not job.snapshot_message_id:
                 job.snapshot_message_id = snapshot_message_id
                 job.last_verified_at = get_utc_now()
                 job.save(
-                    only=[Job.snapshot_message_id, Job.last_verified_at, Job.updated_at]
+                    only=[
+                        Job.snapshot_message_id,
+                        Job.last_verified_at,
+                        Job.updated_at,
+                    ]
                 )
+            return job
 
-        # Asegurar la existencia de todos los Payloads (piezas físicas)
+        config = StrategyConfig(
+            tg_max_size=manifest.chunk_size,
+            user_is_premium=False,
+            app_version=f"imported-{__VERSION__}",
+        )
+        return Job.create(
+            source=source,
+            chat=chat,
+            strategy=manifest.strategy,
+            config=config,
+            status=JobStatus.UPLOADED,
+            deleted_at=0,
+            snapshot_message_id=snapshot_message_id,
+            last_verified_at=get_utc_now() if snapshot_message_id else None,
+        )
+
+    @staticmethod
+    def _sync_payloads(job: Job, parts: list[RemotePart]) -> dict[int, Payload]:
         payload_map = {p.sequence_index: p for p in cast(list[Payload], job.payloads)}
 
-        for part in manifest.parts:
+        for part in parts:
             payload = payload_map.get(part.sequence)
             if not payload:
                 payload = Payload.create(
@@ -667,12 +743,17 @@ class SnapshotImporter:
                 )
                 payload_map[part.sequence] = payload
 
-        # Vincular los RemotePayloads faltantes según el diff del plan
-        will_link_sequences = {
-            pd.sequence for pd in item.parts_diff if pd.action == PartAction.WILL_LINK
-        }
+        return payload_map
 
-        for part in manifest.parts:
+    @staticmethod
+    def _link_remotes(
+        payload_map: dict[int, Payload],
+        parts: list[RemotePart],
+        will_link_sequences: set[int],
+        owner: TelegramUser,
+        mime_type: str,
+    ) -> None:
+        for part in parts:
             if part.sequence not in will_link_sequences:
                 continue
 
@@ -683,7 +764,7 @@ class SnapshotImporter:
                 "document": {
                     "file_name": part.part_filename,
                     "file_size": part.part_size,
-                    "mime_type": manifest.source.mime_type,
+                    "mime_type": mime_type,
                 },
             }
 
@@ -691,73 +772,36 @@ class SnapshotImporter:
                 payload=payload,
                 message_id=part.message_id,
                 chat_id=part.chat_id,
-                owner=owner_obj,
+                owner=owner,
                 json_metadata=synthetic_meta,
                 last_verified_at=datetime.now(timezone.utc),
                 is_orphaned=False,
             )
 
-        # GESTIÓN DE ARCHIVOS DE LA CINTA TAR (TapeMember)
-        if (
-            manifest.source.type == SourceType.FOLDER
-            and item.mutations.members_count > 0
+    @staticmethod
+    def _bulk_ingest_tape_members(source: Source, snapshot_path: Path) -> None:
+        """Vuelca los archivos de la cinta TAR abriendo el SQLite de tartape en bloques de 500 filas."""
+        if not (
+            snapshot_path.suffix == ".ttape" or snapshot_path.name.endswith(".ttape")
         ):
-            snapshot_path = item.inspection.path
+            return
 
-            # CASO A: Contenedor híbrido .ttape (Volcado masivo directo desde SQLite)
-            if snapshot_path.suffix == ".ttape" or snapshot_path.name.endswith(
-                ".ttape"
-            ):
-                from totelegram.packaging.ttape import TapeContainer
+        with TapeContainer.open_catalog(snapshot_path) as cat, cat.db_session:
+            cursor = cat.db_session.db.execute_sql(
+                "SELECT arc_path, size, checksum, start_offset FROM track WHERE is_dir = 0"
+            )
+            tracks = cursor.fetchall()
 
-                with TapeContainer.open_catalog(snapshot_path) as cat, cat.db_session:
-                    cursor = cat.db_session.db.execute_sql(
-                        "SELECT arc_path, size, checksum, start_offset FROM track WHERE is_dir = 0"
-                    )
-                    tracks = cursor.fetchall()
+            member_inserts = [
+                {
+                    "source": source,
+                    "relative_path": row[0],
+                    "size": row[1],
+                    "md5sum": row[2] or "",
+                    "start_offset": row[3] or 0,
+                }
+                for row in tracks
+            ]
 
-                    member_inserts = [
-                        {
-                            "source": source,
-                            "relative_path": row[0],
-                            "size": row[1],
-                            "md5sum": row[2] or "",
-                            "start_offset": row[3] or 0,
-                        }
-                        for row in tracks
-                    ]
-
-                    for batch in batched(member_inserts, 500):
-                        TapeMember.insert_many(batch).on_conflict_ignore().execute()
-
-            # CASO B: Manifiesto legacy (.json.xz) con array inventory
-            elif manifest.source.inventory:
-                member_inserts = []
-                for m in manifest.source.inventory:
-                    start_off = getattr(m, "start_offset", 0)
-
-                    # Deducción matemática resiliente para snapshots antiguos sin start_offset
-                    if start_off == 0 and getattr(m, "fragments", None):
-                        first = m.fragments[0]
-                        global_content = (
-                            first.vol_idx * manifest.chunk_size
-                        ) + first.volume_offset
-                        start_off = max(0, global_content - 512)
-
-                    member_inserts.append(
-                        {
-                            "source": source,
-                            "relative_path": m.relative_path,
-                            "size": m.size,
-                            "md5sum": m.md5sum,
-                            "start_offset": start_off,
-                        }
-                    )
-
-                for batch in batched(member_inserts, 500):
-                    TapeMember.insert_many(batch).on_conflict_ignore().execute()
-
-        # Actualizar estado a UPLOADED si no quedan piezas pendientes
-        if Payload.total_pending_for_job(job) == 0 and job.status != JobStatus.UPLOADED:
-            job.status = JobStatus.UPLOADED
-            job.save(only=[Job.status, Job.updated_at])
+            for batch in batched(member_inserts, 500):
+                TapeMember.insert_many(batch).on_conflict_ignore().execute()

@@ -22,7 +22,6 @@ from totelegram.schemas import (
     SourceType,
     Strategy,
     StrategyConfig,
-    TapeCatalog,
 )
 
 
@@ -31,7 +30,7 @@ class TestSnapshotService(unittest.TestCase):
         self.temp_dir = TemporaryDirectory()
         self.base_path = Path(self.temp_dir.name)
 
-        # Iniciar sesión de base de datos SQLite en memoria con esquema v2
+        # Iniciar sesión de base de datos SQLite en memoria
         self.db_session = DatabaseSession("sqlite:///:memory:", auto_init_schema=True)
         self.db = self.db_session.start()
 
@@ -51,8 +50,7 @@ class TestSnapshotService(unittest.TestCase):
         msg.id = message_id
         msg.chat = MagicMock(id=chat_id, type="channel")
         msg.link = link
-        # str(msg) devuelve un JSON válido para RemotePayload.json_metadata
-        msg.__str__.return_value = json.dumps(  # type: ignore
+        msg.__str__.return_value = json.dumps(
             {
                 "id": message_id,
                 "chat": {"id": chat_id, "type": "channel"},
@@ -191,8 +189,6 @@ class TestSnapshotService(unittest.TestCase):
             manifest, _ = SnapshotService.generate_snapshot(job)
 
         # 2. Validaciones bajo el estándar v6.0 (.ttape)
-        # En v6.0, el JSON ya NO tiene el array inventory (RAM O(1))
-        self.assertIsNone(manifest.source.inventory)
         self.assertEqual(len(manifest.parts), 2)
 
         # Debe generar físicamente el contenedor .ttape
@@ -275,117 +271,6 @@ class TestSnapshotService(unittest.TestCase):
         self.assertEqual(slices[1].volume_offset, 0)
         self.assertEqual(slices[1].volume_length, 212)
         self.assertEqual(slices[1].source_offset, 988)
-
-    def test_import_snapshot_heals_missing_start_offset(self):
-        """Al importar un snapshot antiguo con start_offset en 0, debe sanarlo en BD."""
-        from datetime import datetime, timezone
-
-        from totelegram.packaging.importer import (
-            DbMutations,
-            InspectionStatus,
-            PlanAction,
-            PlanItem,
-            SnapshotImporter,
-            SnapshotInspection,
-        )
-        from totelegram.packaging.schemas import (
-            FileFragment,
-            RemotePart,
-            SourceMetadata,
-            TapeMemberSnapshot,
-            UploadManifest,
-        )
-
-        manifest = UploadManifest(
-            manifest_version="5.1",
-            strategy=Strategy.CHUNKED,
-            chunk_size=1000,
-            created_at=datetime.now(timezone.utc),
-            chat_id=self.chat.id,
-            owner_id=self.user.id,
-            owner_name="Test",
-            parts=[
-                RemotePart(
-                    sequence=0,
-                    message_id=1,
-                    chat_id=self.chat.id,
-                    link="",
-                    part_filename="v.tar.01",
-                    part_size=1000,
-                    part_md5sum="m1",
-                    start_offset=0,
-                    end_offset=1000,
-                ),
-                RemotePart(
-                    sequence=1,
-                    message_id=2,
-                    chat_id=self.chat.id,
-                    link="",
-                    part_filename="v.tar.02",
-                    part_size=500,
-                    part_md5sum="m2",
-                    start_offset=1000,
-                    end_offset=1500,
-                ),
-            ],
-            source=SourceMetadata(
-                filename="backup.tar",
-                size=1500,
-                md5sum="hash_snap_heal_test",
-                mime_type="application/x-tar",
-                mtime=1.0,
-                type=SourceType.FOLDER,
-                inventory=[
-                    # Simula un snapshot viejo: start_offset viene en 0, pero fragments tiene datos
-                    TapeMemberSnapshot(
-                        relative_path="archivo.txt",
-                        size=300,
-                        md5sum="md5_arch",
-                        start_offset=0,
-                        fragments=[
-                            FileFragment(
-                                vol_idx=0,
-                                volume_offset=600,
-                                volume_length=300,
-                                source_offset=0,
-                            )
-                        ],
-                    )
-                ],
-            ),
-        )
-
-        item = PlanItem(
-            inspection=SnapshotInspection(
-                path=Path("/tmp/fake.json.xz"),
-                status=InspectionStatus.VALID,
-                manifest=manifest,
-            ),
-            manifest=manifest,
-            action=PlanAction.CREATE_NEW,
-            target_chat_id=self.chat.id,
-            total_parts=2,
-            mutations=DbMutations(
-                create_source=True,
-                create_job=True,
-                payloads_count=2,
-                remotes_count=2,
-                members_count=1,
-            ),
-        )
-
-        succeeded, errors = SnapshotImporter.apply_plan(
-            plan=type("MockPlan", (), {"actionable_items": [item]})(),
-            db=self.db,
-            owner=self.user,
-        )
-
-        self.assertEqual(succeeded, 1)
-        self.assertEqual(len(errors), 0)
-
-        # Validar que start_offset fue calculado: (0 * 1000 + 600) - 512 = 88
-        saved_member = TapeMember.get(TapeMember.relative_path == "archivo.txt")
-        self.assertEqual(saved_member.start_offset, 88)
 
 
 if __name__ == "__main__":

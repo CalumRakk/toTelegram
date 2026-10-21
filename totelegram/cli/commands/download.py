@@ -88,7 +88,7 @@ def download_snapshot(
         format_badge = (
             "[dim](Contenedor .ttape)[/dim]"
             if is_ttape
-            else "[dim](Snapshot v5.x)[/dim]"
+            else "[dim](Snapshot v6.0)[/dim]"
         )
         UI.print(f"Extrayendo archivo puntual: [bold cyan]{file_path}[/]")
         UI.info(

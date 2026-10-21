@@ -938,7 +938,7 @@ class DisplaySnapshotPlan:
 
     @classmethod
     def show_alerts(cls, plan: ImportPlan, sample_path: str | None = None) -> None:
-        """Muestra advertencias para upgrades pendientes y archivos corruptos."""
+        """Muestra advertencias para versiones incompatibles y archivos corruptos."""
         if not plan.needs_upgrade_items and not plan.corrupted_items:
             return
 
@@ -947,16 +947,16 @@ class DisplaySnapshotPlan:
 
         if plan.needs_upgrade_items:
             count = len(plan.needs_upgrade_items)
-            msg = f"! {count} snapshot(s) en formato antiguo requieren upgrade previo a v5.0:"
+            msg = f"! {count} snapshot(s) en formato antiguo (pre-v6.0) detectados:"
             console.print(
-                f"  [yellow]![/] [bold]{count}[/] snapshot(s) en formato antiguo requieren upgrade previo a v5.0:"
+                f"  [yellow]![/] [bold]{count}[/] snapshot(s) en formato antiguo (pre-v6.0) no son compatibles directamente:"
             )
             ui_logger.warning(f"  {msg}")
 
             for insp in plan.needs_upgrade_items[:5]:
                 ver = insp.detected_version or "antigua"
                 console.print(
-                    f"      [bright_black]• {insp.path.name}[/] [dim]({ver})[/]"
+                    f"      [bright_black]• {insp.path.name}[/] [dim](versión detectada: {ver})[/]"
                 )
                 ui_logger.warning(f"      • {insp.path.name} ({ver})")
 
@@ -964,11 +964,12 @@ class DisplaySnapshotPlan:
                 console.print(f"      [dim]... y {count - 5} archivos más.[/dim]")
                 ui_logger.warning(f"      ... y {count - 5} archivos más.")
 
-            target_cmd = f'"{sample_path}"' if sample_path else "<RUTA>"
-            UI.tip(
-                "Conviértelos al estándar v5.0 moderno ejecutando:",
-                commands=[f"totelegram snapshot upgrade {target_cmd}"],
+            UI.educational_tip(
+                message="Esta versión de toTelegram opera exclusivamente con el estándar v6.0 (.ttape y .json.xz).\n"
+                "Para migrar snapshots históricos masivos a Telegram, utiliza la herramienta de migración (rama migration).",
+                title="Snapshots heredados",
                 spacing="top",
+                border_style="yellow",
             )
             console.print()
 

@@ -2,12 +2,12 @@ import json
 import logging
 import lzma
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
 
 import tartape
 
 from totelegram.models import Job, Payload, RemotePayload
 from totelegram.packaging.schemas import (
+    MANIFEST_VERSION,
     TTAPE_EXTENSION,
     RemotePart,
     SourceMetadata,
@@ -16,27 +16,55 @@ from totelegram.packaging.schemas import (
 from totelegram.packaging.ttape import TapeContainer
 from totelegram.schemas import SourceType
 
-if TYPE_CHECKING:
-    from pyrogram.client import Client
-
 logger = logging.getLogger(__name__)
 
 
 class SnapshotService:
+    """Servicio de generación, resolución y carga de Snapshots modernos v6.0."""
+
     @staticmethod
-    def load_snapshot(path: Path, client: Optional["Client"] = None) -> UploadManifest:
-        """Carga y valida un snapshot de forma polimórfica (.ttape o .json.xz)."""
+    def load_snapshot(path: Path) -> UploadManifest:
+        """Carga y valida un snapshot de forma polimórfica (.ttape o .json.xz v6.0).
+
+        Args:
+            path: Ruta al archivo snapshot.
+
+        Returns:
+            UploadManifest: Manifiesto validado en esquema v6.0.
+
+        Raises:
+            FileNotFoundError: Si el archivo no existe.
+            ValueError: Si el formato o versión no corresponden a v6.0.
+        """
         target = Path(path).resolve()
         if not target.exists():
             raise FileNotFoundError(f"Snapshot no encontrado en: {target}")
 
+        # Caso 1: Contenedor híbrido de carpeta (.ttape)
         if target.suffix == TTAPE_EXTENSION or target.name.endswith(TTAPE_EXTENSION):
             return TapeContainer.read_manifest(target)
 
-        # Para formatos antiguos o .json.xz, delegamos en el upgrader
-        from totelegram.packaging.upgrader import SnapshotUpgrader
+        # Caso 2: Manifiesto de archivo individual (.json.xz)
+        if target.suffix == ".xz" or target.name.endswith(".json.xz"):
+            try:
+                with lzma.open(target, "rt", encoding="utf-8") as f:
+                    raw_data = json.load(f)
+                    manifest = UploadManifest.model_validate(raw_data)
+                    if manifest.manifest_version != MANIFEST_VERSION:
+                        raise ValueError(
+                            f"Versión no soportada ({manifest.manifest_version}). "
+                            f"Se requiere {MANIFEST_VERSION}."
+                        )
+                    return manifest
+            except Exception as e:
+                raise ValueError(
+                    f"Error al leer o validar el snapshot '{target.name}': {e}"
+                ) from e
 
-        return SnapshotUpgrader.load_and_upgrade(target, tg_client=client)
+        raise ValueError(
+            f"Formato no soportado para '{target.name}'. "
+            f"Solo se admiten archivos .ttape y .json.xz v6.0."
+        )
 
     @staticmethod
     def generate_snapshot(job: Job) -> tuple[UploadManifest, Path]:
@@ -47,7 +75,7 @@ class SnapshotService:
         source = job.source
         original_file_path = Path(source.path_str)
 
-        # 1. Recuperar piezas remotas activas
+        # Recuperar piezas remotas activas
         remotes_db = list(
             RemotePayload.select(RemotePayload, Payload)
             .join(Payload)
@@ -77,7 +105,7 @@ class SnapshotService:
 
         owner = remotes_db[0].owner
 
-        # 2. Metadatos del Source (en v6.0 el inventario JSON es None)
+        # Metadatos del Source
         source_meta = SourceMetadata(
             filename=original_file_path.name,
             size=source.size,
@@ -86,7 +114,6 @@ class SnapshotService:
             mtime=source.mtime,
             type=source.type,
             tape_catalog=source.tape_catalog,
-            inventory=None,
         )
 
         manifest = UploadManifest(
@@ -100,7 +127,7 @@ class SnapshotService:
             parts=parts,
         )
 
-        # 3. Bifurcación física de almacenamiento
+        # Bifurcación física de almacenamiento
         output_path = SnapshotService.resolve_snapshot_path(
             original_file_path, source.md5sum, source.type
         )

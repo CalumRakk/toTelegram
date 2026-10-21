@@ -38,11 +38,11 @@ class DiscoveryService:
             f"Investigando disponibilidad de MD5 {job.source.md5sum} en chat {job.chat.id}"
         )
 
-        # 1. Camino Local: ¿Ya está en la base de datos y fresco/válido?
+        # Camino Local: ¿Ya está en la base de datos y fresco/válido?
         if self.is_fulfilled_local(job):
             return AvailabilityReport(state=AvailabilityState.FULFILLED)
 
-        # 2. Descubrimiento JIT en Telegram: ¿Existe en el chat aunque no esté en la DB local?
+        # Descubrimiento JIT en Telegram: ¿Existe en el chat aunque no esté en la DB local?
         if self._discover_and_hydrate_jit(job):
             logger.info(
                 f"Recurso MD5 {job.source.md5sum} descubierto y asimilado JIT desde Telegram."
@@ -51,7 +51,7 @@ class DiscoveryService:
             if self.is_fulfilled_local(job):
                 return AvailabilityReport(state=AvailabilityState.FULFILLED)
 
-        # 3. Camino Espejo: ¿Existe en otro chat para hacer Smart Forward?
+        # Camino Espejo: ¿Existe en otro chat para hacer Smart Forward?
         historical_jobs = self.get_historical_jobs(job)
         if historical_jobs.exists():
             remotes = self.get_remotes(historical_jobs)
@@ -236,14 +236,14 @@ class DiscoveryService:
             and job.snapshot_message_id
             and job.deleted_at == 0
         ):
-            # 1. Camino ultrarrápido O(1): Si está fresco (< 30 min), es válido sin tocar la red
+            # Camino ultrarrápido O(1): Si está fresco (< 30 min), es válido sin tocar la red
             if job.is_fresh:
                 logger.debug(
                     f"Job {job.id} está fresco (verificado recientemente). Disponibilidad confirmada en local."
                 )
                 return True
 
-            # 2. Si expiró la frescura (> 30 min), comprobamos el snapshot en Telegram (50ms)
+            # Si expiró la frescura (> 30 min), comprobamos el snapshot en Telegram (50ms)
             logger.debug(
                 f"Job {job.id} expiró frescura TTL. Verificando snapshot en Telegram..."
             )

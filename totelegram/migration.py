@@ -1,16 +1,12 @@
 import enum
 import logging
-import shutil
 import threading
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from itertools import batched
-from pathlib import Path
-from typing import Callable, Dict, List
+from typing import List
 
 import peewee
-from playhouse.migrate import PostgresqlMigrator, SqliteMigrator, migrate
 
 from totelegram import __CURRENT_DB_VERSION__
 
@@ -23,123 +19,18 @@ MIGRATION_ADVISORY_LOCK_ID = 84920492
 _sqlite_migration_lock = threading.RLock()
 
 
-def _heal_legacy_tapemembergps_data(db: peewee.Database):
-    """
-    Sanación matemática in-place para registros históricos en tapemembergps.
-    Convierte las coordenadas antiguas del contenedor TAR a coordenadas
-    quirúrgicas puras (source_offset, volume_offset, volume_length).
-    """
-    from totelegram.models import Payload, TapeMember
-
-    # Definición local temporal solo si se requiere migrar una BD antigua v4
-    class LegacyTapeMemberGPS(peewee.Model):
-        id = peewee.AutoField()
-        member = peewee.ForeignKeyField(TapeMember, backref="fragments")
-        payload = peewee.ForeignKeyField(Payload)
-        offset_in_volume = peewee.BigIntegerField()
-        bytes_in_volume = peewee.BigIntegerField()
-        source_offset = peewee.BigIntegerField(default=0)
-
-        class Meta:
-            database = db
-            table_name = "tapemembergps"
-
-    TapeMemberGPS = LegacyTapeMemberGPS
-
-    logger.info(
-        "Iniciando sanación de offsets en registros históricos de 'tapemembergps'..."
-    )
-
-    members_query = TapeMember.select().order_by(TapeMember.id)
-    gps_query = (
-        TapeMemberGPS.select(TapeMemberGPS, Payload)
-        .join(Payload)
-        .order_by(Payload.sequence_index)
-    )
-
-    members = peewee.prefetch(members_query, gps_query)
-
-    gps_to_update = []
-    total_healed = 0
-
-    for member in members:
-        fragments = list(member.fragments)
-        if not fragments:
-            continue
-
-        total_frags = len(fragments)
-
-        if total_frags == 1:
-            frag = fragments[0]
-            frag.offset_in_volume = frag.offset_in_volume + 512
-            frag.bytes_in_volume = member.size
-            frag.source_offset = 0
-            gps_to_update.append(frag)
-        else:
-            accumulated = 0
-            for idx, frag in enumerate(fragments):
-                if idx == 0:
-                    # HEAD: Contiene el Header TAR
-                    frag.offset_in_volume = frag.offset_in_volume + 512
-                    frag.bytes_in_volume = max(0, frag.bytes_in_volume - 512)
-                    frag.source_offset = 0
-                    accumulated += frag.bytes_in_volume
-                elif idx == total_frags - 1:
-                    # TAIL: Eliminar el padding final
-                    frag.offset_in_volume = 0
-                    frag.bytes_in_volume = max(0, member.size - accumulated)
-                    frag.source_offset = accumulated
-                else:
-                    # BODY: Datos puros contiguos
-                    frag.offset_in_volume = 0
-                    frag.source_offset = accumulated
-                    accumulated += frag.bytes_in_volume
-
-                gps_to_update.append(frag)
-
-        if len(gps_to_update) >= 300:
-            TapeMemberGPS.bulk_update(
-                gps_to_update,
-                fields=[
-                    TapeMemberGPS.offset_in_volume,
-                    TapeMemberGPS.bytes_in_volume,
-                    TapeMemberGPS.source_offset,
-                ],
-                batch_size=100,
-            )
-            total_healed += len(gps_to_update)
-            gps_to_update = []
-
-    if gps_to_update:
-        TapeMemberGPS.bulk_update(
-            gps_to_update,
-            fields=[
-                TapeMemberGPS.offset_in_volume,
-                TapeMemberGPS.bytes_in_volume,
-                TapeMemberGPS.source_offset,
-            ],
-            batch_size=100,
-        )
-        total_healed += len(gps_to_update)
-
-    logger.info(
-        f"Sanación completada: {total_healed} fragmentos GPS actualizados a coordenadas quirúrgicas."
-    )
-
-
 class DatabaseState(str, enum.Enum):
     """Estados del ciclo de vida y compatibilidad de la base de datos."""
 
-    FRESH = "fresh"  # BD vacía, requiere inicialización completa
-    LEGACY_SQLITE = "legacy_sqlite"  # SQLite antiguo (con PRAGMA user_version)
-    OUTDATED = "outdated"  # Requiere aplicar migraciones pendientes
-    UP_TO_DATE = "up_to_date"  # Lista para operar (cero DDL necesario)
+    FRESH = "fresh"  # Base de datos vacía, lista para inicialización canónica
+    UP_TO_DATE = "up_to_date"  # Lista para operar en la versión canónica actual
+    OUTDATED = "outdated"  # Versión previa incompatible (< versión base)
     AHEAD = "ahead"  # Versión futura (bloquear ejecución)
     CORRUPTED = "corrupted"  # Tablas existentes pero esquema inconsistente
 
 
 class IncompatibleDatabaseError(RuntimeError):
-    """Excepción lanzada cuando la base de datos es más reciente que el cliente."""
+    """Excepción lanzada cuando la base de datos es incompatible con el cliente."""
 
 
 @dataclass
@@ -158,10 +49,7 @@ class DatabaseInspectionReport:
 
 
 class SchemaVersion(peewee.Model):
-    """
-    Tabla canónica y unificada para control de versiones.
-    Mantiene el historial de versiones aplicadas tanto en SQLite como en PostgreSQL.
-    """
+    """Tabla canónica y unificada para control de versiones."""
 
     version = peewee.IntegerField(primary_key=True)
     applied_at = peewee.DateTimeField(default=lambda: datetime.now(timezone.utc))
@@ -173,14 +61,8 @@ class SchemaVersion(peewee.Model):
         table_name = "schema_version"
 
 
-# INSPECTOR DE SOLO LECTURA
-
-
 def inspect_database(db: peewee.Database) -> DatabaseInspectionReport:
-    """
-    Inspecciona la base de datos de manera estrictamente de SOLO LECTURA.
-    No ejecuta DDL ni transacciones de escritura.
-    """
+    """Inspecciona la base de datos de manera estrictamente de SOLO LECTURA."""
     from totelegram.database import db_proxy
 
     if db_proxy.obj != db:
@@ -195,22 +77,21 @@ def inspect_database(db: peewee.Database) -> DatabaseInspectionReport:
         logger.warning(f"Error consultando tablas existentes: {e}")
         existing_tables = set()
 
-    # Tablas críticas de negocio para identificar si la BD ya tiene contenido
     core_tables = {"source", "job", "payload", "telegramchat", "telegramuser"}
     has_core_tables = bool(existing_tables.intersection(core_tables))
     has_schema_version_table = "schema_version" in existing_tables
 
-    # Caso Base de Datos Nueva (Fresh)
+    # Base de Datos Nueva (Fresh)
     if not has_core_tables and not has_schema_version_table:
         return DatabaseInspectionReport(
             state=DatabaseState.FRESH,
             current_version=0,
             target_version=target_version,
             engine_name=engine_name,
-            details="Base de datos vacía, lista para inicialización.",
+            details="Base de datos vacía, lista para inicialización canónica.",
         )
 
-    # Caso con Tabla `schema_version` existente
+    # Tabla schema_version presente
     if has_schema_version_table:
         try:
             latest = (
@@ -240,252 +121,28 @@ def inspect_database(db: peewee.Database) -> DatabaseInspectionReport:
                 details=f"Error leyendo 'schema_version': {e}",
             )
 
-    # Caso SQLite Legacy (Usa PRAGMA user_version)
-    if isinstance(db, peewee.SqliteDatabase) and has_core_tables:
-        try:
-            cursor = db.execute_sql("PRAGMA user_version")
-            pragma_version = cursor.fetchone()[0]
-            if pragma_version > 0:
-                return DatabaseInspectionReport(
-                    state=DatabaseState.LEGACY_SQLITE,
-                    current_version=pragma_version,
-                    target_version=target_version,
-                    engine_name=engine_name,
-                    details=f"SQLite legacy detectada vía PRAGMA user_version={pragma_version}",
-                )
-        except Exception as e:
-            return DatabaseInspectionReport(
-                state=DatabaseState.CORRUPTED,
-                current_version=0,
-                target_version=target_version,
-                engine_name=engine_name,
-                details=f"Fallo leyendo PRAGMA user_version: {e}",
-            )
+    # Tablas existentes pero sin schema_version (Formato heredado no soportado)
+    if has_core_tables:
+        return DatabaseInspectionReport(
+            state=DatabaseState.OUTDATED,
+            current_version=0,
+            target_version=target_version,
+            engine_name=engine_name,
+            details="Base de datos heredada sin control de versiones moderno.",
+        )
 
-    # Caso Inconsistente / Corrupto
     return DatabaseInspectionReport(
         state=DatabaseState.CORRUPTED,
         current_version=0,
         target_version=target_version,
         engine_name=engine_name,
-        details="Se detectaron tablas pero falta el registro de versiones.",
+        details="Se detectaron tablas pero el esquema es inconsistente.",
     )
-
-
-# MOTOR DE MIGRACIONES Y REGISTRO DE PASOS
-
-
-def _get_migrator(db: peewee.Database):
-    """Instancia el migrador DDL adecuado según el motor activo."""
-    if isinstance(db, peewee.SqliteDatabase):
-        return SqliteMigrator(db)
-    return PostgresqlMigrator(db)
-
-
-def _step_v0_to_v1(db: peewee.Database):
-    """Paso histórico v0 -> v1: Agregar status y claimed_by."""
-    migrator = _get_migrator(db)
-    status_field = peewee.CharField(default="PENDING", null=True)
-    claimed_by_field = peewee.CharField(null=True)
-    try:
-        migrate(
-            migrator.add_column("payload", "status", status_field),
-            migrator.add_column("payload", "claimed_by", claimed_by_field),
-        )
-    except Exception as e:
-        logger.debug(f"Aviso en paso v0->v1: {e}")
-
-
-def _step_v1_to_v2(db: peewee.Database):
-    """Paso v1 -> v2: Eliminar status y claimed_by (desacoplamiento)."""
-    migrator = _get_migrator(db)
-    try:
-        migrate(
-            migrator.drop_column("payload", "status"),
-            migrator.drop_column("payload", "claimed_by"),
-        )
-    except Exception as e:
-        logger.debug(f"Aviso en paso v1->v2 (DROP COLUMN): {e}")
-
-
-def _step_v2_to_v3(db: peewee.Database):
-    """Paso v2 -> v3: Convertir offsets y tamaño de payload a BigInt (soporte >2GB en Postgres)."""
-    migrator = _get_migrator(db)
-    try:
-        migrate(
-            migrator.alter_column_type(
-                "payload", "start_offset", peewee.BigIntegerField()
-            ),
-            migrator.alter_column_type(
-                "payload", "end_offset", peewee.BigIntegerField()
-            ),
-            migrator.alter_column_type("payload", "size", peewee.BigIntegerField()),
-        )
-    except Exception as e:
-        logger.debug(f"Aviso en paso v2->v3: {e}")
-
-
-def _step_v3_to_v4(db: peewee.Database):
-    """Paso v3 -> v4: Convertir mtime a DoubleField (float8) para evitar pérdida de precisión en Postgres."""
-    migrator = _get_migrator(db)
-    try:
-        migrate(
-            migrator.alter_column_type("source", "mtime", peewee.DoubleField()),
-        )
-    except Exception as e:
-        logger.debug(f"Aviso en paso v3->v4: {e}")
-
-
-def _step_v4_to_v5(db: peewee.Database):
-    """Paso v4 -> v5: Agregar source_offset a tapemembergps y sanar datos existentes."""
-    migrator = _get_migrator(db)
-
-    # Verificar si la tabla tapemembergps existe antes de intentar alterar columnas o sanar
-    existing_tables = {t.lower() for t in db.get_tables()}
-
-    if "tapemembergps" in existing_tables:
-        try:
-            migrate(
-                migrator.add_column(
-                    "tapemembergps", "source_offset", peewee.BigIntegerField(default=0)
-                ),
-            )
-        except Exception as e:
-            logger.debug(f"Aviso agregando source_offset en v4->v5: {e}")
-
-        _heal_legacy_tapemembergps_data(db)
-    else:
-        logger.debug(
-            "La tabla 'tapemembergps' no existe en esta versión legacy. Omitiendo sanación de v4->v5."
-        )
-
-
-def _step_v5_to_v6(db: peewee.Database):
-    """Paso v5 -> v6: Agregar start_offset a tapemember para cálculo O(1) de fragmentos."""
-    migrator = _get_migrator(db)
-    existing_tables = {t.lower() for t in db.get_tables()}
-
-    if "tapemember" in existing_tables:
-        try:
-            migrate(
-                migrator.add_column(
-                    "tapemember", "start_offset", peewee.BigIntegerField(default=0)
-                ),
-            )
-        except Exception as e:
-            logger.debug(f"Aviso agregando start_offset en v5->v6: {e}")
-    else:
-        logger.debug(
-            "La tabla 'tapemember' no existe en esta versión. Omitiendo migración v5->v6."
-        )
-
-
-def _step_v6_to_v7(db: peewee.Database):
-    """
-    Paso v6 -> v7: Backfill de start_offset en tapemember y eliminación de tapemembergps.
-    """
-    migrator = _get_migrator(db)
-    existing_tables = {t.lower() for t in db.get_tables()}
-
-    # 1. Backfill seguro antes de borrar la tabla
-    if "tapemembergps" in existing_tables and "tapemember" in existing_tables:
-        logger.info(
-            "Migración v6->v7: Verificando y sanando start_offset en 'tapemember'..."
-        )
-        try:
-            # Obtenemos el start_offset real combinando payload.start_offset y gps.offset_in_volume
-            # para el fragmento inicial de cada archivo (source_offset == 0)
-            cursor = db.execute_sql(
-                """
-                SELECT gps.member_id, (p.start_offset + gps.offset_in_volume - 512) AS calculated_offset
-                FROM tapemembergps gps
-                JOIN payload p ON gps.payload_id = p.id
-                WHERE gps.source_offset = 0;
-                """
-            )
-            rows = cursor.fetchall()
-
-            updates = []
-            for member_id, calculated_offset in rows:
-                if calculated_offset > 0:
-                    updates.append((calculated_offset, member_id))
-
-            if updates:
-                # Actualizar los registros que tengan start_offset en 0
-                for batch in batched(updates, 200):
-                    # Usamos SQL directo para máxima velocidad en la migración
-                    for calc_offset, m_id in batch:
-                        db.execute_sql(
-                            "UPDATE tapemember SET start_offset = %s WHERE id = %s AND start_offset = 0;"
-                            if not isinstance(db, peewee.SqliteDatabase)
-                            else "UPDATE tapemember SET start_offset = ? WHERE id = ? AND start_offset = 0;",
-                            (calc_offset, m_id),
-                        )
-                logger.info(
-                    f"Backfill v6->v7: {len(updates)} miembros verificados/actualizados."
-                )
-        except Exception as e:
-            logger.warning(f"Aviso durante el backfill de start_offset en v6->v7: {e}")
-
-    # 2. Eliminación física de tapemembergps
-    if "tapemembergps" in existing_tables:
-        logger.info("Migración v6->v7: Eliminando tabla 'tapemembergps'...")
-        try:
-            migrate(migrator.drop_table("tapemembergps"))
-        except Exception:
-            # Fallback universal si el migrator no soporta drop_table directamente
-            drop_sql = (
-                "DROP TABLE IF EXISTS tapemembergps;"
-                if isinstance(db, peewee.SqliteDatabase)
-                else "DROP TABLE IF EXISTS tapemembergps CASCADE;"
-            )
-            db.execute_sql(drop_sql)
-
-
-def _step_v7_to_v8(db: peewee.Database):
-    """Paso v7 -> v8: Agregar snapshot_message_id y last_verified_at a la tabla Job."""
-    migrator = _get_migrator(db)
-    existing_tables = {t.lower() for t in db.get_tables()}
-
-    if "job" in existing_tables:
-        try:
-            migrate(
-                migrator.add_column(
-                    "job", "snapshot_message_id", peewee.BigIntegerField(null=True)
-                ),
-                migrator.add_column(
-                    "job", "last_verified_at", peewee.DateTimeField(null=True)
-                ),
-            )
-            logger.info(
-                "Columnas 'snapshot_message_id' y 'last_verified_at' añadidas a 'job'."
-            )
-        except Exception as e:
-            logger.debug(f"Aviso agregando columnas de snapshot en v7->v8: {e}")
-    else:
-        logger.debug("La tabla 'job' no existe. Omitiendo migración v7->v8.")
-
-
-# Registrar en MIGRATION_REGISTRY:
-MIGRATION_REGISTRY: Dict[int, Callable[[peewee.Database], None]] = {
-    0: _step_v0_to_v1,
-    1: _step_v1_to_v2,
-    2: _step_v2_to_v3,
-    3: _step_v3_to_v4,
-    4: _step_v4_to_v5,
-    5: _step_v5_to_v6,
-    6: _step_v6_to_v7,
-    7: _step_v7_to_v8,
-}
 
 
 @contextmanager
 def migration_lock(db: peewee.Database):
-    """
-    Garantiza exclusión mutua durante la inicialización o migración de esquema.
-    - PostgreSQL: Adquiere un Advisory Lock distribuido de nivel de sesión.
-    - SQLite: Adquiere el semáforo en memoria para hilos locales.
-    """
+    """Garantiza exclusión mutua durante la inicialización de esquema."""
     is_sqlite = isinstance(db, peewee.SqliteDatabase)
 
     if is_sqlite:
@@ -503,24 +160,8 @@ def migration_lock(db: peewee.Database):
             )
 
 
-def _backup_sqlite_db_if_needed(db: peewee.SqliteDatabase, current_version: int):
-    """Crea un archivo .bak de la base de datos SQLite antes de alterar tablas."""
-    db_file_path = getattr(db, "database", None)
-    if db_file_path and db_file_path != ":memory:":
-        try:
-            path = Path(db_file_path)
-            if path.exists():
-                timestamp = datetime.now(tz=timezone.utc).strftime("%Y%m%d_%H%M%S")
-                backup_name = f"{path.name}.v{current_version}.{timestamp}.bak"
-                backup_path = path.parent / backup_name
-                shutil.copy(path, backup_path)
-                logger.info(f"Backup de seguridad SQLite creado: {backup_path.name}")
-        except Exception as e:
-            logger.warning(f"No se pudo crear el backup de SQLite: {e}")
-
-
 def _initialize_fresh_database(db: peewee.Database, target_version: int):
-    """Crea todas las tablas del modelo actual y registra la versión máxima."""
+    """Crea todas las tablas del modelo canónico actual y registra la versión base."""
     from totelegram.database import db_proxy
     from totelegram.models import (
         Claim,
@@ -552,53 +193,11 @@ def _initialize_fresh_database(db: peewee.Database, target_version: int):
         db.create_tables(models, safe=True)
         SchemaVersion.create(version=target_version)
 
-    logger.info(f"Base de datos inicializada en la versión {target_version}.")
-
-
-def _migrate_legacy_sqlite_bridge(db: peewee.SqliteDatabase, legacy_version: int):
-    """Transfiere la versión de PRAGMA user_version a la tabla `schema_version`."""
-    from totelegram.database import db_proxy
-
-    if db_proxy.obj != db:
-        db_proxy.initialize(db)
-
-    with db.atomic():
-        db.create_tables([SchemaVersion], safe=True)
-        SchemaVersion.create(version=legacy_version)
-        db.execute_sql("PRAGMA user_version = 0;")
-    logger.info(f"Base SQLite migrada al sistema 'schema_version' (v{legacy_version}).")
-
-
-def _apply_pending_migrations(db: peewee.Database, from_version: int, to_version: int):
-    """Ejecuta secuencialmente los pasos registrados entre la versión actual y el objetivo."""
-    from totelegram.database import db_proxy
-
-    if db_proxy.obj != db:
-        db_proxy.initialize(db)
-
-    for v in range(from_version, to_version):
-        next_v = v + 1
-        step_func = MIGRATION_REGISTRY.get(v)
-
-        with db.atomic():
-            if step_func:
-                logger.info(f"Ejecutando migración de esquema: v{v} -> v{next_v}...")
-                step_func(db)
-            else:
-                logger.debug(f"Paso v{v} -> v{next_v} sin operaciones DDL requeridas.")
-
-            SchemaVersion.create(version=next_v)
-            logger.info(f"Esquema actualizado exitosamente a la versión {next_v}.")
-
-
-# ORQUESTADOR PRINCIPAL
+    logger.info(f"Base de datos inicializada en la versión canónica {target_version}.")
 
 
 def setup_database_schema(db: peewee.Database) -> DatabaseInspectionReport:
-    """
-    Punto de entrada principal para preparar la base de datos.
-    Inspecciona y aplica cambios solo si es estrictamente necesario bajo lock.
-    """
+    """Punto de entrada principal para preparar la base de datos."""
     with migration_lock(db):
         report = inspect_database(db)
 
@@ -608,6 +207,21 @@ def setup_database_schema(db: peewee.Database) -> DatabaseInspectionReport:
             )
             return report
 
+        if report.state == DatabaseState.FRESH:
+            logger.info(
+                f"Inicializando esquema canónico en {report.engine_name} (v{report.target_version})..."
+            )
+            _initialize_fresh_database(db, report.target_version)
+            return inspect_database(db)
+
+        if report.state == DatabaseState.OUTDATED:
+            msg = (
+                f"Incompatibilidad de esquema: La base de datos es de una versión anterior "
+                f"(v{report.current_version}), pero esta versión de toTelegram requiere la línea base v{report.target_version}.\n"
+            )
+            logger.critical(msg)
+            raise IncompatibleDatabaseError(msg)
+
         if report.state == DatabaseState.AHEAD:
             msg = (
                 f"Incompatibilidad detectada: La base de datos es versión {report.current_version}, "
@@ -616,29 +230,6 @@ def setup_database_schema(db: peewee.Database) -> DatabaseInspectionReport:
             )
             logger.critical(msg)
             raise IncompatibleDatabaseError(msg)
-
-        if report.state == DatabaseState.FRESH:
-            logger.info(f"Configurando base de datos nueva ({report.engine_name})...")
-            _initialize_fresh_database(db, report.target_version)
-            return inspect_database(db)
-
-        if report.state == DatabaseState.LEGACY_SQLITE:
-            _migrate_legacy_sqlite_bridge(db, report.current_version)  # type: ignore
-            # Re-evaluar por si la versión legacy requiere upgrades adicionales
-            report = inspect_database(db)
-            if report.state == DatabaseState.OUTDATED:
-                return setup_database_schema(db)
-            return report
-
-        if report.state == DatabaseState.OUTDATED:
-            logger.info(
-                f"Base de datos desactualizada (v{report.current_version} -> v{report.target_version})."
-            )
-            if isinstance(db, peewee.SqliteDatabase):
-                _backup_sqlite_db_if_needed(db, report.current_version)
-
-            _apply_pending_migrations(db, report.current_version, report.target_version)
-            return inspect_database(db)
 
         if report.state == DatabaseState.CORRUPTED:
             msg = f"La base de datos se encuentra en un estado inconsistente: {report.details}"
