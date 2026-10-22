@@ -13,7 +13,7 @@ from totelegram.cli.ui import (
     DisplayIndexer,
     DisplayProfile,
 )
-from totelegram.database import DatabaseSession, normalize_database_url
+from totelegram.database import DatabaseSession
 from totelegram.identity import ConfigService
 from totelegram.migration import DatabaseState, inspect_database
 from totelegram.models import TelegramChat
@@ -48,33 +48,6 @@ def handle_config_errors(func):
     return wrapper
 
 
-def _validate_live_database(db_url_value: str, manager) -> None:
-    """Prueba la conexión real con la base de datos antes de persistirla."""
-    from totelegram.database import DatabaseSession, normalize_database_url
-
-    resolved_url = normalize_database_url(db_url_value, manager.database_path)
-
-    with UI.loading("Verificando conexión con la base de datos..."):
-        start_time = time.monotonic()
-        try:
-            with DatabaseSession(resolved_url, auto_init_schema=False) as db:
-                report = inspect_database(db)
-                latency_ms = int((time.monotonic() - start_time) * 1000)
-
-                if report.state == DatabaseState.AHEAD:
-                    raise ValueError(
-                        f"La base de datos es versión v{report.current_version}, "
-                        f"pero el cliente solo soporta hasta v{report.target_version}."
-                    )
-
-                UI.success(
-                    f"Conexión exitosa a [bold]{report.engine_name.upper()}[/] "
-                    f"[dim](Latencia: {latency_ms}ms, Esquema: v{report.current_version})[/dim]"
-                )
-        except Exception as e:
-            raise ValueError(f"No se pudo conectar a la base de datos: {e}") from e
-
-
 def _validate_live_chat_id(
     chat_id_value: str | int, profile_name: str, state: CLIState
 ) -> tuple[int | str, str]:
@@ -95,13 +68,7 @@ def _validate_live_chat_id(
 
         # Guardar / Actualizar en la base de datos local para que el nombre quede en caché
         try:
-            from totelegram.database import DatabaseSession, normalize_database_url
-
-            settings = state.manager.get_settings(profile_name)
-            db_url = normalize_database_url(
-                settings.database_url, state.manager.database_path
-            )
-            with DatabaseSession(db_url, auto_init_schema=True):
+            with DatabaseSession(state.manager.database_path, auto_init_schema=True):
                 tg_chat_obj = client.get_chat(report.chat.id)
                 TelegramChat.get_or_create_from_chat(tg_chat_obj)  # type: ignore
         except Exception:  # noqa: S110
@@ -192,7 +159,7 @@ def set_configs(
 ):
     """
     Modifica una o varias configuraciones. Valida automáticamente endpoints de red
-    (database_url, chat_id) en tiempo real a menos que se use --force.
+    (chat_id) en tiempo real a menos que se use --force.
     """
     state: CLIState = ctx.obj
     settings_name, service = _get_config_tools(ctx)
@@ -201,12 +168,9 @@ def set_configs(
     for key, val in updates.items():
         is_network_key = key in NETWORK_FIELDS
 
-        # Validación en vivo si es una clave de red y no se forzó
-        if is_network_key and not force:
-            if key == "database_url" and val:
-                _validate_live_database(str(val), state.manager)
-            elif key == "chat_id":
-                val, _ = _validate_live_chat_id(val, settings_name, state)
+        # Validación en vivo si es una clave de red (chat_id) y no se forzó
+        if is_network_key and not force and key == "chat_id":
+            val, _ = _validate_live_chat_id(val, settings_name, state)
 
         if is_network_key and force:
             UI.warn(
@@ -301,17 +265,15 @@ def check_config(ctx: typer.Context):
 
     settings = manager.get_settings(profile_name)
 
-    # Verificación de la Base de Datos (SQLite o PostgreSQL)
-    db_url = normalize_database_url(settings.database_url, manager.database_path)
+    # Verificación de la Base de Datos SQLite local
     with UI.loading("Verificando conexión y esquema de base de datos..."):
         try:
-            # Conexión pasiva sin DDL automático para diagnóstico
-            with DatabaseSession(db_url, auto_init_schema=False) as db:
+            with DatabaseSession(manager.database_path, auto_init_schema=False) as db:
                 report = inspect_database(db)
 
                 if report.state == DatabaseState.UP_TO_DATE:
                     UI.success(
-                        f"Base de datos: [bold]{report.engine_name.upper()}[/] al día (v{report.current_version})."
+                        f"Base de datos: [bold]SQLite[/] al día (v{report.current_version})."
                     )
                 elif report.state == DatabaseState.OUTDATED:
                     UI.error(
@@ -323,7 +285,7 @@ def check_config(ctx: typer.Context):
                     raise typer.Exit(1)
                 elif report.state == DatabaseState.FRESH:
                     UI.info(
-                        f"Base de datos: [bold]{report.engine_name.upper()}[/] nueva (se inicializará en v{report.target_version})."
+                        f"Base de datos: [bold]SQLite[/] nueva (se inicializará en v{report.target_version})."
                     )
                 elif report.state == DatabaseState.AHEAD:
                     UI.error(
@@ -371,11 +333,9 @@ def check_config(ctx: typer.Context):
                 UI.info(access_report.hint)
             raise typer.Exit(code=1)
 
-        from totelegram.database import DatabaseSession, normalize_database_url
         from totelegram.packaging.indexer import TapeIndexService
 
-        db_url = normalize_database_url(settings.database_url, manager.database_path)
-        with DatabaseSession(db_url, auto_init_schema=False) as db:
+        with DatabaseSession(manager.database_path, auto_init_schema=False) as db:
             indexer = TapeIndexService(client, db)
             with UI.loading("Comprobando catálogo de cintas archivadas..."):
                 tape_report = indexer.auto_heal_or_report(settings.chat_id)

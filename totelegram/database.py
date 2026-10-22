@@ -4,146 +4,85 @@ import logging
 import threading
 from contextlib import contextmanager
 from pathlib import Path
-from urllib.parse import urlparse, urlunparse
 
 import peewee
 from peewee import Field
-from playhouse.db_url import connect as db_connect
-from playhouse.db_url import parse as db_parse
-from playhouse.db_url import register_database
-from playhouse.postgres_ext import Psycopg3Database
 
 logger = logging.getLogger(__name__)
 
-# Sobrescribimos el registro para que URLs estándar (postgresql://, postgres://)
-# utilicen el driver moderno psycopg (v3)
-register_database(
-    Psycopg3Database, "postgresql", "postgres", "psycopg3", "postgresql+psycopg"
-)
-
-
-def normalize_database_url(url_or_path: str | None, default_sqlite_path: Path) -> str:
-    """
-    Normaliza la configuración de entrada convirtiéndola en una URL de base de datos válida.
-    Si recibe una ruta local, la transforma a una URL de conexión de SQLite.
-    """
-    if not url_or_path:
-        abs_default = default_sqlite_path.resolve()
-        return f"sqlite:///{abs_default.as_posix()}"
-
-    url_or_path = url_or_path.strip()
-
-    valid_schemes = (
-        "sqlite://",
-        "postgresql://",
-        "postgres://",
-        "psycopg3://",
-        "postgresql+psycopg://",
-    )
-    if any(url_or_path.startswith(scheme) for scheme in valid_schemes):
-        return url_or_path
-
-    if url_or_path == ":memory:":
-        return "sqlite:///:memory:"
-
-    path = Path(url_or_path)
-    if not path.is_absolute():
-        path = (default_sqlite_path.parent / path).resolve()
-    else:
-        path = path.resolve()
-
-    return f"sqlite:///{path.as_posix()}"
-
-
 db_proxy = peewee.Proxy()
 
-# Semáforo global para sincronizar hilos cuando se usa SQLite en disco/memoria
+# Semáforo global para sincronizar escrituras en SQLite entre hilos de un mismo proceso
 _sqlite_write_lock = threading.RLock()
 
-
-def sanitize_database_url(url: str | None) -> str:
-    """
-    Enmascara la contraseña de una URL de base de datos para mostrarla de forma segura en logs y UI.
-    Ej: postgresql://admin:secreto123@db.host.com:5432/mibase
-        -> postgresql://admin:***@db.host.com:5432/mibase
-    """
-    if not url:
-        return "None"
-
-    url = url.strip()
-    if not (url.startswith(("postgresql://", "postgres://", "psycopg3://"))):
-        return url
-
-    try:
-        parsed = urlparse(url)
-        if parsed.password:
-            user = parsed.username or ""
-            host = parsed.hostname or ""
-            port = f":{parsed.port}" if parsed.port else ""
-            netloc = f"{user}:***@{host}{port}"
-            sanitized = parsed._replace(netloc=netloc)
-            return urlunparse(sanitized)
-        return url
-    except Exception:
-        return url
+# Pragmas esenciales para alto rendimiento y concurrencia local segura
+SQLITE_PRAGMAS = {
+    "journal_mode": "wal",
+    "cache_size": -1024 * 64,  # 64 MB de caché en memoria
+    "synchronous": "normal",
+    "busy_timeout": 60000,  # 60 segundos de tolerancia ante bloqueos
+    "foreign_keys": 1,
+}
 
 
 @contextmanager
 def db_transaction(db: peewee.Database):
     """
-    Gestor de transacciones seguro para múltiples motores.
-    - SQLite: Aplica semáforo en memoria e inicia con 'IMMEDIATE'.
-    - PostgreSQL: Utiliza el manejador atómico estándar.
+    Gestor de transacciones seguro para SQLite.
+    Aplica el semáforo en memoria e inicia la transacción con 'IMMEDIATE'
+    para evitar conflictos de escalado de bloqueos.
     """
-    is_sqlite = isinstance(db, peewee.SqliteDatabase)
-
-    if is_sqlite:
-        _sqlite_write_lock.acquire()
-
-    try:
-        transaction_type = "IMMEDIATE" if is_sqlite else None
-        with db.atomic(transaction_type):
-            yield
-    finally:
-        if is_sqlite:
-            _sqlite_write_lock.release()
+    with _sqlite_write_lock, db.atomic("IMMEDIATE"):
+        yield
 
 
-def init_database_schema(db: peewee.Database, db_url: str):
-    """
-    Inicializa el esquema y ejecuta migraciones pendientes usando el nuevo orquestador.
-    """
+def init_database_schema(db: peewee.Database, db_url: str | None = None):
+    """Inicializa el esquema y ejecuta migraciones pendientes."""
     from totelegram.migration import setup_database_schema
 
     setup_database_schema(db)
 
 
+def _create_sqlite_database(target: Path | str) -> peewee.SqliteDatabase:
+    """Crea una instancia de SqliteDatabase con los pragmas de alto rendimiento."""
+    str_target = str(target).strip()
+    if str_target.startswith("sqlite:///"):
+        str_target = str_target.replace("sqlite:///", "")
+
+    if str_target != ":memory:":
+        path = Path(str_target)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        return peewee.SqliteDatabase(str(path), pragmas=SQLITE_PRAGMAS)
+
+    return peewee.SqliteDatabase(":memory:", pragmas=SQLITE_PRAGMAS)
+
+
 class DatabaseSession:
     """
-    Administrador de contexto reentrante para la base de datos basado en URLs.
+    Administrador de contexto reentrante para SQLite.
     Controla el conteo de referencias para evitar cierres prematuros en llamadas anidadas.
     """
 
-    active_db_url: str | None = None
+    active_db_target: str | None = None
     _ref_count: int = 0
     _lock: threading.Lock = threading.Lock()
 
-    def __init__(self, db_url: str, auto_init_schema: bool = False):
-        self.db_url = db_url
+    def __init__(self, db_target: Path | str, auto_init_schema: bool = False):
+        self.db_target = str(db_target)
         self.auto_init_schema = auto_init_schema
-        self.db: peewee.Database | None = None
+        self.db: peewee.SqliteDatabase | None = None
 
     def __enter__(self) -> peewee.Database:
         with DatabaseSession._lock:
-            # Reutilizar conexión activa si coincide con la URL solicitada y sigue abierta
+            # Reutilizar conexión activa si coincide con el destino solicitado y sigue abierta
             if (
-                DatabaseSession.active_db_url == self.db_url
+                DatabaseSession.active_db_target == self.db_target
                 and db_proxy.obj is not None
                 and not db_proxy.is_closed()
             ):
                 DatabaseSession._ref_count += 1
                 if self.auto_init_schema:
-                    init_database_schema(db_proxy.obj, self.db_url)
+                    init_database_schema(db_proxy.obj, self.db_target)
                 return db_proxy.obj
 
             # Si había otra conexión abierta distinta, se cierra
@@ -151,34 +90,20 @@ class DatabaseSession:
                 db_proxy.obj.close()
                 DatabaseSession._ref_count = 0
 
-            logger.debug(f"Conectando a base de datos: {self.db_url.split('@')[-1]}")
+            logger.debug(f"Conectando a base de datos SQLite: {self.db_target}")
 
-            parsed = db_parse(self.db_url)
-            if parsed.get("engine") == "peewee.SqliteDatabase":
-                db_file_path = parsed.get("database")
-                if db_file_path and db_file_path != ":memory:":
-                    Path(db_file_path).parent.mkdir(parents=True, exist_ok=True)
-
-            self.db = db_connect(self.db_url)
-
-            if isinstance(self.db, peewee.SqliteDatabase):
-                self.db.pragma("journal_mode", "wal")
-                self.db.pragma("cache_size", -1024 * 64)  # type: ignore
-                self.db.pragma("synchronous", "NORMAL")
-                self.db.pragma("busy_timeout", 30000)
-                self.db.pragma("foreign_keys", 1)
-
+            self.db = _create_sqlite_database(self.db_target)
             db_proxy.initialize(self.db)
 
-            assert self.db is not None, "Base de datos no inicializada"
+            assert self.db is not None, "Base de datos SQLite no inicializada"
 
             self.db.connect(reuse_if_open=True)
 
-            DatabaseSession.active_db_url = self.db_url
+            DatabaseSession.active_db_target = self.db_target
             DatabaseSession._ref_count = 1
 
             if self.auto_init_schema:
-                init_database_schema(self.db, self.db_url)
+                init_database_schema(self.db, self.db_target)
 
             return self.db
 
@@ -186,7 +111,6 @@ class DatabaseSession:
         with DatabaseSession._lock:
             DatabaseSession._ref_count -= 1
 
-            # Solo cerrar físicamente la conexión cuando el último contexto termine
             if DatabaseSession._ref_count <= 0:
                 DatabaseSession._ref_count = 0
                 if self.db and not self.db.is_closed():
@@ -195,7 +119,7 @@ class DatabaseSession:
                 if db_proxy.obj and not db_proxy.obj.is_closed():
                     db_proxy.obj.close()
 
-                DatabaseSession.active_db_url = None
+                DatabaseSession.active_db_target = None
 
     def start(self):
         return self.__enter__()

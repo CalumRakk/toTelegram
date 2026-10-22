@@ -2,7 +2,7 @@ import unittest
 from datetime import datetime, timezone
 
 from totelegram import __CURRENT_DB_VERSION__
-from totelegram.database import DatabaseSession, sanitize_database_url
+from totelegram.database import DatabaseSession
 from totelegram.migration import (
     DatabaseState,
     IncompatibleDatabaseError,
@@ -101,19 +101,3 @@ class TestDatabaseMigrationAndInspection(unittest.TestCase):
         # La segunda ejecución debe ser idempotente y limpia
         second_report = setup_database_schema(self.db)
         self.assertEqual(second_report.state, DatabaseState.UP_TO_DATE)
-
-    def test_06_database_url_sanitization(self):
-        """
-        Seguridad: Sanitización de credenciales en URLs de base de datos.
-        """
-        raw_pg_url = "postgresql://myuser:supersecretpassword123@db.example.com:5432/totelegram_db"
-        sanitized = sanitize_database_url(raw_pg_url)
-
-        self.assertNotIn("supersecretpassword123", sanitized)
-        self.assertIn("myuser:***@db.example.com:5432/totelegram_db", sanitized)
-
-        self.assertEqual(
-            sanitize_database_url("sqlite:////var/data/app.sqlite"),
-            "sqlite:////var/data/app.sqlite",
-        )
-        self.assertEqual(sanitize_database_url(None), "None")

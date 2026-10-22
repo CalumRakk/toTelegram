@@ -20,8 +20,6 @@ from tartape.units import format_size
 from totelegram.database import (
     DatabaseSession,
     db_proxy,
-    normalize_database_url,
-    sanitize_database_url,
 )
 from totelegram.identity import Profile, Settings, SettingsManager
 from totelegram.models import TelegramChat
@@ -84,10 +82,12 @@ def log_table(
         logger.debug(f"Error al volcar tabla en log: {e}")
 
 
-def get_friendly_chat_name(chat_id: str | int, db_url: str) -> str:
+def get_friendly_chat_name(
+    chat_id: str | int, db_path: Path | str | None = None
+) -> str:
     """
     Devuelve un nombre amigable en formato 'Título (ID)'.
-    Aprovecha la base de datos conectada o la caché local.
+    Aprovecha la conexión activa o consulta la base de datos local SQLite.
     """
     val = str(chat_id).strip()
 
@@ -107,12 +107,11 @@ def get_friendly_chat_name(chat_id: str | int, db_url: str) -> str:
             chat = TelegramChat.get_or_none(TelegramChat.id == chat_int_id)
             if chat and chat.title:
                 return f"[bold cyan]{chat.title}[/] [dim]({chat.id})[/]"
-        else:
-            if db_url.startswith("sqlite://"):
-                with DatabaseSession(db_url, auto_init_schema=False):
-                    chat = TelegramChat.get_or_none(TelegramChat.id == chat_int_id)
-                    if chat and chat.title:
-                        return f"[bold cyan]{chat.title}[/] [dim]({chat.id})[/]"
+        elif db_path:
+            with DatabaseSession(db_path, auto_init_schema=False):
+                chat = TelegramChat.get_or_none(TelegramChat.id == chat_int_id)
+                if chat and chat.title:
+                    return f"[bold cyan]{chat.title}[/] [dim]({chat.id})[/]"
     except Exception:  # noqa: S110
         pass
 
@@ -497,8 +496,6 @@ class DisplayConfig:
         table.add_column("Valor Actual")
         table.add_column("Descripción")
 
-        db_url = normalize_database_url(settings.database_url, manager.database_path)
-
         default_settings = Settings.get_default_settings()
         for field_name, default_value in default_settings.model_dump().items():
             info = Settings.get_info(field_name)
@@ -510,14 +507,9 @@ class DisplayConfig:
             value_style = "bold green" if is_value_default else "dim white"
 
             if field_name.lower() == "chat_id":
-                value = get_friendly_chat_name(value, db_url)
+                value = get_friendly_chat_name(value, manager.database_path)
+                display_val = "?"
 
-            if field_name.lower() == "database_url":
-                display_val = (
-                    sanitize_database_url(value)
-                    if value
-                    else "[dim]SQLite local por defecto[/dim]"
-                )
             elif info.is_sensitive and value is not None:
                 display_val = cls._mark_sensitive(value)
             else:

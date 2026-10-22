@@ -33,8 +33,8 @@ logger = logging.getLogger(__name__)
 
 class PortableJSONField(peewee.TextField):
     """
-    Campo JSON que persiste como texto estándar en cualquier base de datos.
-    Esto permite compatibilidad nativa entre SQLite y Postgres sin usar extensiones de drivers.
+    Campo JSON que persiste como texto estándar en SQLite.
+    Serializa y deserializa automáticamente objetos y listas Python.
     """
 
     def db_value(self, value):

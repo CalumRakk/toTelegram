@@ -122,13 +122,6 @@ class Settings(BaseSettings):
         description="Trunca automáticamente los nombres largos al empaquetar carpetas en TAR.",
         json_schema_extra={"is_sensitive": False, "access": AccessLevel.EDITABLE},
     )
-    database_url: str | None = Field(
-        default=None,
-        description="URL de conexión a la base de datos (ej: postgresql://user:pass@host/db). Si se omite, se usará SQLite local.",
-        json_schema_extra={"is_sensitive": True, "access": AccessLevel.EDITABLE},
-    )
-
-    # exclude_files_default: CommaSeparatedList = ["*.json", "*.json.xz"]
 
     model_config = SettingsConfigDict(
         env_file=".env", env_file_encoding="utf-8", extra="ignore"
@@ -497,11 +490,21 @@ class SettingsManager:
 
         # dotenv_values devuelve todos los valores como strings.
         raw_values = dotenv_values(path)
-        return {
-            k.lower(): Settings.validate_single_setting(k, v)
-            for k, v in raw_values.items()
-            if v is not None
-        }
+        sanitized = {}
+
+        for k, v in raw_values.items():
+            if v is None:
+                continue
+            k_norm = k.lower()
+            # Ignorar de forma tolerante claves que ya no forman parte del modelo (ej: database_url)
+            if k_norm not in Settings.model_fields:
+                logger.debug(
+                    f"Ignorando campo obsoleto o no reconocido en '{path.name}': {k}"
+                )
+                continue
+            sanitized[k_norm] = Settings.validate_single_setting(k_norm, v)
+
+        return sanitized
 
     def _write_all_settings(self, settings_name: str, data: Dict[str, Any]) -> None:
         """Vuelca un diccionario completo al archivo .env

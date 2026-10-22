@@ -68,7 +68,6 @@ def main(
     debug: bool = typer.Option(
         False,
         "--debug",
-        help="Activa el modo debug (DB independiente y logs detallados).",
     ),
 ):
     """

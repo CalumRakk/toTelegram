@@ -12,9 +12,6 @@ from totelegram import __CURRENT_DB_VERSION__
 
 logger = logging.getLogger(__name__)
 
-# ID numérico único constante para PostgreSQL Advisory Locks en toTelegram
-MIGRATION_ADVISORY_LOCK_ID = 84920492
-
 # Lock local en memoria para proteger SQLite contra accesos concurrentes de subprocesos
 _sqlite_migration_lock = threading.RLock()
 
@@ -68,7 +65,7 @@ def inspect_database(db: peewee.Database) -> DatabaseInspectionReport:
     if db_proxy.obj != db:
         db_proxy.initialize(db)
 
-    engine_name = "sqlite" if isinstance(db, peewee.SqliteDatabase) else "postgresql"
+    engine_name = "sqlite"
     target_version = __CURRENT_DB_VERSION__
 
     try:
@@ -141,23 +138,10 @@ def inspect_database(db: peewee.Database) -> DatabaseInspectionReport:
 
 
 @contextmanager
-def migration_lock(db: peewee.Database):
-    """Garantiza exclusión mutua durante la inicialización de esquema."""
-    is_sqlite = isinstance(db, peewee.SqliteDatabase)
-
-    if is_sqlite:
-        with _sqlite_migration_lock:
-            yield
-    else:
-        logger.debug("Adquiriendo PostgreSQL Advisory Lock para migración...")
-        db.execute_sql("SELECT pg_advisory_lock(%s);", (MIGRATION_ADVISORY_LOCK_ID,))
-        try:
-            yield
-        finally:
-            logger.debug("Liberando PostgreSQL Advisory Lock...")
-            db.execute_sql(
-                "SELECT pg_advisory_unlock(%s);", (MIGRATION_ADVISORY_LOCK_ID,)
-            )
+def migration_lock(db: peewee.Database | None = None):
+    """Garantiza exclusión mutua local durante la inicialización o verificación de esquema."""
+    with _sqlite_migration_lock:
+        yield
 
 
 def _initialize_fresh_database(db: peewee.Database, target_version: int):

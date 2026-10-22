@@ -133,7 +133,7 @@ class PayloadClaim:
 class ConcurrencyCoordinator:
     """
     Fuente de verdad centralizada para la exclusión mutua y leases en toTelegram.
-    Compatible tanto con SQLite y PostgreSQL.
+    Maneja la exclusión global de cuenta en Telegram y leases locales en SQLite.
     """
 
     def __init__(
