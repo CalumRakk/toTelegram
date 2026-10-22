@@ -334,19 +334,21 @@ def check_config(ctx: typer.Context):
                 UI.info(access_report.hint)
             raise typer.Exit(code=1)
 
-        from totelegram.packaging.indexer import TapeIndexService
+        # SOLO comprobar catálogo si la base de datos está inicializada y operativa
+        if report.is_operational:
+            from totelegram.packaging.indexer import TapeIndexService
 
-        with DatabaseSession(manager.database_path, auto_init_schema=False) as db:
-            indexer = TapeIndexService(client, db)
-            with UI.loading("Comprobando catálogo de cintas archivadas..."):
-                tape_report = indexer.auto_heal_or_report(settings.chat_id)
+            with DatabaseSession(manager.database_path, auto_init_schema=False) as db:
+                indexer = TapeIndexService(client, db)
+                with UI.loading("Comprobando catálogo de cintas archivadas..."):
+                    tape_report = indexer.auto_heal_or_report(settings.chat_id)
 
-            if tape_report.auto_healed:
-                UI.info(
-                    f"Auto-sanadas [bold]{tape_report.healed_count}[/] cintas no indexadas en segundo plano."
-                )
-            elif tape_report.needs_manual_sync:
-                DisplayIndexer.show_unindexed_notice(tape_report.unindexed_count)
+                if tape_report.auto_healed:
+                    UI.info(
+                        f"Auto-sanadas [bold]{tape_report.healed_count}[/] cintas no indexadas en segundo plano."
+                    )
+                elif tape_report.needs_manual_sync:
+                    DisplayIndexer.show_unindexed_notice(tape_report.unindexed_count)
 
         UI.success(f"Perfil '{profile_name}' verificado y listo para operar.")
         if access_report.chat:
