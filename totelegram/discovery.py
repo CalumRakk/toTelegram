@@ -1,5 +1,6 @@
 import logging
 import math
+import re
 import tempfile
 import time
 from pathlib import Path
@@ -19,12 +20,15 @@ from totelegram.packaging.importer import (
     SnapshotInspector,
 )
 from totelegram.schemas import AvailabilityState, JobStatus
-from totelegram.types import AvailabilityReport
+from totelegram.types import AvailabilityReport, DuplicateCandidate
 
 if TYPE_CHECKING:
     from pyrogram.client import Client
 
 logger = logging.getLogger(__name__)
+
+# Umbral mínimo para buscar duplicados por nombre (20 MB)
+HEURISTIC_DUPLICATE_MIN_SIZE = 20 * 1024 * 1024
 
 
 class DiscoveryService:
@@ -60,7 +64,77 @@ class DiscoveryService:
                     state=AvailabilityState.CAN_FORWARD, remotes=remotes
                 )
 
-        return AvailabilityReport(state=AvailabilityState.NEEDS_UPLOAD)
+        # Búsqueda heurística de posibles duplicados por nombre en el chat
+        potential_duplicates = self._search_potential_duplicates(job)
+
+        return AvailabilityReport(
+            state=AvailabilityState.NEEDS_UPLOAD,
+            potential_duplicates=potential_duplicates,
+        )
+
+    def _search_potential_duplicates(self, job: Job) -> List[DuplicateCandidate]:
+        """Busca documentos en el chat de destino con nombres similares al recurso actual."""
+        # Evitar consultas de red para archivos pequeños
+        if not job.source.is_folder and job.source.size < HEURISTIC_DUPLICATE_MIN_SIZE:
+            return []
+
+        raw_name = job.path.name if job.source.is_folder else job.path.stem
+        # Limpiar separadores y caracteres especiales dejando palabras legibles
+        clean_name = re.sub(r"[^\w\s]", " ", raw_name).strip()
+        words = [w for w in clean_name.split() if len(w) > 1]
+        if not words:
+            return []
+
+        # Usar las primeras 4 palabras representativas
+        search_query = " ".join(words[:4])
+        if len(search_query) < 3:
+            return []
+
+        logger.debug(
+            f"Ejecutando búsqueda heurística por nombre en chat {job.chat.id}: '{search_query}'"
+        )
+
+        try:
+            from pyrogram.types import Message
+
+            found_messages = cast(
+                List[Message],
+                list(
+                    self.client.search_messages(
+                        chat_id=job.chat.id,
+                        query=search_query,
+                        filter=enums.MessagesFilter.DOCUMENT,
+                        limit=5,
+                    )  # type: ignore
+                ),
+            )
+        except Exception as e:
+            logger.debug(f"Aviso en búsqueda heurística de duplicados: {e}")
+            return []
+
+        duplicates: List[DuplicateCandidate] = []
+        for msg in found_messages:
+            if not msg.document:
+                continue
+
+            caption = msg.caption or ""
+            # Omitir snapshots, manifiestos o locks del sistema
+            if "#totelegram" in caption or "#src_" in caption:
+                continue
+
+            doc_name = msg.document.file_name or "Desconocido"
+            doc_size = msg.document.file_size or 0
+
+            duplicates.append(
+                DuplicateCandidate(
+                    message_id=msg.id,
+                    file_name=doc_name,
+                    file_size=doc_size,
+                    date=msg.date,
+                )
+            )
+
+        return duplicates
 
     def _discover_and_hydrate_jit(self, job: Job) -> bool:
         """Busca el snapshot del MD5 en Telegram. Si lo encuentra, lo descarga e hidrata la DB.

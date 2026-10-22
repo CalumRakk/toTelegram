@@ -26,11 +26,6 @@ class PathLengthExceededError(JobPlanningError):
 
 
 class JobPlanner:
-    """
-    Planificador puro e idempotente.
-    Convierte una ruta física en un Job con sus Payloads listos en la base de datos.
-    """
-
     @classmethod
     def plan(
         cls,
@@ -39,25 +34,23 @@ class JobPlanner:
         force: bool = False,
         auto_truncate: bool = False,
     ) -> Job:
-        """
-        Punto de entrada: Obtiene o crea el Job y garantiza que sus Chunks estén preparados.
-        """
         chat_db, _ = TelegramChat.get_or_create_from_chat(ctx.tg_chat)
 
-        # Crea Source (Archivo simple o Carpeta TAR)
         if path.is_dir():
             source = cls._resolve_folder_source(path, ctx, force, auto_truncate)
         else:
             source = cls._resolve_file_source(path, ctx)
 
-        # Buscar si ya existía un Job activo para este source en el chat
         existing_job = Job.get_for_source_in_chat(source, chat_db)
+
+        # Si se fuerza, respaldamos snapshots físicos en disco para no perder datos históricos
+        if force:
+            delete_snapshot(path)
 
         if existing_job and force:
             logger.info(
                 f"Forzando reinicio del Job previo {existing_job.id} para {path.name}"
             )
-            delete_snapshot(path)
             with db_transaction(ctx.db):
                 existing_job.mark_deleted()
                 existing_job = None
@@ -65,7 +58,6 @@ class JobPlanner:
         if existing_job:
             job = existing_job
         else:
-            # Formalizar nuevo Job según límites de cuenta
             tg_limit = (
                 ctx.settings.tg_max_size_premium
                 if ctx.owner.is_premium
@@ -78,7 +70,6 @@ class JobPlanner:
                 tg_limit=tg_limit,
             )
 
-        # Asegurar que los payloads (chunks) estén calculados y guardados en DB
         with db_transaction(ctx.db):
             job.prepare_chunks(path, ctx.settings)
 

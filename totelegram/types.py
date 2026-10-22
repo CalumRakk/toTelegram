@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING, List
 
 import peewee
 
-from totelegram.engine.events import NullObserver, UploadObserver
+from totelegram.engine.events import DuplicateCandidate, NullObserver, UploadObserver
 
 if TYPE_CHECKING:
     from pyrogram.client import Client
@@ -47,6 +47,7 @@ class AvailabilityReport:
 
     state: "AvailabilityState"
     remotes: List["RemotePayload"] = field(default_factory=list)
+    potential_duplicates: List[DuplicateCandidate] = field(default_factory=list)
 
     @property
     def can_forward(self) -> bool:

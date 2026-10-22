@@ -312,6 +312,53 @@ class TestEnginePipelineAndComponents(unittest.TestCase):
             if tmp_path.exists():
                 tmp_path.unlink()
 
+    def test_job_pipeline_notifies_observer_on_potential_duplicates(self):
+        """Valida que si Discovery detecta duplicados heurísticos, el pipeline notifique al observer."""
+        with NamedTemporaryFile(delete=False) as tmp:
+            tmp.write(b"CONTENIDO" * 50)
+            tmp_path = Path(tmp.name)
+
+        try:
+            duplicate_candidate = MagicMock()
+            self.ctx.discovery.investigate.return_value = AvailabilityReport(
+                state=AvailabilityState.NEEDS_UPLOAD,
+                potential_duplicates=[duplicate_candidate],
+            )
+
+            mock_strategy = MagicMock()
+            mock_strategy.execute.return_value = StrategyResult(
+                strategy_name="MockStrategy",
+                pieces_processed=1,
+                did_upload_bytes=True,
+                is_completed=True,
+            )
+
+            pipeline = JobPipeline(self.ctx)
+
+            with (
+                patch(
+                    "totelegram.engine.pipeline.StrategyResolver.resolve",
+                    return_value=mock_strategy,
+                ),
+                patch(
+                    "totelegram.packaging.snapshot.SnapshotService.generate_snapshot",
+                    return_value=(MagicMock(), tmp_path),
+                ),
+                patch(
+                    "totelegram.packaging.publisher.SnapshotPublisher.publish",
+                    return_value=MagicMock(id=1),
+                ),
+                patch.object(Payload, "total_pending_for_job", return_value=0),
+            ):
+                pipeline.process(tmp_path, is_last_in_batch=True)
+
+            self.mock_observer.on_potential_duplicates.assert_called_once_with(
+                [duplicate_candidate]
+            )
+        finally:
+            if tmp_path.exists():
+                tmp_path.unlink()
+
 
 if __name__ == "__main__":
     unittest.main()

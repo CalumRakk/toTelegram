@@ -4,6 +4,7 @@ import threading
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import List
 
 import peewee
@@ -39,6 +40,7 @@ class DatabaseInspectionReport:
     target_version: int
     engine_name: str
     details: str | None = None
+    archived_legacy_path: str | None = None
 
     @property
     def is_operational(self) -> bool:
@@ -144,6 +146,59 @@ def migration_lock(db: peewee.Database | None = None):
         yield
 
 
+def _archive_outdated_database(
+    db: peewee.Database, current_version: int
+) -> Path | None:
+    """
+    Cierra conexiones activas y renombra físicamente la base de datos antigua
+    junto con sus archivos asociados (WAL/SHM), liberando el camino para una base limpia.
+    """
+    db_name = getattr(db, "database", None)
+    if not db_name or str(db_name) == ":memory:":
+        return None
+
+    db_path = Path(str(db_name)).resolve()
+    if not db_path.exists():
+        return None
+
+    # Cerrar conexiones activas para liberar locks en SQLite
+    if not db.is_closed():
+        db.close()
+
+    v_tag = f"v{current_version}" if current_version > 0 else "legacy"
+    base_target = db_path.with_name(f"{db_path.stem}.legacy_{v_tag}{db_path.suffix}")
+    archive_dest = base_target
+
+    if archive_dest.exists():
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        archive_dest = db_path.with_name(
+            f"{db_path.stem}.legacy_{v_tag}_{timestamp}{db_path.suffix}"
+        )
+
+    try:
+        db_path.rename(archive_dest)
+        logger.info(f"Base de datos antigua archivada como '{archive_dest.name}'.")
+
+        # Mover archivos asociados de transacciones (WAL, SHM, journals) si existen
+        for suffix in ["-wal", "-shm", "-journal"]:
+            related_file = db_path.with_name(f"{db_path.name}{suffix}")
+            if related_file.exists():
+                related_dest = archive_dest.with_name(f"{archive_dest.name}{suffix}")
+                try:
+                    related_file.rename(related_dest)
+                except Exception as e:
+                    logger.warning(
+                        f"No se pudo mover archivo auxiliar {related_file.name}: {e}"
+                    )
+
+        # Reabrir conexión para que apunte a un nuevo archivo limpio en la ruta original
+        db.connect(reuse_if_open=True)
+        return archive_dest
+    except Exception as e:
+        logger.error(f"Fallo al archivar la base de datos antigua '{db_path}': {e}")
+        raise RuntimeError(f"No se pudo archivar la base de datos anterior: {e}") from e
+
+
 def _initialize_fresh_database(db: peewee.Database, target_version: int):
     """Crea todas las tablas del modelo canónico actual y registra la versión base."""
     from totelegram.database import db_proxy
@@ -199,12 +254,30 @@ def setup_database_schema(db: peewee.Database) -> DatabaseInspectionReport:
             return inspect_database(db)
 
         if report.state == DatabaseState.OUTDATED:
-            msg = (
-                f"Incompatibilidad de esquema: La base de datos es de una versión anterior "
-                f"(v{report.current_version}), pero esta versión de toTelegram requiere la línea base v{report.target_version}.\n"
+            logger.info(
+                f"Detectada base de datos anterior (v{report.current_version}). "
+                f"Archivando para preservar datos y re-inicializando en v{report.target_version}..."
             )
-            logger.critical(msg)
-            raise IncompatibleDatabaseError(msg)
+            archive_path = _archive_outdated_database(db, report.current_version)
+            _initialize_fresh_database(db, report.target_version)
+            new_report = inspect_database(db)
+
+            if archive_path:
+                new_report.archived_legacy_path = str(archive_path)
+                try:
+                    from totelegram.cli.ui import UI
+
+                    UI.warn(
+                        f"Base de datos anterior respaldada en '[bold]{archive_path.name}[/]'.",
+                        spacing="top",
+                    )
+                    UI.info(
+                        f"Se ha inicializado una base de datos limpia v{report.target_version}. Puedes continuar subiendo normalmente."
+                    )
+                except Exception:  # noqa: S110
+                    pass
+
+            return new_report
 
         if report.state == DatabaseState.AHEAD:
             msg = (

@@ -1,3 +1,4 @@
+import time
 from typing import TYPE_CHECKING
 
 from rich.progress import (
@@ -11,6 +12,7 @@ from rich.progress import (
 )
 
 from totelegram.cli.ui import UI, console
+from totelegram.types import DuplicateCandidate
 
 if TYPE_CHECKING:
     from totelegram.models import Job, Payload
@@ -34,6 +36,41 @@ class RichUploadObserver:
         # Controladores de la barra de Hashing
         self._hash_progress: Progress | None = None
         self._hash_task_id = None
+
+    def on_potential_duplicates(self, duplicates: list["DuplicateCandidate"]) -> None:
+        """Muestra un panel visual alertando sobre coincidencias similares en el chat."""
+        if not duplicates:
+            return
+
+        from rich.panel import Panel
+        from tartape.units import format_size
+
+        lines = [
+            "[yellow]Se detectaron archivos con nombres similares en el chat de destino:[/yellow]",
+            "",
+        ]
+        for d in duplicates[:4]:
+            date_str = f" [dim]({d.date.strftime('%Y-%m-%d')})[/dim]" if d.date else ""
+            size_str = f" [dim cyan]~{format_size(d.file_size)}[/dim cyan]"
+            lines.append(
+                f"  • [bold]{d.file_name}[/]{size_str}{date_str} [dim]— Msg ID: {d.message_id}[/dim]"
+            )
+
+        lines.append("")
+        lines.append(
+            "[dim]Continuando con la subida... [italic](Presiona Ctrl+C si prefieres cancelar)[/italic][/dim]"
+        )
+
+        panel = Panel(
+            "\n".join(lines),
+            title="[bold yellow]⚠️ Posible duplicado en Telegram[/bold yellow]",
+            border_style="yellow",
+            padding=(1, 2),
+        )
+        console.print(panel)
+
+        # Pausa sutil de cortesía para lectura
+        time.sleep(2)
 
     def on_hash_start(self, filename: str, total_bytes: int) -> None:
         """Inicia la barra visual de lectura de disco si el archivo supera el umbral."""

@@ -45,6 +45,11 @@ class JobPipeline:
 
         with self.ctx.coordinator.guard_account(self.ctx.account_id):
             report = self.ctx.discovery.investigate(job)
+
+            # Notificación heurística de posibles duplicados en el chat
+            if report.potential_duplicates:
+                self.ctx.observer.on_potential_duplicates(report.potential_duplicates)
+
             strategy = StrategyResolver.resolve(report)
             logger.info(f"Estrategia seleccionada: {strategy.__class__.__name__}")
             strategy_result = strategy.execute(job, self.ctx, report)

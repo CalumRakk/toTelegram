@@ -276,13 +276,14 @@ def check_config(ctx: typer.Context):
                         f"Base de datos: [bold]SQLite[/] al día (v{report.current_version})."
                     )
                 elif report.state == DatabaseState.OUTDATED:
-                    UI.error(
-                        f"Base de datos desactualizada o incompatible (v{report.current_version} detectada, se requiere v{report.target_version})."
+                    UI.warn(
+                        f"Base de datos en versión anterior detectada (v{report.current_version})."
                     )
                     UI.info(
-                        "Acción: Utiliza la rama de migración para actualizar tus datos históricos o inicializa una base limpia."
+                        f"Al ejecutar subidas, se archivará automáticamente como "
+                        f"'{manager.database_path.stem}.legacy_v{report.current_version}.sqlite' "
+                        f"y se iniciará una base de datos limpia v{report.target_version}."
                     )
-                    raise typer.Exit(1)
                 elif report.state == DatabaseState.FRESH:
                     UI.info(
                         f"Base de datos: [bold]SQLite[/] nueva (se inicializará en v{report.target_version})."

@@ -1,3 +1,5 @@
+from dataclasses import dataclass
+from datetime import datetime
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from tartape.exceptions import TarIntegrityError
@@ -15,9 +17,23 @@ if TYPE_CHECKING:
     from totelegram.models import Job, Payload
 
 
+@dataclass
+class DuplicateCandidate:
+    """Representa un archivo o mensaje existente en el chat con nombre similar."""
+
+    message_id: int
+    file_name: str
+    file_size: int
+    date: datetime | None = None
+
+
 @runtime_checkable
 class UploadObserver(Protocol):
     """Protocolo que define los eventos del ciclo de vida de la subida."""
+
+    def on_potential_duplicates(self, duplicates: list["DuplicateCandidate"]) -> None:
+        """Llamado cuando se detectan mensajes con nombres similares en el chat de destino."""
+        ...
 
     def on_hash_start(self, filename: str, total_bytes: int) -> None:
         """Llamado antes de iniciar el cálculo del hash MD5."""
@@ -81,6 +97,9 @@ class UploadObserver(Protocol):
 
 class NullObserver:
     """Implementación no-op útil para tests unitarios o ejecución desatendida."""
+
+    def on_potential_duplicates(self, duplicates: list["DuplicateCandidate"]) -> None:
+        pass
 
     def on_hash_start(self, filename: str, total_bytes: int) -> None:
         pass

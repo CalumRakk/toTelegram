@@ -1,5 +1,9 @@
 import unittest
 from datetime import datetime, timezone
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
+import peewee
 
 from totelegram import __CURRENT_DB_VERSION__
 from totelegram.database import DatabaseSession
@@ -31,51 +35,110 @@ class TestDatabaseMigrationAndInspection(unittest.TestCase):
         self.assertEqual(report.current_version, 0)
         self.assertEqual(report.target_version, __CURRENT_DB_VERSION__)
 
-        # Inicialización canónica
         final_report = setup_database_schema(self.db)
         self.assertEqual(final_report.state, DatabaseState.UP_TO_DATE)
         self.assertEqual(final_report.current_version, __CURRENT_DB_VERSION__)
 
-        # Verificar que la tabla schema_version tiene el registro correcto
         latest_version = (
             SchemaVersion.select().order_by(SchemaVersion.version.desc()).first()
         )
         self.assertIsNotNone(latest_version)
         self.assertEqual(latest_version.version, __CURRENT_DB_VERSION__)
 
-    def test_02_outdated_database_rejection(self):
+    def test_02_outdated_database_auto_archives_and_creates_fresh_v8(self):
         """
-        Base de datos con versión previa a la línea base canónica (ej. v1 a v7).
-        Debe detectarse como OUTDATED y lanzar IncompatibleDatabaseError instruyendo
-        al usuario a migrar sus datos con la herramienta dedicada.
+        Fase 1: Si la base de datos física es OUTDATED (ej: v1), NO debe lanzar error.
+        Debe respaldarse físicamente como .legacy_v1.sqlite y crear una nueva limpia en v8.
         """
-        self.db.create_tables([SchemaVersion, TelegramUser])
-        SchemaVersion.create(version=1, applied_at=datetime.now(timezone.utc))
+        with TemporaryDirectory() as tmp_dir:
+            db_path = Path(tmp_dir) / "test_user.sqlite"
+            file_db = peewee.SqliteDatabase(str(db_path))
 
-        report = inspect_database(self.db)
-        self.assertEqual(report.state, DatabaseState.OUTDATED)
-        self.assertEqual(report.current_version, 1)
+            # Simular base de datos legacy v1 con SQL nativo
+            file_db.connect()
+            file_db.execute_sql(
+                "CREATE TABLE schema_version (version INTEGER PRIMARY KEY, applied_at DATETIME);"
+            )
+            file_db.execute_sql(
+                "INSERT INTO schema_version (version, applied_at) VALUES (1, '2023-01-01 00:00:00');"
+            )
+            file_db.execute_sql(
+                "CREATE TABLE telegramuser (id INTEGER PRIMARY KEY, first_name TEXT);"
+            )
+            file_db.execute_sql(
+                "INSERT INTO telegramuser (id, first_name) VALUES (111, 'OldUser');"
+            )
+            file_db.close()
 
-        with self.assertRaises(IncompatibleDatabaseError):
-            setup_database_schema(self.db)
+            try:
+                # Inspeccionar (modo solo lectura)
+                file_db.connect()
+                report = inspect_database(file_db)
+                self.assertEqual(report.state, DatabaseState.OUTDATED)
+                self.assertEqual(report.current_version, 1)
 
-    def test_03_legacy_tables_without_schema_version_rejected(self):
+                # setup_database_schema debe auto-archivar y reiniciar en v8 sin romper
+                final_report = setup_database_schema(file_db)
+                self.assertEqual(final_report.state, DatabaseState.UP_TO_DATE)
+                self.assertEqual(final_report.current_version, __CURRENT_DB_VERSION__)
+                self.assertIsNotNone(final_report.archived_legacy_path)
+
+                archived_path = Path(final_report.archived_legacy_path)
+                self.assertTrue(archived_path.exists())
+                self.assertIn("legacy_v1", archived_path.name)
+
+                # Comprobar que la nueva base está limpia en v8
+                latest = (
+                    SchemaVersion.select()
+                    .order_by(SchemaVersion.version.desc())
+                    .first()
+                )
+                self.assertIsNotNone(latest)
+                self.assertEqual(latest.version, __CURRENT_DB_VERSION__)
+
+                # El usuario viejo no existe en la base limpia recién inicializada
+                self.assertEqual(TelegramUser.select().count(), 0)
+                file_db.close()
+            finally:
+                # Restaurar el proxy a la base en memoria del test
+                from totelegram.database import db_proxy
+
+                db_proxy.initialize(self.db)
+
+    def test_03_legacy_without_schema_version_auto_archives(self):
         """
-        Base de datos con tablas pero sin la tabla schema_version.
-        Debe catalogarse como OUTDATED y rechazar la ejecución.
+        Base de datos con tablas pero sin schema_version se cataloga OUTDATED
+        y se auto-archiva como legacy.
         """
-        self.db.create_tables([TelegramUser])
+        with TemporaryDirectory() as tmp_dir:
+            db_path = Path(tmp_dir) / "test_legacy.sqlite"
+            file_db = peewee.SqliteDatabase(str(db_path))
 
-        report = inspect_database(self.db)
-        self.assertEqual(report.state, DatabaseState.OUTDATED)
+            # Simular base de datos legacy sin schema_version con SQL nativo
+            file_db.connect()
+            file_db.execute_sql(
+                "CREATE TABLE telegramuser (id INTEGER PRIMARY KEY, first_name TEXT);"
+            )
+            file_db.close()
 
-        with self.assertRaises(IncompatibleDatabaseError):
-            setup_database_schema(self.db)
+            try:
+                file_db.connect()
+                report = inspect_database(file_db)
+                self.assertEqual(report.state, DatabaseState.OUTDATED)
+
+                final_report = setup_database_schema(file_db)
+                self.assertEqual(final_report.state, DatabaseState.UP_TO_DATE)
+                self.assertTrue(Path(final_report.archived_legacy_path).exists())
+                file_db.close()
+            finally:
+                from totelegram.database import db_proxy
+
+                db_proxy.initialize(self.db)
 
     def test_04_ahead_database_rejection(self):
         """
         Base de datos con versión superior a la soportada por el cliente (ej. v99).
-        Debe detectarse como AHEAD y lanzar IncompatibleDatabaseError.
+        DEBE detectarse como AHEAD y lanzar IncompatibleDatabaseError para proteger datos futuros.
         """
         self.db.create_tables([SchemaVersion, TelegramUser])
         SchemaVersion.create(version=99, applied_at=datetime.now(timezone.utc))
@@ -89,8 +152,7 @@ class TestDatabaseMigrationAndInspection(unittest.TestCase):
 
     def test_05_up_to_date_database_zero_ddl_idempotence(self):
         """
-        Base de datos al día.
-        Debe reportar UP_TO_DATE de inmediato sin alterar el esquema.
+        Base de datos al día. Idempotencia y reporte directo.
         """
         setup_database_schema(self.db)
 
@@ -98,6 +160,5 @@ class TestDatabaseMigrationAndInspection(unittest.TestCase):
         self.assertTrue(report.is_operational)
         self.assertEqual(report.state, DatabaseState.UP_TO_DATE)
 
-        # La segunda ejecución debe ser idempotente y limpia
         second_report = setup_database_schema(self.db)
         self.assertEqual(second_report.state, DatabaseState.UP_TO_DATE)

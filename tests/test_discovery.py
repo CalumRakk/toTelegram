@@ -85,6 +85,128 @@ class TestDiscoveryService(unittest.TestCase):
     def tearDown(self):
         self.db_session.close()
 
+    def test_heuristic_search_skips_small_files(self):
+        """Archivos menores al umbral (20 MB) no deben consultar a la API de búsqueda de Telegram."""
+        # self.source mide 2000 bytes (< 20 MB)
+        duplicates = self.discovery._search_potential_duplicates(self.job_target)
+
+        self.assertEqual(len(duplicates), 0)
+        self.mock_client.search_messages.assert_not_called()
+
+    def test_heuristic_search_queries_telegram_for_large_files(self):
+        """Archivos grandes (>= 20 MB) deben buscar por nombre limpio en el chat de destino."""
+        large_source = Source.create(
+            path_str="/tmp/pelicula_vacaciones_2024.1080p.mkv",
+            md5sum="hash_large_file_unique",
+            size=50 * 1024 * 1024,  # 50 MB (> 20 MB)
+            mtime=1700000000.0,
+            mimetype="video/x-matroska",
+            type=SourceType.FILE,
+        )
+        large_job = Job.create(
+            source=large_source,
+            chat=self.chat_target,
+            strategy=Strategy.SINGLE,
+            status=JobStatus.PENDING,
+            config=StrategyConfig(
+                tg_max_size=2000 * 1024 * 1024,
+                user_is_premium=False,
+                app_version="0.9.25",
+            ),
+        )
+
+        # Mock del mensaje encontrado en Telegram
+        mock_msg = MagicMock()
+        mock_msg.id = 777
+        mock_msg.date = datetime.now(timezone.utc)
+        mock_msg.caption = "Subido el mes pasado"
+        mock_msg.document = MagicMock(
+            file_name="pelicula_vacaciones_2024.mkv",
+            file_size=52 * 1024 * 1024,
+        )
+        self.mock_client.search_messages.return_value = [mock_msg]
+
+        duplicates = self.discovery._search_potential_duplicates(large_job)
+
+        self.assertEqual(len(duplicates), 1)
+        self.assertEqual(duplicates[0].message_id, 777)
+        self.assertEqual(duplicates[0].file_name, "pelicula_vacaciones_2024.mkv")
+        self.assertEqual(duplicates[0].file_size, 52 * 1024 * 1024)
+        self.mock_client.search_messages.assert_called_once()
+
+    def test_heuristic_search_ignores_manifest_or_system_captions(self):
+        """Los mensajes de snapshot o locks del sistema (#totelegram) deben ser ignorados en los duplicados."""
+        large_source = Source.create(
+            path_str="/tmp/backup_documentos_2024.tar",
+            md5sum="hash_large_backup_123",
+            size=30 * 1024 * 1024,
+            mtime=1700000000.0,
+            mimetype="application/x-tar",
+            type=SourceType.FOLDER,
+        )
+        large_job = Job.create(
+            source=large_source,
+            chat=self.chat_target,
+            strategy=Strategy.SINGLE,
+            status=JobStatus.PENDING,
+            config=StrategyConfig(
+                tg_max_size=2000 * 1024 * 1024,
+                user_is_premium=False,
+                app_version="0.9.25",
+            ),
+        )
+
+        mock_system_msg = MagicMock()
+        mock_system_msg.id = 888
+        mock_system_msg.caption = "🏷 #totelegram_manifest #src_hash_large_backup_123"
+        mock_system_msg.document = MagicMock(
+            file_name="backup_documentos_2024.ttape", file_size=1000
+        )
+
+        self.mock_client.search_messages.return_value = [mock_system_msg]
+
+        duplicates = self.discovery._search_potential_duplicates(large_job)
+        self.assertEqual(len(duplicates), 0)
+
+    def test_investigate_includes_potential_duplicates_when_needs_upload(self):
+        """investigate() debe poblar el campo potential_duplicates del reporte."""
+        large_source = Source.create(
+            path_str="/tmp/video_cumpleanos_2023.mp4",
+            md5sum="hash_cumple_unique_123",
+            size=40 * 1024 * 1024,
+            mtime=1700000000.0,
+            mimetype="video/mp4",
+            type=SourceType.FILE,
+        )
+        large_job = Job.create(
+            source=large_source,
+            chat=self.chat_target,
+            strategy=Strategy.SINGLE,
+            status=JobStatus.PENDING,
+            config=StrategyConfig(
+                tg_max_size=2000 * 1024 * 1024,
+                user_is_premium=False,
+                app_version="0.9.25",
+            ),
+        )
+
+        mock_msg = MagicMock()
+        mock_msg.id = 901
+        mock_msg.date = datetime.now(timezone.utc)
+        mock_msg.caption = ""
+        mock_msg.document = MagicMock(
+            file_name="video_cumpleanos_2023.mp4", file_size=40 * 1024 * 1024
+        )
+
+        # search_messages se llama tanto en _discover_and_hydrate_jit como en _search_potential_duplicates
+        # Retornamos vacío para la búsqueda por hashtag, y mock_msg para la búsqueda por nombre
+        self.mock_client.search_messages.side_effect = [[], [mock_msg]]
+
+        report = self.discovery.investigate(large_job)
+        self.assertEqual(report.state, AvailabilityState.NEEDS_UPLOAD)
+        self.assertEqual(len(report.potential_duplicates), 1)
+        self.assertEqual(report.potential_duplicates[0].message_id, 901)
+
     def _create_mock_tg_message(self, message_id: int, chat_id: int, file_size: int):
         msg = MagicMock()
         msg.id = message_id
