@@ -1,11 +1,8 @@
 import unittest
 
-from totelegram.schemas import SourceType
 from totelegram.telegram.captions import (
     ChunkCaption,
     ManifestCaption,
-    build_chunk_caption,
-    build_manifest_caption,
     format_version_tag,
 )
 
@@ -21,14 +18,14 @@ class TestCaptions(unittest.TestCase):
         )
         master_md5 = "4f5ab2c1e8d4a6b7c8d9e0f1a2b3c4d5"
 
-        caption = build_chunk_caption(
+        chunk = ChunkCaption(
             filename=long_name,
-            sequence_index=2,
+            part_number=3,
             total_parts=10,
             part_size=2000000000,
-            master_md5=master_md5,
-            part_md5="d41d8cd98f00b204e9800998ecf8427e",
+            source_short_hash=master_md5,
         )
+        caption = chunk.render()
 
         self.assertLessEqual(len(caption), MAX_TELEGRAM_CAPTION_LENGTH)
         self.assertIn("#totelegram_chunk", caption)
@@ -41,27 +38,29 @@ class TestCaptions(unittest.TestCase):
         master_md5 = "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4"
 
         # Archivo suelto
-        file_caption = build_manifest_caption(
-            filename="pelicula.mkv",
-            source_type=SourceType.FILE,
+        file_manifest = ManifestCaption(
+            resource_name="pelicula.mkv",
             total_size=4500000000,
             total_parts=3,
-            master_md5=master_md5,
+            source_short_hash=master_md5,
+            is_tape=False,
         )
+        file_caption = file_manifest.render()
         self.assertIn("#type_file", file_caption)
         self.assertIn(f"#src_{master_md5}", file_caption)
         self.assertNotIn("#type_tape", file_caption)
         self.assertIn("Total:", file_caption)
 
         # Carpeta TAR con conteo de archivos
-        tape_caption = build_manifest_caption(
-            filename="mis_fotos",
-            source_type=SourceType.FOLDER,
+        tape_manifest = ManifestCaption(
+            resource_name="mis_fotos",
             total_size=12000000000,
             total_parts=6,
-            master_md5=master_md5,
+            source_short_hash=master_md5,
+            is_tape=True,
             total_files=1542,
         )
+        tape_caption = tape_manifest.render()
         self.assertIn("#type_tape", tape_caption)
         self.assertIn(f"#src_{master_md5}", tape_caption)
         self.assertNotIn("#type_file", tape_caption)

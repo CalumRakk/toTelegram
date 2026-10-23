@@ -1,9 +1,6 @@
 import re
 
-SELF_CHAT_ALIASES = ["me", "mensajes guardados", "saved messages", "self"]
-VALUE_NOT_SET = (
-    "NOT-SET"  # TODO: VALUE_NOT_SET esta ubicado tambien en schemas. corregir esto.
-)
+from totelegram.schemas import SELF_CHAT_ALIASES, VALUE_NOT_SET
 
 
 def is_potential_username(value: str) -> bool:

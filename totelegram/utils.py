@@ -1,20 +1,9 @@
 import keyword
 import logging
-import uuid
 from pathlib import Path
 from typing import List
 
 logger = logging.getLogger(__name__)
-
-
-def get_node_id(worktable: Path) -> str:
-    """Genera o recupera un identificador único para esta máquina."""
-    node_id_file = worktable / "node_id"
-    if not node_id_file.exists():
-        node_id = str(uuid.uuid4())
-        node_id_file.write_text(node_id)
-        return node_id
-    return node_id_file.read_text().strip()
 
 
 def is_excluded(path: Path, patterns: List[str]) -> bool:

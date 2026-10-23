@@ -5,7 +5,6 @@ from typing import Optional
 from tartape.units import format_size
 
 from totelegram.packaging.coordinates import PartCoordinate
-from totelegram.schemas import SourceType
 
 PROTOCOL_VERSION: int = 6
 
@@ -20,7 +19,7 @@ _CHUNK_PATTERN = re.compile(
     r"^(?P<filename>[^\n]+)\n\n"
     r"Part\s+\[(?P<cur>\d+)/(?P<tot>\d+)\]\s+•\s+(?P<size>[^\n]+)\n\n"
     r".*?#totelegram_chunk\s+#part_(?P<p_cur>\d+)_(?P<p_tot>\d+)\s+#v(?P<version>\d+)\n"
-    r"#src_(?P<hash>[a-fA-F0-9]{32,64})",
+    r"#src_(?P<hash>[a-fA-F0-9]{32})",
     re.DOTALL,
 )
 
@@ -28,7 +27,7 @@ _MANIFEST_PATTERN = re.compile(
     r"^(?P<resource_name>[^\n]+)\n\n"
     r"(?P<metric_line>Total:[^\n]+)\n\n"
     r".*?#totelegram_manifest\s+(?P<type>#type_tape|#type_file)\s+#v(?P<version>\d+)\n"
-    r"#src_(?P<hash>[a-fA-F0-9]{32,64})",
+    r"#src_(?P<hash>[a-fA-F0-9]{32})",
     re.DOTALL,
 )
 
@@ -164,45 +163,3 @@ class ManifestCaption:
             total_files=total_files,
             version=int(data["version"]),
         )
-
-
-# FUNCIONES DE COMPATIBILIDAD CON LA BASE DE CÓDIGO ACTUAL
-
-
-def build_chunk_caption(
-    filename: str,
-    sequence_index: int,
-    total_parts: int,
-    part_size: int,
-    master_md5: str,
-    part_md5: str | None = None,  # Mantenido por retrocompatibilidad de firma
-) -> str:
-    """Puente temporal que delega en el nuevo contrato ChunkCaption."""
-    caption = ChunkCaption(
-        filename=filename,
-        part_number=sequence_index + 1,
-        total_parts=total_parts,
-        part_size=part_size,
-        source_short_hash=master_md5,
-    )
-    return caption.render()
-
-
-def build_manifest_caption(
-    filename: str,
-    source_type: SourceType,
-    total_size: int,
-    total_parts: int,
-    master_md5: str,
-    total_files: int | None = None,
-) -> str:
-    """Puente temporal que delega en el nuevo contrato ManifestCaption."""
-    caption = ManifestCaption(
-        resource_name=filename,
-        total_size=total_size,
-        total_parts=total_parts,
-        source_short_hash=master_md5,
-        is_tape=source_type == SourceType.FOLDER,
-        total_files=total_files,
-    )
-    return caption.render()

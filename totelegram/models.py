@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Callable, Generator, List, Optional, Tuple, ca
 import peewee
 import tartape
 from tartape import calculate_file_slices
-from tartape.schemas import FileSlice, ManifestEntry
+from tartape.schemas import FileSlice
 
 from totelegram import __VERSION__
 from totelegram.common.helpers import is_expired as helpers_is_expired
@@ -656,28 +656,6 @@ class TapeMember(BaseModel):
 
     class Meta:  # type: ignore
         indexes = ((("source", "relative_path"), True),)
-
-    @classmethod
-    def register_manifest_entries(
-        cls, source: "Source", payload: "Payload", entries: list[ManifestEntry]
-    ):
-        """Registra los archivos de un volumen (TapeMembers) y su GPS en el volumen."""
-        BATCH_SIZE = 100
-
-        for batch in batched(entries, BATCH_SIZE):  # type: ignore
-            batch: List[ManifestEntry]
-            member_data = [
-                {
-                    "source": source,
-                    "relative_path": e.info.arc_path,
-                    "size": e.info.size,
-                    "md5sum": e.info.md5sum,
-                    "start_offset": e.global_window.start,
-                }
-                for e in batch
-                if not e.info.is_dir
-            ]
-            cls.insert_many(member_data).on_conflict_ignore().execute()
 
     def get_slices(self, volume_size: int) -> list[FileSlice]:
         """Calcula los fragmentos quirúrgicos del archivo usando las matemáticas de TarTape.

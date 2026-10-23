@@ -12,7 +12,7 @@ from totelegram.engine.events import TarUploadObserverBridge, UploadObserver
 from totelegram.models import Payload
 from totelegram.schemas import SourceType
 from totelegram.stream import FileVolume
-from totelegram.telegram.captions import build_chunk_caption
+from totelegram.telegram.captions import ChunkCaption
 
 logger = logging.getLogger(__name__)
 
@@ -65,26 +65,22 @@ class PayloadStreamFactory:
 
     @staticmethod
     def resolve_naming(payload: Payload, max_filename_len: int = 55) -> Tuple[str, str]:
-        """
-        Determina el nombre amigable para el archivo y el caption estructurado para Telegram.
-        """
+        """Determina el nombre amigable para el archivo y el caption estructurado para Telegram."""
         if len(payload.filename) <= max_filename_len:
             filename = payload.filename
         else:
             filename = payload.filename_short
 
         total_parts = payload.job.payloads.count()
-
         master_short_hash = payload.job.source.short_hash
 
-        caption = build_chunk_caption(
+        caption = ChunkCaption(
             filename=payload.filename,
-            sequence_index=payload.sequence_index,
+            part_number=payload.sequence_index + 1,
             total_parts=total_parts,
             part_size=payload.size,
-            master_md5=master_short_hash,
-            part_md5=payload.md5sum,
-        )
+            source_short_hash=master_short_hash,
+        ).render()
 
         return filename, caption
 

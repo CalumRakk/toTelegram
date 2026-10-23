@@ -7,7 +7,8 @@ from typing import TYPE_CHECKING, cast
 from pyrogram.errors import FloodWait, RPCError
 
 from totelegram.packaging.schemas import UploadManifest
-from totelegram.telegram.captions import build_manifest_caption
+from totelegram.schemas import SourceType
+from totelegram.telegram.captions import ManifestCaption
 
 if TYPE_CHECKING:
     from pyrogram.client import Client
@@ -57,15 +58,15 @@ class SnapshotPublisher:
         if manifest.source.tape_catalog:
             total_files = manifest.source.tape_catalog.total_files
 
-        # Construir caption estructurado y seguro (< 1024 caracteres) con short_hash
-        caption = build_manifest_caption(
-            filename=manifest.source.filename,
-            source_type=manifest.source.type,
+        # Construir caption estructurado directamente con el contrato formal
+        caption = ManifestCaption(
+            resource_name=manifest.source.filename,
             total_size=manifest.source.size,
             total_parts=len(manifest.parts),
-            master_md5=manifest.source.md5sum[:32],
+            source_short_hash=manifest.source.md5sum[:32],
+            is_tape=manifest.source.type == SourceType.FOLDER,
             total_files=total_files,
-        )
+        ).render()
 
         logger.info(
             f"Publicando snapshot '{path.name}' en chat {chat_id} "
