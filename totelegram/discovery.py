@@ -137,11 +137,14 @@ class DiscoveryService:
         return duplicates
 
     def _discover_and_hydrate_jit(self, job: Job) -> bool:
-        """Busca el snapshot del MD5 en Telegram. Si lo encuentra, lo descarga e hidrata la DB.
+        """Busca el snapshot del recurso en Telegram. Si lo encuentra, lo descarga e hidrata la DB.
 
         Retorna True si encontró y procesó un snapshot con éxito.
         """
-        query = f"#src_{job.source.md5sum}"
+        from totelegram.telegram.captions import ManifestCaption
+
+        target_short_hash = job.source.short_hash
+        query = f"#src_{target_short_hash}"
         logger.debug(
             f"Buscando snapshot en Telegram JIT en chat {job.chat.id} con query '{query}'"
         )
@@ -162,15 +165,15 @@ class DiscoveryService:
                 ),
             )
 
-            # Filtrar el mensaje que realmente sea el manifiesto/snapshot
-            manifest_msg = next(
-                (
-                    m
-                    for m in found_messages
-                    if m.document and m.caption and "#totelegram_manifest" in m.caption
-                ),
-                None,
-            )
+            # Filtrar validando con el contrato formal ManifestCaption
+            manifest_msg = None
+            for m in found_messages:
+                if not m.document or not m.caption:
+                    continue
+                parsed = ManifestCaption.parse(m.caption)
+                if parsed and parsed.source_short_hash == target_short_hash:
+                    manifest_msg = m
+                    break
 
             if not manifest_msg:
                 logger.debug(
@@ -190,7 +193,7 @@ class DiscoveryService:
                     else ".json.xz"
                 )
                 temp_snapshot_path = (
-                    Path(temp_dir) / f"snapshot_{job.source.md5sum}{ext}"
+                    Path(temp_dir) / f"snapshot_{target_short_hash}{ext}"
                 )
 
                 downloaded = self.client.download_media(

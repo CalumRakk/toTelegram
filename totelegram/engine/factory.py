@@ -68,22 +68,21 @@ class PayloadStreamFactory:
         """
         Determina el nombre amigable para el archivo y el caption estructurado para Telegram.
         """
-        # Si el nombre supera el límite de Telegram para nombres de archivo en disco, usamos el técnico corto
         if len(payload.filename) <= max_filename_len:
             filename = payload.filename
         else:
             filename = payload.filename_short
 
-        # Obtenemos datos del Job y Source para construir el caption familiar
         total_parts = payload.job.payloads.count()
-        master_md5 = payload.job.source.md5sum
+
+        master_short_hash = payload.job.source.short_hash
 
         caption = build_chunk_caption(
             filename=payload.filename,
             sequence_index=payload.sequence_index,
             total_parts=total_parts,
             part_size=payload.size,
-            master_md5=master_md5,
+            master_md5=master_short_hash,
             part_md5=payload.md5sum,
         )
 

@@ -52,13 +52,19 @@ class SnapshotPublisher:
         if not path.is_file():
             raise FileNotFoundError(f"Snapshot no encontrado en disco: {path}")
 
-        # Construir caption estructurado y seguro (< 1024 caracteres)
+        # Extraer total_files si es un contenedor de carpeta (tape)
+        total_files = None
+        if manifest.source.tape_catalog:
+            total_files = manifest.source.tape_catalog.total_files
+
+        # Construir caption estructurado y seguro (< 1024 caracteres) con short_hash
         caption = build_manifest_caption(
             filename=manifest.source.filename,
             source_type=manifest.source.type,
             total_size=manifest.source.size,
             total_parts=len(manifest.parts),
-            master_md5=manifest.source.md5sum,
+            master_md5=manifest.source.md5sum[:32],
+            total_files=total_files,
         )
 
         logger.info(

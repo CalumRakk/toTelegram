@@ -4,6 +4,7 @@ from typing import List, Tuple
 import tartape
 from tartape.chunker import calculate_segments
 
+from totelegram.packaging.coordinates import PartCoordinate
 from totelegram.packaging.schemas import (
     VirtualChunk,
     VirtualTapeCatalog,
@@ -19,23 +20,20 @@ def build_payload_names_pure(
     idx: int,
     total: int,
 ) -> Tuple[str, str]:
-    """Genera nombres técnicos y legibles basados únicamente en tipos primitivos."""
+    """Genera nombres técnicos y legibles delegando en PartCoordinate."""
+    coord = PartCoordinate(index=idx + 1, total=total)
+    part_suffix = coord.filename_suffix
+
     if source_type == SourceType.FOLDER:
         original_ext = ".tar"
         base_human_name = path.name
-        combat_hash = md5sum[:40]
+        combat_hash = md5sum[:32]
     else:
         original_ext = path.suffix
         base_human_name = path.name
         if original_ext:
             base_human_name = base_human_name[: -len(original_ext)]
-        combat_hash = md5sum
-
-    if total > 1:
-        padding = max(2, len(str(total)))
-        part_suffix = f".{str(idx + 1).zfill(padding)}-{str(total).zfill(padding)}"
-    else:
-        part_suffix = ""
+        combat_hash = md5sum[:32]
 
     full_name = f"{base_human_name}{original_ext}{part_suffix}"
     short_name = f"{combat_hash}{original_ext}{part_suffix}"

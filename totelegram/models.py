@@ -154,7 +154,9 @@ class Source(BaseModel):
     id: int
 
     path_str = cast(str, peewee.CharField())
-    md5sum = cast(str, peewee.CharField(unique=True))  # MD5 o Fingerprint
+    md5sum = cast(
+        str, peewee.CharField(unique=True)
+    )  # MD5 o Fingerprint # FIXME: Nombre de campo incoherente
     size = cast(int, peewee.BigIntegerField())
 
     # mtime : Unix timestamp. Es util para la identificar archivo
@@ -163,6 +165,16 @@ class Source(BaseModel):
     type = cast(SourceType, EnumField(SourceType, default=SourceType.FILE))  # type: ignore
 
     tape_catalog = cast(TapeCatalog | None, PydanticJSONField(TapeCatalog, null=True))
+
+    @property
+    def short_hash(self) -> str:
+        """
+        Retorna el identificador normalizado de 32 caracteres (128 bits).
+        Para archivos individuales es su MD5 completo.
+        Para carpetas son los primeros 32 caracteres de su fingerprint estructural.
+        Se utiliza como baliza universal en Telegram (#src_<short_hash>).
+        """
+        return self.md5sum[:32]
 
     @property
     def path(self) -> Path:

@@ -8,6 +8,7 @@ from pyrogram import enums
 
 from totelegram.identity import ChatID
 from totelegram.models import Source, TapeMember
+from totelegram.telegram.captions import ManifestCaption
 
 if TYPE_CHECKING:
     from pyrogram.client import Client
@@ -15,8 +16,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Regex para extraer el hash del caption sin descargar el archivo
-SRC_HASH_REGEX = re.compile(r"#src_([a-fA-F0-9]{32,64})")
+SRC_HASH_REGEX = re.compile(r"#src_([a-fA-F0-9]{32})")
 
 
 @dataclass
@@ -45,7 +45,6 @@ class TapeIndexService:
         cuántos no tienen sus archivos indexados en la tabla TapeMember.
         """
         try:
-            # Búsqueda nativa de solo carpetas/cintas en Telegram
             messages: List["Message"] = list(
                 self.client.search_messages(
                     chat_id=int(chat_id),
@@ -60,21 +59,27 @@ class TapeIndexService:
 
         unindexed_messages = []
 
-        # Obtener los MD5 que ya tienen TapeMembers registrados en local
-        indexed_sources = set(
+        # Obtenemos los hashes cortos (primeros 32 caracteres) de las fuentes ya indexadas en BD
+        indexed_sources = (
             Source.select(Source.md5sum).join(TapeMember).distinct().scalars()
         )
+        indexed_short_hashes = {str(h)[:32].lower() for h in indexed_sources}
 
         for msg in messages:
             if not msg.caption:
                 continue
 
-            match = SRC_HASH_REGEX.search(msg.caption)
-            if not match:
-                continue
+            # Intentar extraer mediante contrato formal primero, con fallback al regex
+            parsed = ManifestCaption.parse(msg.caption)
+            if parsed:
+                hash_to_check = parsed.source_short_hash
+            else:
+                match = SRC_HASH_REGEX.search(msg.caption)
+                if not match:
+                    continue
+                hash_to_check = match.group(1)[:32].lower()
 
-            md5 = match.group(1)
-            if md5 not in indexed_sources:
+            if hash_to_check not in indexed_short_hashes:
                 unindexed_messages.append(msg)
 
         return UnindexedTapesReport(

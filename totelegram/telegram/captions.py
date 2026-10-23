@@ -1,40 +1,172 @@
-import logging
-from pathlib import PurePath
+import re
+from dataclasses import dataclass
+from typing import Optional
 
 from tartape.units import format_size
 
+from totelegram.packaging.coordinates import PartCoordinate
 from totelegram.schemas import SourceType
 
-logger = logging.getLogger(__name__)
+PROTOCOL_VERSION: int = 6
 
-# Límites de la plataforma Telegram
-MAX_TELEGRAM_CAPTION_LENGTH = 1024
-SAFE_FILENAME_MAX_LENGTH = 80
-
-# Etiquetas canónicas del protocolo
+# Tags canónicos del protocolo
 TAG_ROOT_CHUNK = "#totelegram_chunk"
 TAG_ROOT_MANIFEST = "#totelegram_manifest"
-TAG_TYPE_FILE = "#type_file"
 TAG_TYPE_TAPE = "#type_tape"
+TAG_TYPE_FILE = "#type_file"
+
+# Expresiones regulares para parsing bidireccional
+_CHUNK_PATTERN = re.compile(
+    r"^(?P<filename>[^\n]+)\n\n"
+    r"Part\s+\[(?P<cur>\d+)/(?P<tot>\d+)\]\s+•\s+(?P<size>[^\n]+)\n\n"
+    r".*?#totelegram_chunk\s+#part_(?P<p_cur>\d+)_(?P<p_tot>\d+)\s+#v(?P<version>\d+)\n"
+    r"#src_(?P<hash>[a-fA-F0-9]{32,64})",
+    re.DOTALL,
+)
+
+_MANIFEST_PATTERN = re.compile(
+    r"^(?P<resource_name>[^\n]+)\n\n"
+    r"(?P<metric_line>Total:[^\n]+)\n\n"
+    r".*?#totelegram_manifest\s+(?P<type>#type_tape|#type_file)\s+#v(?P<version>\d+)\n"
+    r"#src_(?P<hash>[a-fA-F0-9]{32,64})",
+    re.DOTALL,
+)
 
 
-def truncate_middle(text: str, max_chars: int = SAFE_FILENAME_MAX_LENGTH) -> str:
+def format_version_tag(version: int | str) -> str:
     """
-    Trunca una cadena larga preservando el inicio y la extensión final si existe.
-    Ejemplo: 'archivo_gigante_con_nombre_larguisimo.tar.01' -> 'archivo_gigante...tar.01'
+    Sanitiza cualquier representación de versión a un tag mayor entero seguro.
+    Ejemplos: 6 -> '#v6', '6.0' -> '#v6', 'v6.1' -> '#v6'.
     """
-    if len(text) <= max_chars:
-        return text
+    clean = str(version).strip().lstrip("vV")
+    major = clean.split(".")[0]
+    return f"#v{major}"
 
-    path = PurePath(text)
-    ext = "".join(path.suffixes)
-    stem = text[: -len(ext)] if ext else text
 
-    available_stem = max(10, max_chars - len(ext) - 3)
-    half = available_stem // 2
+@dataclass(frozen=True)
+class ChunkCaption:
+    """
+    Contrato formal para el caption de piezas individuales (chunks)
+    """
 
-    truncated = f"{stem[:half]}...{stem[-half:]}{ext}"
-    return truncated
+    filename: str
+    part_number: int  # 1-based
+    total_parts: int
+    part_size: int
+    source_short_hash: str
+    version: int = PROTOCOL_VERSION
+
+    @property
+    def coordinate(self) -> PartCoordinate:
+        return PartCoordinate(index=self.part_number, total=self.total_parts)
+
+    def render(self) -> str:
+        """Genera el texto estandarizado en 3 bloques en inglés técnico."""
+        coord = self.coordinate
+        size_str = format_size(self.part_size)
+        v_tag = format_version_tag(self.version)
+        clean_hash = self.source_short_hash[:32].lower()
+
+        return (
+            f"{self.filename}\n\n"
+            f"Part {coord.display} • {size_str}\n\n"
+            f"{TAG_ROOT_CHUNK} {coord.tag} {v_tag}\n"
+            f"#src_{clean_hash}"
+        )
+
+    @classmethod
+    def parse(cls, text: str) -> Optional["ChunkCaption"]:
+        """Deserializa un caption de Telegram devolviendo la instancia tipada o None."""
+        if not text or TAG_ROOT_CHUNK not in text:
+            return None
+
+        match = _CHUNK_PATTERN.search(text.strip())
+        if not match:
+            return None
+
+        data = match.groupdict()
+        return cls(
+            filename=data["filename"].strip(),
+            part_number=int(data["cur"]),
+            total_parts=int(data["tot"]),
+            part_size=0,  # El tamaño exacto reside en document.file_size
+            source_short_hash=data["hash"][:32].lower(),
+            version=int(data["version"]),
+        )
+
+
+@dataclass(frozen=True)
+class ManifestCaption:
+    """
+    Contrato formal para el caption del manifiesto/snapshot (.ttape o .json.xz).
+    """
+
+    resource_name: str
+    total_size: int
+    total_parts: int
+    source_short_hash: str
+    is_tape: bool
+    total_files: int | None = None
+    version: int = PROTOCOL_VERSION
+
+    def render(self) -> str:
+        """Genera el texto estandarizado del snapshot en inglés técnico."""
+        size_str = format_size(self.total_size)
+        v_tag = format_version_tag(self.version)
+        type_tag = TAG_TYPE_TAPE if self.is_tape else TAG_TYPE_FILE
+        clean_hash = self.source_short_hash[:32].lower()
+        parts_label = "part" if self.total_parts == 1 else "parts"
+        parts_str = f"({self.total_parts} {parts_label})"
+
+        if self.is_tape and self.total_files is not None:
+            files_label = "file" if self.total_files == 1 else "files"
+            files_str = f"{self.total_files:,} {files_label}"
+            metric_line = f"Total: {size_str} • {files_str} {parts_str}"
+        else:
+            metric_line = f"Total: {size_str} {parts_str}"
+
+        return (
+            f"{self.resource_name}\n\n"
+            f"{metric_line}\n\n"
+            f"{TAG_ROOT_MANIFEST} {type_tag} {v_tag}\n"
+            f"#src_{clean_hash}"
+        )
+
+    @classmethod
+    def parse(cls, text: str) -> Optional["ManifestCaption"]:
+        """Deserializa un caption de snapshot confirmando tipo y versión."""
+        if not text or TAG_ROOT_MANIFEST not in text:
+            return None
+
+        match = _MANIFEST_PATTERN.search(text.strip())
+        if not match:
+            return None
+
+        data = match.groupdict()
+        is_tape = data["type"] == TAG_TYPE_TAPE
+
+        # Intentar extraer total de partes desde la línea métrica
+        parts_match = re.search(r"\((\d+)\s+parts?\)", data["metric_line"])
+        total_parts = int(parts_match.group(1)) if parts_match else 1
+
+        # Intentar extraer archivos si es cinta
+        files_match = re.search(r"([\d,]+)\s+files?", data["metric_line"])
+        total_files = (
+            int(files_match.group(1).replace(",", "")) if files_match else None
+        )
+
+        return cls(
+            resource_name=data["resource_name"].strip(),
+            total_size=0,
+            total_parts=total_parts,
+            source_short_hash=data["hash"][:32].lower(),
+            is_tape=is_tape,
+            total_files=total_files,
+            version=int(data["version"]),
+        )
+
+
+# FUNCIONES DE COMPATIBILIDAD CON LA BASE DE CÓDIGO ACTUAL
 
 
 def build_chunk_caption(
@@ -43,39 +175,17 @@ def build_chunk_caption(
     total_parts: int,
     part_size: int,
     master_md5: str,
-    part_md5: str | None = None,
+    part_md5: str | None = None,  # Mantenido por retrocompatibilidad de firma
 ) -> str:
-    """
-    Genera el caption estructurado para una pieza física (Payload).
-    Garantiza una longitud menor a 1024 caracteres y la vinculación por #src_<md5>.
-    """
-    safe_name = truncate_middle(filename, SAFE_FILENAME_MAX_LENGTH)
-    current_part = sequence_index + 1
-    padding = max(2, len(str(total_parts)))
-    part_tag_suffix = (
-        f"{str(current_part).zfill(padding)}_{str(total_parts).zfill(padding)}"
+    """Puente temporal que delega en el nuevo contrato ChunkCaption."""
+    caption = ChunkCaption(
+        filename=filename,
+        part_number=sequence_index + 1,
+        total_parts=total_parts,
+        part_size=part_size,
+        source_short_hash=master_md5,
     )
-
-    lines = [
-        f"📦 {safe_name}",
-        f"🧩 Parte [{current_part}/{total_parts}] • {format_size(part_size)}",
-    ]
-
-    if part_md5:
-        lines.append(f"🔑 MD5 Parte: {part_md5}")
-
-    lines.append(f"🏷 {TAG_ROOT_CHUNK} #part_{part_tag_suffix} #src_{master_md5}")
-
-    caption = "\n".join(lines)
-
-    # Salvaguarda final estricta de longitud
-    if len(caption) > MAX_TELEGRAM_CAPTION_LENGTH:
-        logger.warning(
-            "El caption del chunk excedió 1024 caracteres. Recortando de emergencia."
-        )
-        caption = caption[:MAX_TELEGRAM_CAPTION_LENGTH]
-
-    return caption
+    return caption.render()
 
 
 def build_manifest_caption(
@@ -84,30 +194,15 @@ def build_manifest_caption(
     total_size: int,
     total_parts: int,
     master_md5: str,
+    total_files: int | None = None,
 ) -> str:
-    """
-    Genera el caption de cierre para el Snapshot (.json.xz o .ttape).
-    Distingue el tipo de recurso con #type_file o #type_tape.
-    """
-    safe_name = truncate_middle(filename, SAFE_FILENAME_MAX_LENGTH)
-    type_tag = TAG_TYPE_TAPE if source_type == SourceType.FOLDER else TAG_TYPE_FILE
-    icon = "📁" if source_type == SourceType.FOLDER else "📄"
-    parts_word = "parte" if total_parts == 1 else "partes"
-
-    lines = [
-        "✅ BACKUP COMPLETADO",
-        f"{icon} Recurso: {safe_name}",
-        f"📊 {format_size(total_size)} ({total_parts} {parts_word})",
-        f"🔑 MD5 Maestro: {master_md5}",
-        f"🏷 {TAG_ROOT_MANIFEST} {type_tag} #src_{master_md5}",
-    ]
-
-    caption = "\n".join(lines)
-
-    if len(caption) > MAX_TELEGRAM_CAPTION_LENGTH:
-        logger.warning(
-            "El caption del snapshot excedió 1024 caracteres. Recortando de emergencia."
-        )
-        caption = caption[:MAX_TELEGRAM_CAPTION_LENGTH]
-
-    return caption
+    """Puente temporal que delega en el nuevo contrato ManifestCaption."""
+    caption = ManifestCaption(
+        resource_name=filename,
+        total_size=total_size,
+        total_parts=total_parts,
+        source_short_hash=master_md5,
+        is_tape=source_type == SourceType.FOLDER,
+        total_files=total_files,
+    )
+    return caption.render()
