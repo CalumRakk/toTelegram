@@ -199,7 +199,7 @@ class TestDiscoveryService(unittest.TestCase):
         )
 
         # search_messages se llama tanto en _discover_and_hydrate_jit como en _search_potential_duplicates
-        # Retornamos vacío para la búsqueda por hashtag, y mock_msg para la búsqueda por nombre
+        # Retornamos vacío para la búsqueda por hashtag, y mock_msg para la búsqueda por nombre.
         self.mock_client.search_messages.side_effect = [[], [mock_msg]]
 
         report = self.discovery.investigate(large_job)
@@ -246,12 +246,14 @@ class TestDiscoveryService(unittest.TestCase):
         self.assertEqual(report.state, AvailabilityState.FULFILLED)
 
     def test_investigate_returns_can_forward_when_mirror_exists_in_another_chat(self):
-        """Si existe un Job completado e íntegro en otro chat, retorna CAN_FORWARD con sus remotos."""
+        """Si existe un Job completado con Snapshot en otro chat, retorna CAN_FORWARD con sus remotos."""
         job_mirror = Job.create(
             source=self.source,
             chat=self.chat_mirror,
             strategy=Strategy.CHUNKED,
             status=JobStatus.UPLOADED,
+            snapshot_message_id=8888,
+            last_verified_at=datetime.now(timezone.utc),
             config=StrategyConfig(
                 tg_max_size=1000, user_is_premium=False, app_version="0.9.15"
             ),
@@ -298,6 +300,8 @@ class TestDiscoveryService(unittest.TestCase):
             chat=self.chat_mirror,
             strategy=Strategy.CHUNKED,
             status=JobStatus.UPLOADED,
+            snapshot_message_id=8888,
+            last_verified_at=datetime.now(timezone.utc),
             config=StrategyConfig(
                 tg_max_size=1000, user_is_premium=False, app_version="0.9.15"
             ),
@@ -329,6 +333,36 @@ class TestDiscoveryService(unittest.TestCase):
 
         report = self.discovery.investigate(self.job_target)
         self.assertEqual(report.state, AvailabilityState.NEEDS_UPLOAD)
+
+    def test_investigate_ignores_mirror_without_snapshot(self):
+        """Un Job en otro chat sin snapshot_message_id debe ser ignorado por completo."""
+        job_mirror = Job.create(
+            source=self.source,
+            chat=self.chat_mirror,
+            strategy=Strategy.CHUNKED,
+            status=JobStatus.UPLOADED,
+            snapshot_message_id=None,  # Sin snapshot publicado
+            config=StrategyConfig(
+                tg_max_size=1000, user_is_premium=False, app_version="0.9.15"
+            ),
+        )
+        mp0 = Payload.create(
+            job=job_mirror,
+            sequence_index=0,
+            start_offset=0,
+            end_offset=1000,
+            size=1000,
+            filename="video.mp4.01-02",
+            filename_short="h.mp4.01-02",
+        )
+        msg0 = self._create_mock_tg_message(201, self.chat_mirror.id, 1000)
+        RemotePayload.register_upload(mp0, msg0, self.user)
+
+        report = self.discovery.investigate(self.job_target)
+
+        # No se considera para reenviar porque no tiene un Snapshot que lo respalde
+        self.assertEqual(report.state, AvailabilityState.NEEDS_UPLOAD)
+        self.assertEqual(len(report.remotes), 0)
 
     def test_jit_batch_marks_orphaned_when_message_deleted_in_telegram(self):
         """La validación JIT debe orfanar el registro si Telegram informa que el mensaje no existe o está vacío."""

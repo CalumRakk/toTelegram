@@ -22,10 +22,6 @@ class FulfilledStrategy(JobStrategy):
             f"Recurso {job.source.path_str} ya disponible en destino (Job {job.id})."
         )
 
-        if job.status != JobStatus.UPLOADED:
-            with db_transaction(ctx.db):
-                job.set_uploaded()
-
         return StrategyResult(
             strategy_name="FulfilledStrategy",
             pieces_processed=0,

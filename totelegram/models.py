@@ -392,9 +392,8 @@ class Job(BaseModel):
 
     def adopt_job(self, job: "Job") -> "Job":
         self.strategy = job.strategy
-        self.status = job.status
         self.config = job.config
-        self.save(only=[Job.strategy, Job.status, Job.config, Job.updated_at])
+        self.save(only=[Job.strategy, Job.config, Job.updated_at])
         return self
 
     def mark_deleted(self):

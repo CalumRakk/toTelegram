@@ -110,8 +110,6 @@ class CooperativeUploadStrategy(JobStrategy):
         with db_transaction(ctx.db):
             pending_total = Payload.total_pending_for_job(job)
             is_completed = pending_total == 0
-            if is_completed:
-                job.set_uploaded()
 
         return StrategyResult(
             strategy_name="CooperativeUploadStrategy",

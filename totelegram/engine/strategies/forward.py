@@ -67,9 +67,6 @@ class SmartForwardStrategy(JobStrategy):
             pieces_forwarded += 1
             time.sleep(0.5)
 
-        with db_transaction(ctx.db):
-            job_adopted.set_uploaded()
-
         ctx.observer.on_forward_success(job_adopted, pieces_forwarded)
 
         return StrategyResult(

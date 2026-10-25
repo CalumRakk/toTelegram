@@ -252,6 +252,10 @@ class DiscoveryService:
             return False
 
     def get_historical_jobs(self, job: Job) -> peewee.ModelSelect:
+        """Busca Jobs completados para el mismo Source en otros chats.
+
+        Solo se consideran Jobs que cuenten con un Snapshot publicado en Telegram.
+        """
         return (
             Job.select()
             .where(
@@ -259,6 +263,9 @@ class DiscoveryService:
                 & (Job.status == JobStatus.UPLOADED)
                 & (Job.chat != job.chat)
                 & (Job.deleted_at == 0)
+                & (
+                    Job.snapshot_message_id.is_null(False)  # type: ignore
+                )  # Exclusivo para Jobs con Snapshot
             )
             .order_by(Job.updated_at.desc())  # type: ignore
         )
@@ -340,31 +347,13 @@ class DiscoveryService:
             return self._validate_jit_batch(local_remotes)
         return False
 
-    def get_remotes(self, historical_jobs):
+    def get_remotes(self, historical_jobs) -> List[RemotePayload] | None:
+        """Valida que el Job espejo tenga todas sus partes en Telegram verificando su Snapshot."""
         for hist_job in historical_jobs:
-            # Si el Job histórico tiene snapshot, usamos la validación rápida del snapshot
-            if hist_job.snapshot_message_id:
-                if not hist_job.is_fresh and not self._validate_job_snapshot_jit(
-                    hist_job
-                ):
-                    continue
-
-                remotes = list(
-                    RemotePayload.select(RemotePayload, Payload)
-                    .join(Payload)
-                    .where(
-                        (Payload.job == hist_job) & (RemotePayload.is_orphaned == False)
-                    )
-                    .order_by(Payload.sequence_index)
-                )
-                if len(remotes) == self._get_expected_count(hist_job):
-                    logger.info(
-                        f"Espejo íntegro confirmado vía snapshot: Job {hist_job.id}"
-                    )
-                    return remotes
+            # Si expiró la frescura TTL, verificamos el Snapshot en Telegram
+            if not hist_job.is_fresh and not self._validate_job_snapshot_jit(hist_job):
                 continue
 
-            # Fallback para jobs históricos antiguos sin snapshot registrado
             remotes = list(
                 RemotePayload.select(RemotePayload, Payload)
                 .join(Payload)
@@ -373,10 +362,12 @@ class DiscoveryService:
             )
 
             expected_count = self._get_expected_count(hist_job)
-
-            if len(remotes) == expected_count and self._validate_jit_batch(remotes):
-                logger.info(f"Espejo íntegro: Job {hist_job.id}")
+            if len(remotes) == expected_count:
+                logger.info(
+                    f"Espejo íntegro confirmado vía snapshot: Job {hist_job.id}"
+                )
                 return remotes
+
         return None
 
     def _validate_jit_batch(self, remotes: List[RemotePayload]) -> bool:

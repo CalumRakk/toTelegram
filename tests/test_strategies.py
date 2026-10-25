@@ -138,7 +138,7 @@ class TestEngineStrategies(unittest.TestCase):
         self.assertTrue(result.is_completed)
         self.assertFalse(result.did_upload_bytes)
         self.assertEqual(result.pieces_processed, 0)
-        self.assertEqual(Job.get_by_id(job.id).status, JobStatus.UPLOADED)
+        self.assertTrue(result.is_completed)
 
     # PRUEBAS DE SMART FORWARD STRATEGY
 
@@ -232,7 +232,7 @@ class TestEngineStrategies(unittest.TestCase):
                 RemotePayload.select().join(Payload).where(Payload.job == job_target)
             )
             self.assertEqual(len(target_remotes), 2)
-            self.assertEqual(Job.get_by_id(job_target.id).status, JobStatus.UPLOADED)
+            self.assertTrue(result.is_completed)
             self.mock_observer.on_forward_success.assert_called_once()
 
         finally:
@@ -286,7 +286,7 @@ class TestEngineStrategies(unittest.TestCase):
 
             # Verificar que todos los payloads quedaron con MD5 y RemotePayload registrado
             self.assertEqual(Payload.total_pending_for_job(job), 0)
-            self.assertEqual(Job.get_by_id(job.id).status, JobStatus.UPLOADED)
+            self.assertTrue(result.is_completed)
 
             # Verificar hooks del observador
             self.assertEqual(self.mock_observer.on_payload_start.call_count, 3)
