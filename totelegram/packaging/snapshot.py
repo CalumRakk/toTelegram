@@ -40,11 +40,17 @@ class SnapshotService:
         if not target.exists():
             raise FileNotFoundError(f"Snapshot no encontrado en: {target}")
 
-        # Caso 1: Contenedor híbrido de carpeta (.ttape)
+        # Snapshot .ttape
         if target.suffix == TTAPE_EXTENSION or target.name.endswith(TTAPE_EXTENSION):
-            return TapeContainer.read_manifest(target)
+            manifest = TapeContainer.read_manifest(target)
+            if manifest.manifest_version != MANIFEST_VERSION:
+                raise ValueError(
+                    f"Versión de contenedor .ttape no soportada ({manifest.manifest_version}). "
+                    f"Se requiere {MANIFEST_VERSION}."
+                )
+            return manifest
 
-        # Caso 2: Manifiesto de archivo individual (.json.xz)
+        # Snapshot .json.xz
         if target.suffix == ".xz" or target.name.endswith(".json.xz"):
             try:
                 with lzma.open(target, "rt", encoding="utf-8") as f:

@@ -747,9 +747,11 @@ class DisplaySnapshotPlan:
         actionable_count = len(plan.actionable_items)
         conflicts_count = len(plan.conflicts)
         warnings_count = (
-            conflicts_count + len(plan.needs_upgrade_items) + len(plan.corrupted_items)
+            conflicts_count
+            + len(plan.needs_upgrade_items)
+            + len(plan.ahead_items)
+            + len(plan.corrupted_items)
         )
-
         console.print()
         UI.print("[bold blue]BALANCE DEL ESCANEO:[/bold blue]", indent=False)
         UI.print(f"• Total procesados:     [bold]{plan.total_scanned}[/] snapshots")
@@ -931,56 +933,73 @@ class DisplaySnapshotPlan:
     @classmethod
     def show_alerts(cls, plan: ImportPlan, sample_path: str | None = None) -> None:
         """Muestra advertencias para versiones incompatibles y archivos corruptos."""
-        if not plan.needs_upgrade_items and not plan.corrupted_items:
+        if (
+            not plan.needs_upgrade_items
+            and not plan.ahead_items
+            and not plan.corrupted_items
+        ):
             return
 
         UI.print("[bold red]ATENCIÓN REQUERIDA:[/bold red]", indent=False)
         ui_logger.warning("=== ATENCIÓN REQUERIDA ===")
 
+        # Alerta para snapshots de versiones futuras (AHEAD)
+        if plan.ahead_items:
+            count = len(plan.ahead_items)
+            console.print(
+                f"  [bold red]▲[/] [bold]{count}[/] snapshot(s) generados por una versión más reciente de toTelegram:"
+            )
+            for insp in plan.ahead_items[:5]:
+                console.print(
+                    f"      [bright_black]• {insp.path.name}[/] [dim](v{insp.detected_version})[/]"
+                )
+
+            UI.educational_tip(
+                message="Tu versión de toTelegram no puede leer estos snapshots porque fueron creados con una versión más nueva.\n"
+                "Actualiza toTelegram para habilitar la compatibilidad.",
+                title="Actualización requerida",
+                commands=["pip install --upgrade totelegram"],
+                spacing="top",
+                border_style="red",
+            )
+            console.print()
+
+        # Alerta para snapshots antiguos (NEEDS_UPGRADE / OUTDATED)
         if plan.needs_upgrade_items:
             count = len(plan.needs_upgrade_items)
-            msg = f"! {count} snapshot(s) en formato antiguo (pre-v6.0) detectados:"
             console.print(
-                f"  [yellow]![/] [bold]{count}[/] snapshot(s) en formato antiguo (pre-v6.0) no son compatibles directamente:"
+                f"  [yellow]![/] [bold]{count}[/] snapshot(s) en formato antiguo no son compatibles con este estándar:"
             )
-            ui_logger.warning(f"  {msg}")
-
             for insp in plan.needs_upgrade_items[:5]:
                 ver = insp.detected_version or "antigua"
                 console.print(
                     f"      [bright_black]• {insp.path.name}[/] [dim](versión detectada: {ver})[/]"
                 )
-                ui_logger.warning(f"      • {insp.path.name} ({ver})")
 
             if count > 5:
                 console.print(f"      [dim]... y {count - 5} archivos más.[/dim]")
-                ui_logger.warning(f"      ... y {count - 5} archivos más.")
 
             UI.educational_tip(
                 message="Esta versión de toTelegram opera exclusivamente con el estándar v6.0 (.ttape y .json.xz).\n"
-                "Para migrar snapshots históricos masivos a Telegram, utiliza la herramienta de migración (rama migration).",
-                title="Snapshots heredados",
+                "Los snapshots de versiones descontinuadas deben regenerarse o volver a subirse.",
+                title="Snapshots descontinuados",
                 spacing="top",
                 border_style="yellow",
             )
             console.print()
 
+        # Alerta para snapshots corruptos
         if plan.corrupted_items:
             count = len(plan.corrupted_items)
-            msg = f"X {count} snapshot(s) corruptos o con formato inválido:"
             console.print(
                 f"  [bold red]X[/] [bold]{count}[/] snapshot(s) corruptos o con formato inválido:"
             )
-            ui_logger.error(f"  {msg}")
-
             for insp in plan.corrupted_items[:5]:
                 err = insp.error_detail or "Error de parsing"
                 console.print(f"      [red]• {insp.path.name}:[/] [dim]{err}[/]")
-                ui_logger.error(f"      • {insp.path.name}: {err}")
 
             if count > 5:
                 console.print(f"      [dim]... y {count - 5} archivos más.[/dim]")
-                ui_logger.error(f"      ... y {count - 5} archivos más.")
             console.print()
 
 

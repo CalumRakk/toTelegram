@@ -1,6 +1,4 @@
 import logging
-import tempfile
-from pathlib import Path
 from typing import List, cast
 
 import typer
@@ -10,11 +8,7 @@ from pyrogram.types import Message
 from totelegram.cli.state import CLIState
 from totelegram.cli.ui import UI, console
 from totelegram.models import TelegramUser
-from totelegram.packaging.importer import (
-    SnapshotImporter,
-    SnapshotImportPlanner,
-    SnapshotInspector,
-)
+from totelegram.packaging.importer import SnapshotImporter
 from totelegram.packaging.indexer import TapeIndexService
 from totelegram.schemas import VALUE_NOT_SET, Commands
 
@@ -120,55 +114,27 @@ def index_tapes(
         except Exception:  # noqa: S110
             pass
 
-        # Proceso de descarga de .ttape e inserción masiva en SQLite
+        # Proceso de descarga e inserción delegado en SnapshotImporter
         console.print()
-        succeeded = 0
-        total_errors = []
+        with console.status(
+            "[bold green]Descargando e indexando cintas...[/]"
+        ) as status:
 
-        with (
-            tempfile.TemporaryDirectory() as temp_dir,
-            console.status(
-                "[bold green]Descargando e indexando cintas...[/]"
-            ) as status,
-        ):
-            inspections = []
-
-            for idx, msg in enumerate(messages_to_process, 1):
-                doc_name = (
-                    msg.document.file_name if msg.document else f"tape_{msg.id}.ttape"
-                )
+            def on_progress(cur: int, tot: int, name: str):
                 status.update(
-                    f"[bold green]Descargando contenedor ({idx}/{total_targets}):[/] {doc_name}"
+                    f"[bold green]Indexando inventario ({cur}/{tot}):[/] {name}"
                 )
 
-                temp_file = Path(temp_dir) / f"{msg.id}_{doc_name}"
-                downloaded = client.download_media(msg, file_name=str(temp_file))
+            result = SnapshotImporter.rehydrate_from_messages(
+                client=client,
+                messages=messages_to_process,
+                db=db,
+                owner=owner,
+                on_progress=on_progress,
+            )
 
-                if downloaded and temp_file.exists():
-                    insp = SnapshotInspector.inspect_file(temp_file)
-                    inspections.append(insp)
-                else:
-                    total_errors.append((doc_name, "Fallo al descargar desde Telegram"))
-
-            # Planificar y aplicar mutaciones usando el volcado SQLite directo (Fase 3)
-            if inspections:
-                status.update(
-                    "[bold green]Volcando inventario a la base de datos local...[/]"
-                )
-                plan = SnapshotImportPlanner.plan(inspections)
-
-                def on_apply_progress(cur: int, tot: int, name: str):
-                    status.update(
-                        f"[bold green]Indexando inventario ({cur}/{tot}):[/] {name}"
-                    )
-
-                succeeded, errors = SnapshotImporter.apply_plan(
-                    plan=plan,
-                    db=db,
-                    owner=owner,
-                    on_progress=on_apply_progress,
-                )
-                total_errors.extend(errors)
+        succeeded = result.succeeded_count
+        total_errors = result.errors
 
         # Balance final
         UI.separator()

@@ -109,27 +109,11 @@ class TapeIndexService:
 
     def _silent_heal(self, messages: List["Message"]) -> int:
         """Descarga e indexa silenciosamente un grupo pequeño de mensajes .ttape."""
-        import tempfile
-        from pathlib import Path
+        from totelegram.packaging.importer import SnapshotImporter
 
-        from totelegram.packaging.importer import (
-            SnapshotImporter,
-            SnapshotImportPlanner,
-            SnapshotInspector,
+        result = SnapshotImporter.rehydrate_from_messages(
+            client=self.client,
+            messages=messages,
+            db=self.db,
         )
-
-        healed = 0
-        with tempfile.TemporaryDirectory() as temp_dir:
-            inspections = []
-            for msg in messages:
-                filename = msg.document.file_name if msg.document else "tape.ttape"
-                temp_path = Path(temp_dir) / filename
-                if self.client.download_media(msg, file_name=str(temp_path)):
-                    inspections.append(SnapshotInspector.inspect_file(temp_path))
-
-            if inspections:
-                plan = SnapshotImportPlanner.plan(inspections)
-                succeeded, _ = SnapshotImporter.apply_plan(plan, self.db)
-                healed = succeeded
-
-        return healed
+        return result.succeeded_count

@@ -1,9 +1,9 @@
+# totelegram/discovery.py
+
 import logging
 import math
 import re
-import tempfile
 import time
-from pathlib import Path
 from typing import TYPE_CHECKING, List, cast
 
 import peewee
@@ -12,13 +12,8 @@ from pyrogram.errors import RPCError
 
 from totelegram.common.helpers import batched
 from totelegram.database import db_transaction
-from totelegram.models import Job, Payload, RemotePayload, TelegramUser
-from totelegram.packaging.importer import (
-    InspectionStatus,
-    SnapshotImporter,
-    SnapshotImportPlanner,
-    SnapshotInspector,
-)
+from totelegram.models import Job, Payload, RemotePayload
+from totelegram.packaging.importer import SnapshotImporter
 from totelegram.schemas import AvailabilityState, JobStatus
 from totelegram.types import AvailabilityReport, DuplicateCandidate
 
@@ -137,9 +132,9 @@ class DiscoveryService:
         return duplicates
 
     def _discover_and_hydrate_jit(self, job: Job) -> bool:
-        """Busca el snapshot del recurso en Telegram. Si lo encuentra, lo descarga e hidrata la DB.
+        """Busca el snapshot del recurso en Telegram. Si lo encuentra, delega su hidratación en SQLite.
 
-        Retorna True si encontró y procesó un snapshot con éxito.
+        Retorna True si encontró y asimiló un snapshot con éxito.
         """
         from totelegram.telegram.captions import ManifestCaption
 
@@ -152,7 +147,6 @@ class DiscoveryService:
         try:
             from pyrogram.types import Message
 
-            # Búsqueda nativa indexada por documento y hashtag
             found_messages = cast(
                 List[Message],
                 list(
@@ -182,67 +176,25 @@ class DiscoveryService:
                 return False
 
             logger.info(
-                f"Snapshot detectado en Telegram (Msg ID: {manifest_msg.id}). Descargando para hidratar DB..."
+                f"Snapshot detectado en Telegram (Msg ID: {manifest_msg.id}). Hidratando DB..."
             )
 
-            # Descargar a directorio temporal aislado
-            with tempfile.TemporaryDirectory() as temp_dir:
-                ext = (
-                    ".ttape"
-                    if manifest_msg.document.file_name.endswith(".ttape")
-                    else ".json.xz"
+            # Delegación directa al motor centralizado
+            succeeded = SnapshotImporter.rehydrate_from_message(
+                client=self.client,
+                message=manifest_msg,
+                db=self.db,
+            )
+
+            if succeeded:
+                logger.info(
+                    f"Hidratación JIT completada con éxito para Job {job.id} "
+                    f"(Snapshot Msg ID: {manifest_msg.id})"
                 )
-                temp_snapshot_path = (
-                    Path(temp_dir) / f"snapshot_{target_short_hash}{ext}"
-                )
+            else:
+                logger.warning(f"Fallo al aplicar la importación JIT para Job {job.id}")
 
-                downloaded = self.client.download_media(
-                    message=manifest_msg,
-                    file_name=str(temp_snapshot_path),
-                )
-
-                if not downloaded or not temp_snapshot_path.exists():
-                    logger.warning(
-                        "Fallo al descargar el archivo snapshot de Telegram durante JIT."
-                    )
-                    return False
-
-                # Inspeccionar y Planificar la importación
-                inspection = SnapshotInspector.inspect_file(temp_snapshot_path)
-                if (
-                    inspection.status != InspectionStatus.VALID
-                    or not inspection.manifest
-                ):
-                    logger.warning(
-                        f"Snapshot en Telegram corrupto o no válido ({inspection.error_detail})."
-                    )
-                    return False
-
-                plan = SnapshotImportPlanner.plan([inspection])
-
-                # Resolver propietario actual para vincular remotos
-                me = self.client.get_me()
-                owner = TelegramUser.get_or_create_from_tg(me) if me else None
-
-                # Aplicar mutaciones en la DB persistiendo el snapshot_message_id
-                succeeded, errors = SnapshotImporter.apply_plan(
-                    plan=plan,
-                    db=self.db,
-                    owner=owner,
-                    snapshot_message_id=manifest_msg.id,
-                )
-
-                if succeeded > 0:
-                    logger.info(
-                        f"Hidratación JIT completada con éxito para Job {job.id} "
-                        f"(Snapshot Msg ID: {manifest_msg.id})"
-                    )
-                    return True
-                else:
-                    logger.warning(
-                        f"Errores aplicando plan de importación JIT: {errors}"
-                    )
-                    return False
+            return succeeded
 
         except RPCError as e:
             logger.warning(f"Error de Telegram durante búsqueda JIT: {e}")

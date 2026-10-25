@@ -2,10 +2,16 @@ import enum
 import json
 import logging
 import lzma
+import re
+import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable, List, Tuple, cast
+from typing import TYPE_CHECKING, Callable, List, Tuple, cast
+
+if TYPE_CHECKING:
+    from pyrogram.client import Client
+    from pyrogram.types import Message
 
 import peewee
 
@@ -37,7 +43,8 @@ logger = logging.getLogger(__name__)
 
 class InspectionStatus(str, enum.Enum):
     VALID = "valid"  # UploadManifest v6.0 íntegro
-    NEEDS_UPGRADE = "needs_upgrade"  # Versión legacy (requiere rama de migración)
+    NEEDS_UPGRADE = "needs_upgrade"  # Versión anterior incompatible (< 6.0)
+    AHEAD = "ahead"  # Versión más reciente que requiere actualizar el cliente (> 6.0)
     CORRUPTED = "corrupted"  # Archivo corrupto o JSON/ZIP inválido
 
 
@@ -62,6 +69,25 @@ class PlanAction(str, enum.Enum):
 
 
 # DTOs DEL DIFERENCIAL Y MUTACIONES
+
+
+@dataclass
+class RehydrationResult:
+    """Resultado consolidado de una operación de rehidratación desde Telegram."""
+
+    succeeded_count: int
+    total_processed: int
+    errors: List[Tuple[str, str]] = field(default_factory=list)
+
+    @property
+    def is_success(self) -> bool:
+        """Indica si al menos un recurso fue rehidratado sin errores."""
+        return self.succeeded_count > 0 and len(self.errors) == 0
+
+    @property
+    def has_changes(self) -> bool:
+        """Indica si hubo mutaciones efectivas en la base de datos."""
+        return self.succeeded_count > 0
 
 
 @dataclass
@@ -121,6 +147,7 @@ class SnapshotInspection:
     manifest: UploadManifest | None = None
     detected_version: str | None = None
     error_detail: str | None = None
+    message_id: int | None = None
 
 
 @dataclass
@@ -156,8 +183,6 @@ class PlanItem:
 
 @dataclass
 class ImportPlan:
-    """El contenedor maestro que organiza el escaneo en sus cubetas limpias."""
-
     # Silenciosos: completamente al día (solo suman a la estadística)
     synced_count: int = 0
 
@@ -169,6 +194,7 @@ class ImportPlan:
 
     # Atención requerida externa
     needs_upgrade_items: List[SnapshotInspection] = field(default_factory=list)
+    ahead_items: List[SnapshotInspection] = field(default_factory=list)
     corrupted_items: List[SnapshotInspection] = field(default_factory=list)
 
     @property
@@ -178,6 +204,7 @@ class ImportPlan:
             + len(self.items)
             + len(self.conflicts)
             + len(self.needs_upgrade_items)
+            + len(self.ahead_items)
             + len(self.corrupted_items)
         )
 
@@ -192,11 +219,23 @@ class ImportPlan:
         return [i for i in self.items if i.is_partial]
 
 
+def _parse_version_tuple(ver_str: str) -> tuple[int, ...]:
+    """Convierte cadenas como '6.0', 'v7.1' o '6' en tuplas comparables (6, 0)."""
+    try:
+        nums = re.findall(r"\d+", str(ver_str))
+        return tuple(map(int, nums)) if nums else (0,)
+    except Exception:
+        return (0,)
+
+
 class SnapshotInspector:
     """Inspecciona y valida archivos snapshot v6.0 (.ttape y .json.xz)."""
 
     @classmethod
     def inspect_file(cls, path: Path) -> SnapshotInspection:
+        manifest: UploadManifest | None = None
+        raw_version: str | None = None
+
         # Caso 1: Contenedor híbrido .ttape (Carpetas)
         if path.suffix == ".ttape" or path.name.endswith(".ttape"):
             try:
@@ -207,12 +246,7 @@ class SnapshotInspector:
                         error_detail="Contenedor .ttape inválido o faltan artefactos requeridos.",
                     )
                 manifest = TapeContainer.read_manifest(path)
-                return SnapshotInspection(
-                    path=path,
-                    status=InspectionStatus.VALID,
-                    manifest=manifest,
-                    detected_version=manifest.manifest_version,
-                )
+                raw_version = manifest.manifest_version
             except Exception as e:
                 return SnapshotInspection(
                     path=path,
@@ -221,7 +255,7 @@ class SnapshotInspector:
                 )
 
         # Caso 2: Snapshot de archivo individual (.json.xz)
-        if path.suffix == ".xz" or path.name.endswith(".json.xz"):
+        elif path.suffix == ".xz" or path.name.endswith(".json.xz"):
             try:
                 with lzma.open(path, "rt", encoding="utf-8") as f:
                     raw_data = json.load(f)
@@ -239,36 +273,54 @@ class SnapshotInspector:
                     error_detail="El contenido no es un objeto JSON válido.",
                 )
 
-            ver = str(raw_data.get("manifest_version", "unknown"))
-            if ver == MANIFEST_VERSION:
+            raw_version = str(raw_data.get("manifest_version", "unknown"))
+            if raw_version == MANIFEST_VERSION:
                 try:
                     manifest = UploadManifest.model_validate(raw_data)
-                    return SnapshotInspection(
-                        path=path,
-                        status=InspectionStatus.VALID,
-                        manifest=manifest,
-                        detected_version=ver,
-                    )
                 except Exception as e:
                     return SnapshotInspection(
                         path=path,
                         status=InspectionStatus.CORRUPTED,
                         error_detail=f"Esquema v{MANIFEST_VERSION} inválido: {e}",
-                        detected_version=ver,
+                        detected_version=raw_version,
                     )
-
-            # Versiones distintas a v6.0 se delegan a la rama de migración
+        else:
             return SnapshotInspection(
                 path=path,
-                status=InspectionStatus.NEEDS_UPGRADE,
-                detected_version=ver,
-                error_detail=f"Versión '{ver}' incompatible. Usa la rama de migración para actualizar a v{MANIFEST_VERSION}.",
+                status=InspectionStatus.CORRUPTED,
+                error_detail="Extensión no reconocida. Se requiere .ttape o .json.xz.",
+            )
+
+        # Validación comparativa de versión para cualquier formato
+        target_tuple = _parse_version_tuple(MANIFEST_VERSION)
+        detected_tuple = _parse_version_tuple(raw_version or "0")
+
+        if detected_tuple == target_tuple and manifest is not None:
+            return SnapshotInspection(
+                path=path,
+                status=InspectionStatus.VALID,
+                manifest=manifest,
+                detected_version=raw_version,
+            )
+
+        if detected_tuple > target_tuple:
+            return SnapshotInspection(
+                path=path,
+                status=InspectionStatus.AHEAD,
+                detected_version=raw_version,
+                error_detail=(
+                    f"Versión '{raw_version}' es más reciente que la soportada por este cliente (v{MANIFEST_VERSION}). "
+                    "Actualiza toTelegram: pip install --upgrade totelegram"
+                ),
             )
 
         return SnapshotInspection(
             path=path,
-            status=InspectionStatus.CORRUPTED,
-            error_detail="Extensión no reconocida. Se requiere .ttape o .json.xz.",
+            status=InspectionStatus.NEEDS_UPGRADE,
+            detected_version=raw_version,
+            error_detail=(
+                f"Versión '{raw_version}' es un formato anterior incompatible con este estándar (v{MANIFEST_VERSION})."
+            ),
         )
 
     @classmethod
@@ -300,6 +352,9 @@ class SnapshotImportPlanner:
         for insp in inspections:
             if insp.status == InspectionStatus.NEEDS_UPGRADE:
                 plan.needs_upgrade_items.append(insp)
+                continue
+            if insp.status == InspectionStatus.AHEAD:
+                plan.ahead_items.append(insp)
                 continue
             if insp.status == InspectionStatus.CORRUPTED:
                 plan.corrupted_items.append(insp)
@@ -584,6 +639,9 @@ class SnapshotImporter:
         """Aplica las mutaciones planificadas coordinando submétodos atómicos."""
         manifest = item.manifest
 
+        # Si no se pasó explícito, se hereda el message_id del mensaje de Telegram que originó la inspección
+        resolved_snapshot_msg_id = snapshot_message_id or item.inspection.message_id
+
         chat = cls._ensure_destination_chat(item.target_chat_id)
         owner_obj = cls._ensure_owner_user(owner, manifest)
         source = cls._upsert_source(item.existing_source, manifest.source)
@@ -592,7 +650,7 @@ class SnapshotImporter:
             source=source,
             chat=chat,
             manifest=manifest,
-            snapshot_message_id=snapshot_message_id,
+            snapshot_message_id=resolved_snapshot_msg_id,
         )
 
         payload_map = cls._sync_payloads(job, manifest.parts)
@@ -805,3 +863,137 @@ class SnapshotImporter:
 
             for batch in batched(member_inserts, 500):
                 TapeMember.insert_many(batch).on_conflict_ignore().execute()
+
+    @classmethod
+    def rehydrate_from_message(
+        cls,
+        client: "Client",
+        message: "Message",
+        db: peewee.Database,
+        owner: TelegramUser | None = None,
+    ) -> bool:
+        """Descarga e hidrata un único mensaje de Telegram (JIT)."""
+        if (
+            not message
+            or getattr(message, "empty", False) is True
+            or not message.document
+        ):
+            return False
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            doc_name = message.document.file_name or f"snapshot_{message.id}"
+            temp_file = Path(temp_dir) / doc_name
+
+            downloaded = client.download_media(message, file_name=str(temp_file))
+            if not downloaded or not temp_file.exists():
+                return False
+
+            inspection = SnapshotInspector.inspect_file(temp_file)
+            if inspection.status != InspectionStatus.VALID or not inspection.manifest:
+                return False
+
+            plan = SnapshotImportPlanner.plan([inspection])
+            if not plan.actionable_items:
+                return True
+
+            succeeded, _ = cls.apply_plan(
+                plan=plan,
+                db=db,
+                owner=owner,
+                snapshot_message_id=message.id,
+            )
+            return succeeded > 0
+
+    @classmethod
+    def rehydrate_from_messages(
+        cls,
+        client: "Client",
+        messages: List["Message"],
+        db: peewee.Database,
+        owner: TelegramUser | None = None,
+        on_progress: Callable[[int, int, str], None] | None = None,
+    ) -> RehydrationResult:
+        """Descarga e importa snapshots desde una lista de mensajes de Telegram.
+
+        Maneja un directorio temporal aislado, descarga los archivos, ejecuta
+        la inspección, planifica y aplica las mutaciones a la base de datos local.
+        """
+        import tempfile
+
+        if not messages:
+            return RehydrationResult(succeeded_count=0, total_processed=0, errors=[])
+
+        # Resolver el usuario actual de Telegram si no se proporcionó explícitamente
+        if owner is None:
+            try:
+                me = client.get_me()
+                if me:
+                    owner = TelegramUser.get_or_create_from_tg(me)
+            except Exception as e:
+                logger.warning(
+                    f"No se pudo resolver el usuario de Telegram durante la rehidratación: {e}"
+                )
+
+        total_processed = len(messages)
+        inspections: List[SnapshotInspection] = []
+        errors: List[Tuple[str, str]] = []
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_dir_path = Path(temp_dir)
+
+            for msg in messages:
+                doc = getattr(msg, "document", None)
+                doc_name = (
+                    doc.file_name if doc and doc.file_name else f"tape_{msg.id}.ttape"
+                )
+                temp_file = temp_dir_path / f"{msg.id}_{doc_name}"
+
+                try:
+                    downloaded = client.download_media(msg, file_name=str(temp_file))
+                    if not downloaded or not temp_file.exists():
+                        errors.append(
+                            (
+                                doc_name,
+                                f"Fallo al descargar el archivo desde Telegram (Msg ID: {msg.id}).",
+                            )
+                        )
+                        continue
+
+                    insp = SnapshotInspector.inspect_file(temp_file)
+                    if insp.status != InspectionStatus.VALID or not insp.manifest:
+                        err_msg = insp.error_detail or "Snapshot corrupto o inválido."
+                        errors.append((doc_name, err_msg))
+                        continue
+
+                    inspections.append(insp)
+
+                except Exception as e:
+                    logger.warning(
+                        f"Error procesando snapshot de Telegram (Msg ID {msg.id}): {e}"
+                    )
+                    errors.append((doc_name, str(e)))
+
+            if not inspections:
+                return RehydrationResult(
+                    succeeded_count=0,
+                    total_processed=total_processed,
+                    errors=errors,
+                )
+
+            # Planificar mutaciones diferenciales
+            plan = SnapshotImportPlanner.plan(inspections)
+
+            # Aplicar en base de datos local
+            succeeded, apply_errors = cls.apply_plan(
+                plan=plan,
+                db=db,
+                owner=owner,
+                on_progress=on_progress,
+            )
+            errors.extend(apply_errors)
+
+            return RehydrationResult(
+                succeeded_count=succeeded,
+                total_processed=total_processed,
+                errors=errors,
+            )
