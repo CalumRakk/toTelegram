@@ -691,10 +691,6 @@ class SnapshotImporter:
                 owner=owner_obj,
             )
 
-        # Actualizar estado a UPLOADED si todas las partes están completas
-        if Payload.total_pending_for_job(job) == 0 and job.status != JobStatus.UPLOADED:
-            job.set_uploaded()
-
     @classmethod
     def _resolve_or_publish_remote_snapshot(
         cls,
@@ -848,7 +844,6 @@ class SnapshotImporter:
                 chat=chat,
                 strategy=manifest.strategy,
                 config=config,
-                status=JobStatus.UPLOADED,
                 deleted_at=0,
                 last_verified_at=get_utc_now(),
             )

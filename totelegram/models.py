@@ -16,7 +16,7 @@ from totelegram.common.helpers import is_expired as helpers_is_expired
 from totelegram.database import db_transaction
 from totelegram.packaging.partitioner import StatelessPartitioner
 from totelegram.packaging.schemas import VirtualChunk, VirtualTapeMember
-from totelegram.schemas import JobStatus, ResourceType, SourceType, Strategy
+from totelegram.schemas import ResourceType, SourceType, Strategy
 from totelegram.telegram.client import parse_message_json_data
 
 if TYPE_CHECKING:
@@ -153,6 +153,7 @@ class Source(BaseModel):
     """Representa la identidad única de un recurso (Archivo o Carpeta)."""
 
     id: int
+    members: list
 
     path_str = cast(str, peewee.CharField())
     md5sum = cast(
@@ -326,6 +327,44 @@ class Source(BaseModel):
             )
         return changed
 
+    def index_tape_members(self, tape: tartape.Tape) -> None:
+        """Indexa los archivos de la cinta TAR directamente en TapeMember (ADR-009)."""
+        if not self.is_folder:
+            return
+
+        # Si ya fueron indexados para este Source, no repetir
+        if self.members.count() > 0:  # type: ignore
+            return
+
+        try:
+            assert tape.catalog_path is not None
+            with (
+                tartape.open_catalog(tape.catalog_path, read_only=True) as cat,
+                cat.db_session,
+            ):
+                cursor = cat.db_session.db.execute_sql(
+                    "SELECT arc_path, size, checksum, start_offset FROM track WHERE is_dir = 0"
+                )
+                tracks = cursor.fetchall()
+
+                member_inserts = [
+                    {
+                        "source": self,
+                        "relative_path": row[0],
+                        "size": row[1],
+                        "md5sum": row[2] or "",
+                        "start_offset": row[3] or 0,
+                    }
+                    for row in tracks
+                ]
+
+                for batch in batched(member_inserts, 500):
+                    TapeMember.insert_many(batch).on_conflict_ignore().execute()
+        except Exception as e:
+            logger.warning(
+                f"Aviso al indexar miembros de cinta para '{self.path_str}': {e}"
+            )
+
 
 class Job(BaseModel):
     chat_id: int
@@ -337,10 +376,32 @@ class Job(BaseModel):
 
     strategy = cast(Strategy, EnumField(Strategy))  # type: ignore
     config = cast(StrategyConfig, PydanticJSONField(StrategyConfig))
-    status = cast(JobStatus, EnumField(JobStatus))  # type: ignore
 
     deleted_at = cast(float, peewee.FloatField(default=0))
     last_verified_at = cast(datetime | None, peewee.DateTimeField(null=True))
+
+    @property
+    def is_deleted(self) -> bool:
+        """Indica si el Job fue cancelado o descartado."""
+        return self.deleted_at > 0
+
+    @property
+    def is_completed_local(self) -> bool:
+        """
+        Determina si todas las piezas físicas del Job están registradas en la base de datos local.
+        Es una verdad matemática pura derivada de Payload y RemotePayload (Cero Split-Brain).
+        """
+        if self.is_deleted:
+            return False
+        total = self.payloads.count()
+        if total == 0:
+            return False
+        return Payload.total_pending_for_job(self) == 0
+
+    @property
+    def has_remote_snapshot(self) -> bool:
+        """Indica si existe un snapshot remoto activo (no huérfano) en Telegram."""
+        return self.remote_snapshot is not None
 
     @property
     def path(self) -> Path:
@@ -375,15 +436,10 @@ class Job(BaseModel):
             )
             RemoteSnapshot.register(self, value, self.chat, owner)
 
-    def set_uploaded(self):
-        """Marca el Job como subido exitosamente."""
-        self.status = JobStatus.UPLOADED
-        self.save(only=[Job.status, Job.updated_at])
-
     def set_snapshot_published(
         self, message_id: int, owner: Optional["TelegramUser"] = None
     ) -> "RemoteSnapshot":
-        """Registra el RemoteSnapshot en Telegram y marca el Job como UPLOADED."""
+        """Registra el RemoteSnapshot en Telegram y actualiza la fecha de verificación."""
         if owner is None:
             first_remote = (
                 RemotePayload.select().join(Payload).where(Payload.job == self).first()
@@ -401,11 +457,10 @@ class Job(BaseModel):
             job=self,
             message_id=message_id,
             chat=self.chat,
-            owner=owner,
+            owner=owner,  # type: ignore
         )
         self.last_verified_at = get_utc_now()
-        self.status = JobStatus.UPLOADED
-        self.save(only=[Job.last_verified_at, Job.status, Job.updated_at])
+        self.save(only=[Job.last_verified_at, Job.updated_at])
         return remote
 
     @staticmethod
@@ -426,7 +481,6 @@ class Job(BaseModel):
                     source=source,
                     chat=chat,
                     strategy=strategy,
-                    status=JobStatus.PENDING,
                     config=config,
                 )
         except peewee.IntegrityError:
@@ -439,7 +493,7 @@ class Job(BaseModel):
     def get_for_source_in_chat(
         source: "Source", chat: "TelegramChat"
     ) -> Optional["Job"]:
-        """Devuelve el Job que existe para el source en el chat especificado."""
+        """Devuelve el Job activo que existe para el source en el chat especificado."""
         return Job.get_or_none(
             (Job.source == source) & (Job.chat == chat) & (Job.deleted_at == 0)
         )
@@ -461,23 +515,21 @@ class Job(BaseModel):
         ).execute()
 
         self.deleted_at = time.time()
-        self.status = JobStatus.DELETED
-        self.save(only=[Job.deleted_at, Job.status, Job.updated_at])
+        self.save(only=[Job.deleted_at, Job.updated_at])
 
         logger.debug(f"Job {self.id} invalidado y remotos orfanados.")
 
     def prepare_chunks(self, path: Path, settings) -> List["Payload"]:
-        """Orquesta el particionado físico delegando en StatelessPartitioner."""
         if self.payloads.count() > 0:
             return cast(
                 List["Payload"], list(self.payloads.order_by(Payload.sequence_index))
             )
 
         if self.source.type == SourceType.FOLDER:
-            _, chunks, members = StatelessPartitioner.partition_folder(
+            _, chunks, _ = StatelessPartitioner.partition_folder(
                 path, self.config.tg_max_size, settings.exclude_files
             )
-            return self._persist_folder_chunks(chunks, members)
+            return self._persist_chunks(chunks)
         else:
             chunks = StatelessPartitioner.partition_file(
                 path, self.config.tg_max_size, self.source.md5sum
@@ -544,11 +596,7 @@ class Job(BaseModel):
 
     def is_fresh(self) -> bool:
         """Determina si la verificación JIT del Job aún es confiable."""
-        if (
-            not self.last_verified_at
-            or self.status == JobStatus.DELETED
-            or self.deleted_at > 0
-        ):
+        if not self.last_verified_at or self.is_deleted:
             return False
         return not helpers_is_expired(self.last_verified_at, grace_period_seconds=1800)
 

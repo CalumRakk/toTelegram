@@ -7,7 +7,7 @@ from pyrogram.types import Message
 from totelegram.database import db_transaction
 from totelegram.engine.factory import PayloadStreamFactory
 from totelegram.engine.strategies.base import JobStrategy
-from totelegram.models import Job, RemotePayload
+from totelegram.models import Job, Payload, RemotePayload
 from totelegram.types import AvailabilityReport, StrategyResult, UploadContext
 
 logger = logging.getLogger(__name__)
@@ -27,13 +27,20 @@ class SmartForwardStrategy(JobStrategy):
                 "SmartForwardStrategy requiere una lista de remotos válidos en el reporte."
             )
 
+        mirror_job = report.remotes[0].payload.job
         mirrors = {r.payload.sequence_index: r for r in report.remotes}
         logger.info(
             f"Iniciando Smart Forward para Job {job.id} desde {len(mirrors)} partes espejo."
         )
 
         with db_transaction(ctx.db):
-            job_adopted = job.adopt_job(report.remotes[0].payload.job)
+            # Limpiar payloads viejos que no tengan remotes vinculados para evitar colisiones
+            if job.payloads.count() > 0 and not any(
+                p.has_remote for p in cast(list[Payload], job.payloads)
+            ):
+                Payload.delete().where(Payload.job == job).execute()
+
+            job_adopted = job.adopt_job(mirror_job)
             payloads = job_adopted.prepare_chunks(job_adopted.source.path, ctx.settings)
 
         pieces_forwarded = 0

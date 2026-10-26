@@ -165,6 +165,21 @@ class DownloadEngine:
                 start_offset = track.start_offset or 0
                 expected_checksum = track.checksum
 
+                # CASO LÍMITE: Si el archivo mide 0 bytes (ej: __init__.py, .gitkeep), no cruza ningún volumen TAR
+                if file_size == 0:
+                    target_file.touch()
+                    logger.info(
+                        f"Archivo vacío '{relative_path}' restaurado directamente (0 bytes)."
+                    )
+                    return DownloadReport(
+                        source_filename=relative_path,
+                        output_path=target_file,
+                        total_bytes_downloaded=0,
+                        files_extracted=1,
+                        is_success=True,
+                        message=f"Archivo vacío '{relative_path}' restaurado directamente.",
+                    )
+
             tartape_slices = calculate_file_slices(
                 start_offset=start_offset,
                 file_size=file_size,

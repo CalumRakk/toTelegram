@@ -135,6 +135,9 @@ def parse_message_json_data(json_data: dict) -> Message:
 
     if "_" in chat_json:
         chat_json.pop("_")
+
+    # asegura 'type' si no viene en el JSON
+    chat_json.setdefault("type", "channel")
     chat = Chat(**chat_json)
 
     media_raw = data.get("media")

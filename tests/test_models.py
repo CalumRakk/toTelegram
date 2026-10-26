@@ -1,3 +1,5 @@
+# tests/test_models.py
+
 import json
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -12,11 +14,12 @@ from totelegram.models import (
     Job,
     Payload,
     RemotePayload,
+    RemoteSnapshot,
     Source,
     TelegramChat,
     TelegramUser,
 )
-from totelegram.schemas import JobStatus, SourceType, Strategy, StrategyConfig
+from totelegram.schemas import SourceType, Strategy, StrategyConfig
 
 
 class TestModelsArchitecture(unittest.TestCase):
@@ -63,14 +66,12 @@ class TestModelsArchitecture(unittest.TestCase):
             mimetype="application/octet-stream",
         )
 
-        # CASO 1: Archivo (150b) > Límite (100b) -> CHUNKED
         job_chunked = Job.formalize_intent(
             source, self.chat, is_premium=False, tg_limit=100
         )
         self.assertEqual(job_chunked.strategy, Strategy.CHUNKED)
         self.assertEqual(job_chunked.config.tg_max_size, 100)
 
-        # CASO 2: Archivo (150b) < Límite (200b) -> SINGLE
         job_single = Job.formalize_intent(
             source, self.chat_alternate, is_premium=True, tg_limit=200
         )
@@ -88,12 +89,11 @@ class TestModelsArchitecture(unittest.TestCase):
         )
 
         job = Job.formalize_intent(source, self.chat, is_premium=False, tg_limit=100)
-
         job_from_db = Job.get_by_id(job.id)
         self.assertEqual(job_from_db.config.tg_max_size, 100)
 
-    def test_job_prepare_chunks_and_payload_pending_count(self):
-        """Valida que prepare_chunks particione y calcule piezas pendientes."""
+    def test_job_derived_completion_state(self):
+        """Valida que is_completed_local se derive puramente de las piezas subidas."""
         with NamedTemporaryFile(delete=False) as tmp:
             tmp.write(b"x" * 250)
             tmp_path = Path(tmp.name)
@@ -112,7 +112,6 @@ class TestModelsArchitecture(unittest.TestCase):
                 source=source,
                 chat=self.chat,
                 strategy=Strategy.CHUNKED,
-                status=JobStatus.PENDING,
                 config=StrategyConfig(
                     tg_max_size=100, user_is_premium=False, app_version="0.9.15"
                 ),
@@ -121,21 +120,33 @@ class TestModelsArchitecture(unittest.TestCase):
             mock_settings = MagicMock(exclude_files=[])
             payloads = job.prepare_chunks(tmp_path, mock_settings)
 
-            # 250 bytes / 100 bytes = 3 partes (100, 100, 50)
+            # 3 partes generadas, 0 subidas -> No está completado
             self.assertEqual(len(payloads), 3)
-            self.assertEqual(Payload.total_pending_for_job(job), 3)
-            self.assertFalse(payloads[0].has_remote)
+            self.assertFalse(job.is_completed_local)
+            self.assertFalse(job.has_remote_snapshot)
 
-            # Subir la primera parte
-            mock_msg = MagicMock(id=999, chat=MagicMock(id=self.chat.id))
-            mock_msg.__str__.return_value = json.dumps(  # type: ignore
-                {"id": 999, "chat": {"id": self.chat.id}}
+            # Subir parte 1 de 3 -> Sigue incompleto
+            mock_msg1 = MagicMock(id=991, chat=MagicMock(id=self.chat.id), empty=False)
+            mock_msg1.__str__.return_value = json.dumps(
+                {"id": 991, "chat": {"id": self.chat.id}}
             )
+            RemotePayload.register_upload(payloads[0], mock_msg1, self.user)
+            self.assertFalse(job.is_completed_local)
 
-            RemotePayload.register_upload(payloads[0], mock_msg, self.user)
+            # Subir partes 2 y 3 -> Ahora es completado localmente sin flags almacenados
+            mock_msg2 = MagicMock(id=992, chat=MagicMock(id=self.chat.id), empty=False)
+            mock_msg2.__str__.return_value = json.dumps(
+                {"id": 992, "chat": {"id": self.chat.id}}
+            )
+            RemotePayload.register_upload(payloads[1], mock_msg2, self.user)
 
-            self.assertEqual(Payload.total_pending_for_job(job), 2)
-            self.assertTrue(Payload.get_by_id(payloads[0].id).has_remote)
+            mock_msg3 = MagicMock(id=993, chat=MagicMock(id=self.chat.id), empty=False)
+            mock_msg3.__str__.return_value = json.dumps(
+                {"id": 993, "chat": {"id": self.chat.id}}
+            )
+            RemotePayload.register_upload(payloads[2], mock_msg3, self.user)
+
+            self.assertTrue(job.is_completed_local)
 
         finally:
             if tmp_path.exists():
@@ -157,35 +168,29 @@ class TestModelsArchitecture(unittest.TestCase):
             filename_short="doc.pdf",
         )
 
-        # FIX: Declarar empty=False explícitamente en el mock
         mock_msg = MagicMock(id=505, chat=MagicMock(id=self.chat.id), empty=False)
-        mock_msg.__str__.return_value = json.dumps(  # type: ignore
+        mock_msg.__str__.return_value = json.dumps(
             {"id": 505, "chat": {"id": self.chat.id}}
         )
 
         remote = RemotePayload.register_upload(payload, mock_msg, self.user)
 
-        # Recién creado sin verificar -> No es fresh
         self.assertFalse(remote.is_fresh)
-
-        # Marcado como verificado ahora -> Es fresh
         remote.mark_verified(mock_msg)
         self.assertTrue(remote.is_fresh)
         self.assertFalse(remote.is_orphaned)
 
-        # Marcado como huérfano
         remote.mark_orphaned()
         self.assertTrue(remote.is_orphaned)
         self.assertFalse(remote.is_fresh)
 
-        # Verificación de expiración temporal (más de 15 minutos)
         remote.is_orphaned = False
         remote.last_verified_at = datetime.now(timezone.utc) - timedelta(minutes=20)
         remote.save()
         self.assertFalse(remote.is_fresh)
 
     def test_job_mark_deleted_orphans_remotes(self):
-        """Al marcar un Job como borrado, todos sus RemotePayload deben quedar huérfanos."""
+        """Al marcar un Job como borrado, is_deleted es True y orfana sus remotos."""
         source = Source.create(
             path_str="del.bin", md5sum="h_del", size=10, mtime=1.0, mimetype="bin"
         )
@@ -200,8 +205,8 @@ class TestModelsArchitecture(unittest.TestCase):
             filename_short="del.bin",
         )
 
-        mock_msg = MagicMock(id=777, chat=MagicMock(id=self.chat.id))
-        mock_msg.__str__.return_value = json.dumps(  # type: ignore
+        mock_msg = MagicMock(id=777, chat=MagicMock(id=self.chat.id), empty=False)
+        mock_msg.__str__.return_value = json.dumps(
             {"id": 777, "chat": {"id": self.chat.id}}
         )
         remote = RemotePayload.register_upload(payload, mock_msg, self.user)
@@ -209,16 +214,15 @@ class TestModelsArchitecture(unittest.TestCase):
         job.mark_deleted()
 
         job_refreshed = Job.get_by_id(job.id)
-        self.assertEqual(job_refreshed.status, JobStatus.DELETED)
+        self.assertTrue(job_refreshed.is_deleted)
         self.assertGreater(job_refreshed.deleted_at, 0)
+        self.assertFalse(job_refreshed.is_completed_local)
 
         remote_refreshed = RemotePayload.get_by_id(remote.id)
         self.assertTrue(remote_refreshed.is_orphaned)
 
     def test_remote_snapshot_lifecycle_and_job_properties(self):
         """Valida que RemoteSnapshot se registre y Job exponga sus propiedades dinámicamente."""
-        from totelegram.models import RemoteSnapshot
-
         source = Source.create(
             path_str="backup.tar",
             md5sum="hash_snap_model_test",
@@ -228,11 +232,10 @@ class TestModelsArchitecture(unittest.TestCase):
         )
         job = Job.formalize_intent(source, self.chat, False, 2000)
 
-        # Recién creado: no tiene snapshot remoto
         self.assertIsNone(job.remote_snapshot)
         self.assertIsNone(job.snapshot_message_id)
+        self.assertFalse(job.has_remote_snapshot)
 
-        # Registrar RemoteSnapshot
         remote_snap = RemoteSnapshot.register(
             job=job,
             message_id=9999,
@@ -240,29 +243,17 @@ class TestModelsArchitecture(unittest.TestCase):
             owner=self.user,
         )
 
-        # Ahora el Job resuelve dinámicamente el snapshot y su message_id
         self.assertIsNotNone(job.remote_snapshot)
         self.assertEqual(job.remote_snapshot.id, remote_snap.id)
         self.assertEqual(job.snapshot_message_id, 9999)
+        self.assertTrue(job.has_remote_snapshot)
         self.assertTrue(remote_snap.is_fresh)
         self.assertFalse(remote_snap.is_orphaned)
 
-        # Orfanar el snapshot: Job ya no lo ve como activo
         remote_snap.mark_orphaned()
         self.assertIsNone(job.remote_snapshot)
         self.assertIsNone(job.snapshot_message_id)
-
-        # Al llamar a mark_deleted en Job, orfana snapshots asociados
-        remote_snap_2 = RemoteSnapshot.register(
-            job=job, message_id=10000, chat=self.chat, owner=self.user
-        )
-        self.assertEqual(job.snapshot_message_id, 10000)
-
-        job.mark_deleted()
-        self.assertEqual(job.status, JobStatus.DELETED)
-        refreshed_snap = RemoteSnapshot.get_by_id(remote_snap_2.id)
-        self.assertTrue(refreshed_snap.is_orphaned)
-        self.assertIsNone(job.snapshot_message_id)
+        self.assertFalse(job.has_remote_snapshot)
 
 
 if __name__ == "__main__":

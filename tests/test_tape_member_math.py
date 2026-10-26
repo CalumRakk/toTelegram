@@ -95,6 +95,15 @@ class TestTapeMemberMath(unittest.TestCase):
                         f"Fallo en {vm.relative_path} parte {idx}: source_offset {calc.source_offset} != {frag.source_offset}",
                     )
 
+    def test_empty_file_slice_projection(self):
+        """Archivos de 0 bytes no deben generar fragmentos de corte."""
+        slices = tartape.calculate_file_slices(
+            start_offset=1000,
+            file_size=0,
+            volume_size=1024,
+        )
+        self.assertEqual(len(slices), 0)
+
 
 if __name__ == "__main__":
     unittest.main()

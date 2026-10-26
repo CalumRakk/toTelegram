@@ -412,6 +412,31 @@ class TestDiscoveryService(unittest.TestCase):
         r0_refreshed = RemotePayload.get_by_id(r0.id)
         self.assertTrue(r0_refreshed.is_orphaned)
 
+    def test_partial_resume_orphans_deleted_chunks(self):
+        """Si un Job incompleto tiene piezas que fueron borradas de Telegram,
+        la investigación JIT debe marcarlas como huérfanas antes de reanudar."""
+        # Se subió la parte 0 pero no la parte 1
+        msg0 = self._create_mock_tg_message(901, self.chat_target.id, 1000)
+        r0 = RemotePayload.register_upload(self.p0, msg0, self.user)
+
+        # Forzar que r0 haya expirado en frescura
+        r0.last_verified_at = datetime.now(timezone.utc) - timedelta(minutes=30)
+        r0.save()
+
+        # Simular que Telegram informa que el mensaje 901 fue borrado (vacío)
+        deleted_msg = MagicMock(id=901, empty=True, document=None)
+        self.mock_client.get_messages.return_value = [deleted_msg]
+
+        with patch("time.sleep", return_value=None):
+            report = self.discovery.investigate(self.job_target)
+
+        # Debe requerir subida completa porque la pieza 0 murió
+        self.assertEqual(report.state, AvailabilityState.NEEDS_UPLOAD)
+
+        # La pieza 0 debe haber quedado huérfana en la base de datos
+        r0_refreshed = RemotePayload.get_by_id(r0.id)
+        self.assertTrue(r0_refreshed.is_orphaned)
+
 
 if __name__ == "__main__":
     unittest.main()

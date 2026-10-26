@@ -14,7 +14,7 @@ from totelegram.common.helpers import batched
 from totelegram.database import db_transaction
 from totelegram.models import Job, Payload, RemotePayload
 from totelegram.packaging.importer import SnapshotImporter
-from totelegram.schemas import AvailabilityState, JobStatus
+from totelegram.schemas import AvailabilityState
 from totelegram.types import AvailabilityReport, DuplicateCandidate
 
 if TYPE_CHECKING:
@@ -215,7 +215,6 @@ class DiscoveryService:
             .join(RemoteSnapshot)
             .where(
                 (Job.source == job.source)
-                & (Job.status == JobStatus.UPLOADED)
                 & (Job.chat != job.chat)
                 & (Job.deleted_at == 0)
                 & (RemoteSnapshot.is_orphaned == False)
@@ -265,16 +264,9 @@ class DiscoveryService:
             return False
 
     def is_fulfilled_local(self, job: Job) -> bool:
-        """Verifica si el Job actual ya está completo en el destino.
-
-        Aplica fast-path de frescura (TTL 30m) y validación ligera del snapshot.
-        """
-        # Si el Job ya fue marcado como subido y tiene snapshot registrado
-        if (
-            job.status == JobStatus.UPLOADED
-            and job.snapshot_message_id
-            and job.deleted_at == 0
-        ):
+        """Verifica si el Job actual ya está completo en el destino."""
+        # Si el Job está completo en local y tiene snapshot registrado sin borrarse
+        if job.is_completed_local and job.has_remote_snapshot:
             # Camino ultrarrápido O(1): Si está fresco (< 30 min), es válido sin tocar la red
             if job.is_fresh:
                 logger.debug(
@@ -286,10 +278,11 @@ class DiscoveryService:
             logger.debug(
                 f"Job {job.id} expiró frescura TTL. Verificando snapshot en Telegram..."
             )
-            # Si el snapshot falló o fue borrado, _validate_job_snapshot_jit ya lo marcó como DELETED
-            return bool(self._validate_job_snapshot_jit(job))
+            if self._validate_job_snapshot_jit(job):
+                return True
+            # Si el snapshot en Telegram no existe o fue borrado, continuamos abajo para auditar los chunks
 
-        # Fallback para Jobs en curso o sin snapshot publicado: validación por lotes de chunks
+        # Recuperar todas las piezas que no estén huérfanas
         local_remotes = list(
             RemotePayload.select()
             .join(Payload)
@@ -297,10 +290,21 @@ class DiscoveryService:
             .order_by(Payload.sequence_index)
         )
 
+        # Si existen piezas previas (completas o parciales), verificamos que sigan vivas en Telegram
+        if local_remotes:
+            self._validate_jit_batch(local_remotes)
+
         expected = self._get_expected_count(job)
-        if len(local_remotes) == expected and expected > 0:
-            return self._validate_jit_batch(local_remotes)
-        return False
+
+        # Re-contar piezas válidas que sobrevivieron a la validación JIT
+        valid_remotes_count = (
+            RemotePayload.select()
+            .join(Payload)
+            .where((Payload.job == job) & (RemotePayload.is_orphaned == False))
+            .count()
+        )
+
+        return bool(valid_remotes_count == expected and expected > 0)
 
     def get_remotes(self, historical_jobs) -> List[RemotePayload] | None:
         """Valida que el Job espejo tenga todas sus partes en Telegram verificando su Snapshot y sus Chunks."""

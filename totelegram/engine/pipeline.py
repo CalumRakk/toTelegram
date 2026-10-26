@@ -6,10 +6,8 @@ from pathlib import Path
 from totelegram.database import db_transaction
 from totelegram.engine.planner import JobPlanner
 from totelegram.engine.strategies.base import StrategyResolver
-from totelegram.models import Payload
 from totelegram.packaging.publisher import SnapshotPublicationError, SnapshotPublisher
 from totelegram.packaging.snapshot import SnapshotService
-from totelegram.schemas import JobStatus
 from totelegram.types import JobExecutionResult, UploadContext
 
 logger = logging.getLogger(__name__)
@@ -58,22 +56,15 @@ class JobPipeline:
             snapshot_generated = False
 
             # Verificamos si todas las partes físicas están en Telegram
-            pending_pieces = Payload.total_pending_for_job(job)
-
-            if pending_pieces == 0:
+            if job.is_completed_local:
                 is_completed = True
 
-                # IDEMPOTENCIA: Si el snapshot aún no se ha publicado en Telegram
+                # Si no tiene RemoteSnapshot activo (o fue borrado en Telegram), auto-sanamos publicándolo
                 if job.remote_snapshot is None:
                     try:
-                        # Generar snapshot local (.json.xz o .ttape)
                         manifest, snapshot_path = SnapshotService.generate_snapshot(job)
                         snapshot_generated = True
 
-                        # Publicar snapshot en Telegram con caption estructurado
-                        self.ctx.observer.on_pause_start(
-                            0, "Publicando snapshot en Telegram"
-                        )
                         sent_msg = SnapshotPublisher.publish(
                             client=self.ctx.client,
                             chat_id=self.ctx.tg_chat.id,
@@ -81,11 +72,10 @@ class JobPipeline:
                             manifest=manifest,
                         )
 
-                        # Transacción atómica: vincular snapshot y sellar Job
                         with db_transaction(self.ctx.db):
                             job.set_snapshot_published(sent_msg.id, self.ctx.owner)
                             logger.info(
-                                f"Job {job.id} completado y sellado con RemoteSnapshot Msg ID: {sent_msg.id}"
+                                f"Job {job.id} auto-sanado y sellado con RemoteSnapshot Msg ID: {sent_msg.id}"
                             )
 
                     except SnapshotPublicationError as e:
@@ -94,10 +84,6 @@ class JobPipeline:
                         logger.exception(
                             f"Error inesperado en cierre de snapshot para Job {job.id}"
                         )
-                else:
-                    if job.status != JobStatus.UPLOADED:
-                        with db_transaction(self.ctx.db):
-                            job.set_uploaded()
 
             self.ctx.observer.on_job_complete(job, snapshot_generated)
 

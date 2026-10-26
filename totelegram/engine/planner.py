@@ -70,9 +70,6 @@ class JobPlanner:
                 tg_limit=tg_limit,
             )
 
-        with db_transaction(ctx.db):
-            job.prepare_chunks(path, ctx.settings)
-
         return job
 
     @classmethod
@@ -98,7 +95,9 @@ class JobPlanner:
             try:
                 tape = tartape.Tape(path)
                 tape.verify(deep=False, raise_exception=True)
-                return Source.get_or_create_from_tape(tape)
+                source = Source.get_or_create_from_tape(tape)
+                source.index_tape_members(tape)
+                return source
             except (peewee.DoesNotExist, TarIntegrityError):
                 logger.debug(
                     f"Cinta en {path.name} inexistente en DB o corrupta. Re-indexando..."
@@ -113,6 +112,8 @@ class JobPlanner:
                 overwrite=force,
                 auto_truncate=auto_truncate,
             )
-            return Source.create_from_tape(tape, exclusion_patterns)
+            source = Source.create_from_tape(tape, exclusion_patterns)
+            source.index_tape_members(tape)
+            return source
         except PathConstraintReportError as e:
             raise PathLengthExceededError(path) from e

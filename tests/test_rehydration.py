@@ -140,7 +140,7 @@ class TestRehydrationEngine(unittest.TestCase):
         job = Job.get_or_none(Job.source == source)
         assert job is not None
         self.assertIsNotNone(job)
-        self.assertEqual(job.status, JobStatus.UPLOADED)
+        self.assertTrue(job.is_completed_local)
         self.assertEqual(job.snapshot_message_id, 101)
 
         payloads = list(Payload.select().where(Payload.job == job))
