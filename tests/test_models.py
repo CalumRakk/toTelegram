@@ -215,6 +215,55 @@ class TestModelsArchitecture(unittest.TestCase):
         remote_refreshed = RemotePayload.get_by_id(remote.id)
         self.assertTrue(remote_refreshed.is_orphaned)
 
+    def test_remote_snapshot_lifecycle_and_job_properties(self):
+        """Valida que RemoteSnapshot se registre y Job exponga sus propiedades dinámicamente."""
+        from totelegram.models import RemoteSnapshot
+
+        source = Source.create(
+            path_str="backup.tar",
+            md5sum="hash_snap_model_test",
+            size=1000,
+            mtime=1.0,
+            mimetype="application/x-tar",
+        )
+        job = Job.formalize_intent(source, self.chat, False, 2000)
+
+        # Recién creado: no tiene snapshot remoto
+        self.assertIsNone(job.remote_snapshot)
+        self.assertIsNone(job.snapshot_message_id)
+
+        # Registrar RemoteSnapshot
+        remote_snap = RemoteSnapshot.register(
+            job=job,
+            message_id=9999,
+            chat=self.chat,
+            owner=self.user,
+        )
+
+        # Ahora el Job resuelve dinámicamente el snapshot y su message_id
+        self.assertIsNotNone(job.remote_snapshot)
+        self.assertEqual(job.remote_snapshot.id, remote_snap.id)
+        self.assertEqual(job.snapshot_message_id, 9999)
+        self.assertTrue(remote_snap.is_fresh)
+        self.assertFalse(remote_snap.is_orphaned)
+
+        # Orfanar el snapshot: Job ya no lo ve como activo
+        remote_snap.mark_orphaned()
+        self.assertIsNone(job.remote_snapshot)
+        self.assertIsNone(job.snapshot_message_id)
+
+        # Al llamar a mark_deleted en Job, orfana snapshots asociados
+        remote_snap_2 = RemoteSnapshot.register(
+            job=job, message_id=10000, chat=self.chat, owner=self.user
+        )
+        self.assertEqual(job.snapshot_message_id, 10000)
+
+        job.mark_deleted()
+        self.assertEqual(job.status, JobStatus.DELETED)
+        refreshed_snap = RemoteSnapshot.get_by_id(remote_snap_2.id)
+        self.assertTrue(refreshed_snap.is_orphaned)
+        self.assertIsNone(job.snapshot_message_id)
+
 
 if __name__ == "__main__":
     unittest.main()

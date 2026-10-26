@@ -9,6 +9,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable, List, Tuple, cast
 
+from totelegram.packaging.publisher import SnapshotPublicationError, SnapshotPublisher
+from totelegram.telegram.captions import ManifestCaption
+
 if TYPE_CHECKING:
     from pyrogram.client import Client
     from pyrogram.types import Message
@@ -608,6 +611,7 @@ class SnapshotImporter:
         owner: TelegramUser | None = None,
         on_progress: Callable[[int, int, str], None] | None = None,
         snapshot_message_id: int | None = None,
+        client: "Client | None" = None,
     ) -> Tuple[int, List[Tuple[str, str]]]:
         actionable = plan.actionable_items
         succeeded = 0
@@ -617,7 +621,10 @@ class SnapshotImporter:
             try:
                 with db_transaction(db):
                     cls._apply_item(
-                        item, owner, snapshot_message_id=snapshot_message_id
+                        item,
+                        owner,
+                        snapshot_message_id=snapshot_message_id,
+                        client=client,
                     )
                 succeeded += 1
             except Exception as e:
@@ -635,11 +642,11 @@ class SnapshotImporter:
         item: PlanItem,
         owner: TelegramUser | None,
         snapshot_message_id: int | None = None,
+        client: "Client | None" = None,
     ) -> None:
         """Aplica las mutaciones planificadas coordinando submétodos atómicos."""
         manifest = item.manifest
 
-        # Si no se pasó explícito, se hereda el message_id del mensaje de Telegram que originó la inspección
         resolved_snapshot_msg_id = snapshot_message_id or item.inspection.message_id
 
         chat = cls._ensure_destination_chat(item.target_chat_id)
@@ -650,6 +657,7 @@ class SnapshotImporter:
             source=source,
             chat=chat,
             manifest=manifest,
+            owner=owner_obj,
             snapshot_message_id=resolved_snapshot_msg_id,
         )
 
@@ -673,10 +681,92 @@ class SnapshotImporter:
         ):
             cls._bulk_ingest_tape_members(source, item.inspection.path)
 
+        # AUTO-ENLACE / PUBLICACIÓN EN TELEGRAM
+        # Si el Job no tiene RemoteSnapshot y tenemos cliente activo, resolvemos en Telegram
+        if not job.remote_snapshot and client is not None:
+            cls._resolve_or_publish_remote_snapshot(
+                client=client,
+                job=job,
+                item=item,
+                owner=owner_obj,
+            )
+
         # Actualizar estado a UPLOADED si todas las partes están completas
         if Payload.total_pending_for_job(job) == 0 and job.status != JobStatus.UPLOADED:
-            job.status = JobStatus.UPLOADED
-            job.save(only=[Job.status, Job.updated_at])
+            job.set_uploaded()
+
+    @classmethod
+    def _resolve_or_publish_remote_snapshot(
+        cls,
+        client: "Client",
+        job: Job,
+        item: PlanItem,
+        owner: TelegramUser,
+    ) -> None:
+        """
+        Busca si el snapshot ya existe en Telegram vía #src_<hash>.
+        Si existe, enlaza el RemoteSnapshot. Si no, lo sube y lo enlaza.
+        """
+        from pyrogram.types import Message
+
+        from totelegram.models import RemoteSnapshot
+
+        target_short_hash = job.source.short_hash
+        query = f"#src_{target_short_hash}"
+
+        # Comprobar si ya existe publicado en Telegram
+        try:
+            found_msgs = cast(
+                List[Message],
+                list(
+                    client.search_messages(
+                        chat_id=job.chat.id,
+                        query=query,
+                        limit=5,
+                    )  # type: ignore
+                ),
+            )
+            for m in found_msgs:
+                if not m.document or not m.caption:
+                    continue
+                parsed = ManifestCaption.parse(m.caption)
+                if parsed and parsed.source_short_hash == target_short_hash:
+                    RemoteSnapshot.register(
+                        job=job,
+                        message_id=m.id,
+                        chat=job.chat,
+                        owner=owner,
+                    )
+                    logger.info(
+                        f"Snapshot existente enlazado para Job {job.id} (Msg ID: {m.id})."
+                    )
+                    return
+        except Exception as e:
+            logger.warning(f"Aviso buscando snapshot existente en Telegram: {e}")
+
+        # Si no existe y el archivo físico está presente en disco, lo publicamos
+        snapshot_file = item.inspection.path
+        if snapshot_file.is_file():
+            try:
+                sent_msg = SnapshotPublisher.publish(
+                    client=client,
+                    chat_id=job.chat.id,
+                    snapshot_path=snapshot_file,
+                    manifest=item.manifest,
+                )
+                RemoteSnapshot.register(
+                    job=job,
+                    message_id=sent_msg.id,
+                    chat=job.chat,
+                    owner=owner,
+                )
+                logger.info(
+                    f"Snapshot publicado y enlazado para Job {job.id} (Msg ID: {sent_msg.id})."
+                )
+            except SnapshotPublicationError as e:
+                logger.warning(
+                    f"No se pudo auto-publicar el snapshot para Job {job.id}: {e}"
+                )
 
     @staticmethod
     def _ensure_destination_chat(chat_id: int) -> TelegramChat:
@@ -735,52 +825,44 @@ class SnapshotImporter:
         source: Source,
         chat: TelegramChat,
         manifest: UploadManifest,
+        owner: TelegramUser,
         snapshot_message_id: int | None,
     ) -> Job:
+        from totelegram.models import RemoteSnapshot
+
         if existing_job is not None:
-            if snapshot_message_id and not existing_job.snapshot_message_id:
-                existing_job.snapshot_message_id = snapshot_message_id
-                existing_job.last_verified_at = get_utc_now()
-                existing_job.save(
-                    only=[
-                        Job.snapshot_message_id,
-                        Job.last_verified_at,
-                        Job.updated_at,
-                    ]
-                )
-            return existing_job
+            job = existing_job
+        else:
+            job = Job.get_or_none(
+                (Job.source == source) & (Job.chat == chat) & (Job.deleted_at == 0)
+            )
 
-        job = Job.get_or_none(
-            (Job.source == source) & (Job.chat == chat) & (Job.deleted_at == 0)
-        )
-        if job is not None:
-            if snapshot_message_id and not job.snapshot_message_id:
-                job.snapshot_message_id = snapshot_message_id
-                job.last_verified_at = get_utc_now()
-                job.save(
-                    only=[
-                        Job.snapshot_message_id,
-                        Job.last_verified_at,
-                        Job.updated_at,
-                    ]
-                )
-            return job
+        if job is None:
+            config = StrategyConfig(
+                tg_max_size=manifest.chunk_size,
+                user_is_premium=False,
+                app_version=f"imported-{__VERSION__}",
+            )
+            job = Job.create(
+                source=source,
+                chat=chat,
+                strategy=manifest.strategy,
+                config=config,
+                status=JobStatus.UPLOADED,
+                deleted_at=0,
+                last_verified_at=get_utc_now(),
+            )
 
-        config = StrategyConfig(
-            tg_max_size=manifest.chunk_size,
-            user_is_premium=False,
-            app_version=f"imported-{__VERSION__}",
-        )
-        return Job.create(
-            source=source,
-            chat=chat,
-            strategy=manifest.strategy,
-            config=config,
-            status=JobStatus.UPLOADED,
-            deleted_at=0,
-            snapshot_message_id=snapshot_message_id,
-            last_verified_at=get_utc_now() if snapshot_message_id else None,
-        )
+        # Si tenemos el ID del snapshot y no está registrado, lo vinculamos
+        if snapshot_message_id and not job.remote_snapshot:
+            RemoteSnapshot.register(
+                job=job,
+                message_id=snapshot_message_id,
+                chat=chat,
+                owner=owner,
+            )
+
+        return job
 
     @staticmethod
     def _sync_payloads(job: Job, parts: list[RemotePart]) -> dict[int, Payload]:

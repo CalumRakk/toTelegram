@@ -18,6 +18,7 @@ from totelegram.packaging.importer import (
     InspectionStatus,
     RehydrationResult,
     SnapshotImporter,
+    SnapshotImportPlanner,
     SnapshotInspector,
 )
 from totelegram.packaging.schemas import (
@@ -132,10 +133,12 @@ class TestRehydrationEngine(unittest.TestCase):
 
         # Verificar que la DB fue rehidratada
         source = Source.get_or_none(Source.md5sum == "hash_doc_12345")
+        assert source is not None
         self.assertIsNotNone(source)
         self.assertEqual(source.path_str, "documento.pdf")
 
         job = Job.get_or_none(Job.source == source)
+        assert job is not None
         self.assertIsNotNone(job)
         self.assertEqual(job.status, JobStatus.UPLOADED)
         self.assertEqual(job.snapshot_message_id, 101)
@@ -248,6 +251,7 @@ class TestRehydrationEngine(unittest.TestCase):
             "viejo.bin", "hash_old", manifest_version="5.0"
         )
         insp_v5 = SnapshotInspector.inspect_file(snap_v5)
+        assert insp_v5.error_detail is not None
         self.assertEqual(insp_v5.status, InspectionStatus.NEEDS_UPGRADE)
         self.assertIn("incompatible", insp_v5.error_detail.lower())
         self.assertNotIn("rama de migración", insp_v5.error_detail.lower())
@@ -257,8 +261,47 @@ class TestRehydrationEngine(unittest.TestCase):
             "futuro.bin", "hash_fut", manifest_version="7.0"
         )
         insp_v7 = SnapshotInspector.inspect_file(snap_v7)
+        assert insp_v7.error_detail is not None
         self.assertEqual(insp_v7.status, InspectionStatus.AHEAD)
         self.assertIn("reciente", insp_v7.error_detail.lower())
+
+    def test_import_local_snapshot_auto_links_when_found_in_telegram(self):
+        """Valida que un snapshot local consulte Telegram y enlace su RemoteSnapshot si ya existía."""
+        valid_md5 = (
+            "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4"  # 32 caracteres hexadecimales reales
+        )
+        snap_file = self._create_synthetic_snapshot_file("auto_link.pdf", valid_md5)
+
+        # Simular que Telegram encuentra el mensaje con el caption correcto
+        from totelegram.telegram.captions import ManifestCaption
+
+        mock_caption = ManifestCaption(
+            resource_name="auto_link.pdf",
+            total_size=2048,
+            total_parts=1,
+            source_short_hash=valid_md5,
+            is_tape=False,
+        ).render()
+
+        mock_found_msg = self._create_mock_tg_message(909, "auto_link.pdf.json.xz")
+        mock_found_msg.caption = mock_caption
+        self.mock_client.search_messages.return_value = [mock_found_msg]
+
+        inspection = SnapshotInspector.inspect_file(snap_file)
+        plan = SnapshotImportPlanner.plan([inspection])
+
+        succeeded, _ = SnapshotImporter.apply_plan(
+            plan=plan,
+            db=self.db,
+            owner=self.user,
+            client=self.mock_client,
+        )
+
+        self.assertEqual(succeeded, 1)
+        job = Job.get()
+        # Debe haber enlazado el ID 909 de Telegram a través de RemoteSnapshot
+        self.assertIsNotNone(job.remote_snapshot)
+        self.assertEqual(job.snapshot_message_id, 909)
 
 
 if __name__ == "__main__":

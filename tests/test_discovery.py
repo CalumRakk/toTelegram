@@ -9,6 +9,7 @@ from totelegram.models import (
     Job,
     Payload,
     RemotePayload,
+    RemoteSnapshot,
     Source,
     TelegramChat,
     TelegramUser,
@@ -252,11 +253,16 @@ class TestDiscoveryService(unittest.TestCase):
             chat=self.chat_mirror,
             strategy=Strategy.CHUNKED,
             status=JobStatus.UPLOADED,
-            snapshot_message_id=8888,
             last_verified_at=datetime.now(timezone.utc),
             config=StrategyConfig(
                 tg_max_size=1000, user_is_premium=False, app_version="0.9.15"
             ),
+        )
+        RemoteSnapshot.register(
+            job=job_mirror,
+            message_id=8888,
+            chat=self.chat_mirror,
+            owner=self.user,
         )
         mp0 = Payload.create(
             job=job_mirror,
@@ -300,11 +306,16 @@ class TestDiscoveryService(unittest.TestCase):
             chat=self.chat_mirror,
             strategy=Strategy.CHUNKED,
             status=JobStatus.UPLOADED,
-            snapshot_message_id=8888,
             last_verified_at=datetime.now(timezone.utc),
             config=StrategyConfig(
                 tg_max_size=1000, user_is_premium=False, app_version="0.9.15"
             ),
+        )
+        RemoteSnapshot.register(
+            job=job_mirror,
+            message_id=8888,
+            chat=self.chat_mirror,
+            owner=self.user,
         )
         # Se crean las 2 piezas del Job espejo
         mp0 = Payload.create(
@@ -341,7 +352,6 @@ class TestDiscoveryService(unittest.TestCase):
             chat=self.chat_mirror,
             strategy=Strategy.CHUNKED,
             status=JobStatus.UPLOADED,
-            snapshot_message_id=None,  # Sin snapshot publicado
             config=StrategyConfig(
                 tg_max_size=1000, user_is_premium=False, app_version="0.9.15"
             ),

@@ -133,6 +133,7 @@ def import_snapshots(
                 db=db,
                 owner=owner,
                 on_progress=on_progress,
+                client=client,
             )
 
         UI.separator()

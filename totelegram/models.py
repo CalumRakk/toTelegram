@@ -2,6 +2,7 @@ import json
 import logging
 import time
 from datetime import datetime, timezone
+from itertools import batched
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Generator, List, Optional, Tuple, cast
 
@@ -24,7 +25,7 @@ if TYPE_CHECKING:
 
 
 from totelegram.common.files import create_md5sum_by_hashlib, get_mimetype
-from totelegram.common.helpers import batched, get_utc_now
+from totelegram.common.helpers import get_utc_now
 from totelegram.database import EnumField, PydanticJSONField, db_proxy
 from totelegram.schemas import StrategyConfig, TapeCatalog
 
@@ -339,17 +340,73 @@ class Job(BaseModel):
     status = cast(JobStatus, EnumField(JobStatus))  # type: ignore
 
     deleted_at = cast(float, peewee.FloatField(default=0))
-
-    snapshot_message_id = cast(int | None, peewee.BigIntegerField(null=True))
     last_verified_at = cast(datetime | None, peewee.DateTimeField(null=True))
 
     @property
     def path(self) -> Path:
         return Path(self.source.path_str)
 
+    @property
+    def remote_snapshot(self) -> Optional["RemoteSnapshot"]:
+        """Retorna el snapshot remoto activo (no huérfano) asociado a este Job."""
+        return RemoteSnapshot.get_or_none(
+            (RemoteSnapshot.job == self) & (RemoteSnapshot.is_orphaned == False)
+        )
+
+    @property
+    def snapshot_message_id(self) -> int | None:
+        """Propiedad de conveniencia: ID del mensaje en Telegram del snapshot activo."""
+        snap = self.remote_snapshot
+        if snap:
+            return snap.message_id
+        return getattr(self, "_temp_snapshot_message_id", None)
+
+    @snapshot_message_id.setter
+    def snapshot_message_id(self, value: int | None):
+        """Setter de compatibilidad para evitar errores durante Peewee.create."""
+        self._temp_snapshot_message_id = value
+        if (
+            value is not None
+            and getattr(self, "id", None)
+            and getattr(self, "chat", None)
+        ):
+            owner = TelegramUser.select().first() or TelegramUser.create(
+                id=0, first_name="System"
+            )
+            RemoteSnapshot.register(self, value, self.chat, owner)
+
     def set_uploaded(self):
+        """Marca el Job como subido exitosamente."""
         self.status = JobStatus.UPLOADED
         self.save(only=[Job.status, Job.updated_at])
+
+    def set_snapshot_published(
+        self, message_id: int, owner: Optional["TelegramUser"] = None
+    ) -> "RemoteSnapshot":
+        """Registra el RemoteSnapshot en Telegram y marca el Job como UPLOADED."""
+        if owner is None:
+            first_remote = (
+                RemotePayload.select().join(Payload).where(Payload.job == self).first()
+            )
+            owner = (
+                first_remote.owner if first_remote else TelegramUser.select().first()
+            )
+
+        if owner is None:
+            owner, _ = TelegramUser.get_or_create(
+                id=0, defaults={"first_name": "System"}
+            )
+
+        remote = RemoteSnapshot.register(
+            job=self,
+            message_id=message_id,
+            chat=self.chat,
+            owner=owner,
+        )
+        self.last_verified_at = get_utc_now()
+        self.status = JobStatus.UPLOADED
+        self.save(only=[Job.last_verified_at, Job.status, Job.updated_at])
+        return remote
 
     @staticmethod
     def formalize_intent(
@@ -358,10 +415,7 @@ class Job(BaseModel):
         is_premium: bool,
         tg_limit: int,
     ) -> "Job":
-        """
-        Crea un Job basado en la estrategía y la configuración de la cuenta.
-        """
-
+        """Crea un Job basado en la estrategia y la configuración de la cuenta."""
         strategy = Strategy.evaluate(source.size, tg_limit)
         config = StrategyConfig(
             tg_max_size=tg_limit, user_is_premium=is_premium, app_version=__VERSION__
@@ -397,11 +451,14 @@ class Job(BaseModel):
         return self
 
     def mark_deleted(self):
-
-        query = RemotePayload.update(is_orphaned=True).where(
+        """Invalida el Job y marca como huérfanos sus payloads y snapshots remotos."""
+        RemotePayload.update(is_orphaned=True).where(
             RemotePayload.payload << self.payloads
-        )
-        query.execute()
+        ).execute()
+
+        RemoteSnapshot.update(is_orphaned=True).where(
+            RemoteSnapshot.job == self
+        ).execute()
 
         self.deleted_at = time.time()
         self.status = JobStatus.DELETED
@@ -410,33 +467,24 @@ class Job(BaseModel):
         logger.debug(f"Job {self.id} invalidado y remotos orfanados.")
 
     def prepare_chunks(self, path: Path, settings) -> List["Payload"]:
-        """
-        Orquesta el particionado físico delegando en StatelessPartitioner
-        y persiste los resultados en la base de datos de manera atómica.
-        """
+        """Orquesta el particionado físico delegando en StatelessPartitioner."""
         if self.payloads.count() > 0:
             return cast(
                 List["Payload"], list(self.payloads.order_by(Payload.sequence_index))
             )
 
         if self.source.type == SourceType.FOLDER:
-            # Ejecutar motor físico
             _, chunks, members = StatelessPartitioner.partition_folder(
                 path, self.config.tg_max_size, settings.exclude_files
             )
-            # Guardar en base de datos local
             return self._persist_folder_chunks(chunks, members)
         else:
-            # Ejecutar motor físico
             chunks = StatelessPartitioner.partition_file(
                 path, self.config.tg_max_size, self.source.md5sum
             )
-            # Guardar en base de datos local
             return self._persist_chunks(chunks)
 
     def _persist_chunks(self, virtual_chunks: List[VirtualChunk]) -> List["Payload"]:
-        """Guarda la estructura de payloads del archivo en la base de datos."""
-
         payloads_data = [
             {
                 "job": self,
@@ -461,11 +509,9 @@ class Job(BaseModel):
         virtual_chunks: List[VirtualChunk],
         virtual_members: List[VirtualTapeMember],
     ) -> List["Payload"]:
-        """Guarda la estructura de volúmenes y el inventario de la carpeta (TapeMembers)."""
         database = self._meta.database
 
         with db_transaction(database):
-            # Inserción de Payloads
             payloads_data = [
                 {
                     "job": self,
@@ -480,7 +526,6 @@ class Job(BaseModel):
             ]
             Payload.insert_many(payloads_data).execute()
 
-            # Inserción masiva de TapeMembers con su start_offset
             member_inserts = [
                 {
                     "source": self.source,
@@ -497,22 +542,8 @@ class Job(BaseModel):
 
         return cast(List[Payload], list(self.payloads.order_by(Payload.sequence_index)))
 
-    def set_snapshot_published(self, message_id: int):
-        """Registra el mensaje del snapshot en Telegram y marca el Job como UPLOADED."""
-        self.snapshot_message_id = message_id
-        self.last_verified_at = get_utc_now()
-        self.status = JobStatus.UPLOADED
-        self.save(
-            only=[
-                Job.snapshot_message_id,
-                Job.last_verified_at,
-                Job.status,
-                Job.updated_at,
-            ]
-        )
-
     def is_fresh(self) -> bool:
-        """Determina si la verificación JIT del Job aún es confiable (30 minutos por defecto)."""
+        """Determina si la verificación JIT del Job aún es confiable."""
         if (
             not self.last_verified_at
             or self.status == JobStatus.DELETED
@@ -638,6 +669,67 @@ class RemotePayload(BaseModel):
     @property
     def message(self) -> "Message":
         return parse_message_json_data(self.json_metadata)
+
+
+class RemoteSnapshot(BaseModel):
+    """Representa el mensaje del Snapshot (.ttape / .json.xz) alojado en Telegram."""
+
+    id: int
+    job = cast(Job, peewee.ForeignKeyField(Job, backref="remote_snapshots"))
+    chat = cast(
+        TelegramChat, peewee.ForeignKeyField(TelegramChat, backref="remote_snapshots")
+    )
+    message_id = cast(int, peewee.BigIntegerField())
+    owner = cast(
+        TelegramUser, peewee.ForeignKeyField(TelegramUser, backref="remote_snapshots")
+    )
+
+    last_verified_at = cast(datetime | None, peewee.DateTimeField(null=True))
+    is_orphaned = cast(bool, peewee.BooleanField(default=False))
+
+    class Meta:  # type: ignore
+        indexes = ((("job", "is_orphaned"), False),)
+
+    @staticmethod
+    def register(
+        job: Job,
+        message_id: int,
+        chat: TelegramChat,
+        owner: TelegramUser,
+    ) -> "RemoteSnapshot":
+        """Registra el enlace al mensaje del snapshot en Telegram."""
+        return RemoteSnapshot.create(
+            job=job,
+            chat=chat,
+            message_id=message_id,
+            owner=owner,
+            last_verified_at=get_utc_now(),
+            is_orphaned=False,
+        )
+
+    def mark_orphaned(self):
+        """Marca el snapshot como eliminado en Telegram."""
+        self.is_orphaned = True
+        self.save(only=[RemoteSnapshot.is_orphaned, RemoteSnapshot.updated_at])
+
+    def mark_verified(self):
+        """Actualiza la fecha de verificación JIT del snapshot."""
+        self.last_verified_at = get_utc_now()
+        self.is_orphaned = False
+        self.save(
+            only=[
+                RemoteSnapshot.last_verified_at,
+                RemoteSnapshot.is_orphaned,
+                RemoteSnapshot.updated_at,
+            ]
+        )
+
+    @property
+    def is_fresh(self) -> bool:
+        """Determina si la verificación aún es confiable (30 minutos)."""
+        if self.is_orphaned or not self.last_verified_at:
+            return False
+        return not helpers_is_expired(self.last_verified_at, grace_period_seconds=1800)
 
 
 class TapeMember(BaseModel):

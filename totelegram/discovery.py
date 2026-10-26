@@ -206,18 +206,19 @@ class DiscoveryService:
     def get_historical_jobs(self, job: Job) -> peewee.ModelSelect:
         """Busca Jobs completados para el mismo Source en otros chats.
 
-        Solo se consideran Jobs que cuenten con un Snapshot publicado en Telegram.
+        Solo se consideran Jobs que cuenten con un Snapshot activo en Telegram.
         """
+        from totelegram.models import RemoteSnapshot
+
         return (
             Job.select()
+            .join(RemoteSnapshot)
             .where(
                 (Job.source == job.source)
                 & (Job.status == JobStatus.UPLOADED)
                 & (Job.chat != job.chat)
                 & (Job.deleted_at == 0)
-                & (
-                    Job.snapshot_message_id.is_null(False)  # type: ignore
-                )  # Exclusivo para Jobs con Snapshot
+                & (RemoteSnapshot.is_orphaned == False)
             )
             .order_by(Job.updated_at.desc())  # type: ignore
         )
@@ -225,9 +226,10 @@ class DiscoveryService:
     def _validate_job_snapshot_jit(self, job: Job) -> bool:
         """Comprueba mediante una sola llamada si el mensaje del snapshot sigue existiendo en Telegram.
 
-        Si el mensaje fue eliminado o el chat ya no es accesible, auto-sana el Job marcándolo como DELETED.
+        Si el snapshot no existe, solo orfana el RemoteSnapshot sin destruir el Job si las piezas están vivas.
         """
-        if not job.snapshot_message_id:
+        remote_snap = job.remote_snapshot
+        if not remote_snap:
             return False
 
         try:
@@ -235,30 +237,31 @@ class DiscoveryService:
 
             msg = cast(
                 Message | None,
-                self.client.get_messages(job.chat.id, job.snapshot_message_id),
+                self.client.get_messages(job.chat.id, remote_snap.message_id),
             )
 
             # Si el mensaje no existe o está vacío en Telegram
             if msg is None or getattr(msg, "empty", True) or not msg.document:
                 logger.warning(
-                    f"Snapshot (Msg {job.snapshot_message_id}) no encontrado en chat {job.chat.id}. "
-                    f"Auto-sanando Job {job.id} a DELETED."
+                    f"Snapshot (Msg {remote_snap.message_id}) no encontrado en chat {job.chat.id}. "
+                    f"Marcando RemoteSnapshot como huérfano."
                 )
                 with db_transaction(self.db):
-                    job.mark_deleted()
+                    remote_snap.mark_orphaned()
                 return False
 
             with db_transaction(self.db):
+                remote_snap.mark_verified()
                 job.mark_verified()
             return True
 
         except RPCError as e:
             logger.warning(
                 f"Error de acceso en Telegram para Snapshot (Chat: {job.chat.id}, "
-                f"Msg: {job.snapshot_message_id}): {e}. Auto-sanando Job {job.id} a DELETED."
+                f"Msg: {remote_snap.message_id}): {e}. Marcando como huérfano."
             )
             with db_transaction(self.db):
-                job.mark_deleted()
+                remote_snap.mark_orphaned()
             return False
 
     def is_fulfilled_local(self, job: Job) -> bool:
@@ -300,9 +303,9 @@ class DiscoveryService:
         return False
 
     def get_remotes(self, historical_jobs) -> List[RemotePayload] | None:
-        """Valida que el Job espejo tenga todas sus partes en Telegram verificando su Snapshot."""
+        """Valida que el Job espejo tenga todas sus partes en Telegram verificando su Snapshot y sus Chunks."""
         for hist_job in historical_jobs:
-            # Si expiró la frescura TTL, verificamos el Snapshot en Telegram
+            # Si el snapshot del espejo expiró frescura, comprobar que siga existiendo en Telegram
             if not hist_job.is_fresh and not self._validate_job_snapshot_jit(hist_job):
                 continue
 
@@ -314,11 +317,18 @@ class DiscoveryService:
             )
 
             expected_count = self._get_expected_count(hist_job)
-            if len(remotes) == expected_count:
-                logger.info(
-                    f"Espejo íntegro confirmado vía snapshot: Job {hist_job.id}"
+            if len(remotes) != expected_count:
+                continue
+
+            # Confirmar que los chunks existan en Telegram
+            if not self._validate_jit_batch(remotes):
+                logger.warning(
+                    f"Espejo Job {hist_job.id} tiene piezas huérfanas en Telegram. Omitiendo espejo."
                 )
-                return remotes
+                continue
+
+            logger.info(f"Espejo íntegro confirmado vía JIT batch: Job {hist_job.id}")
+            return remotes
 
         return None
 

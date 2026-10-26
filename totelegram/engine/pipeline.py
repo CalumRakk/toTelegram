@@ -64,7 +64,7 @@ class JobPipeline:
                 is_completed = True
 
                 # IDEMPOTENCIA: Si el snapshot aún no se ha publicado en Telegram
-                if job.snapshot_message_id is None:
+                if job.remote_snapshot is None:
                     try:
                         # Generar snapshot local (.json.xz o .ttape)
                         manifest, snapshot_path = SnapshotService.generate_snapshot(job)
@@ -73,7 +73,7 @@ class JobPipeline:
                         # Publicar snapshot en Telegram con caption estructurado
                         self.ctx.observer.on_pause_start(
                             0, "Publicando snapshot en Telegram"
-                        )  # Notificación visual
+                        )
                         sent_msg = SnapshotPublisher.publish(
                             client=self.ctx.client,
                             chat_id=self.ctx.tg_chat.id,
@@ -83,20 +83,18 @@ class JobPipeline:
 
                         # Transacción atómica: vincular snapshot y sellar Job
                         with db_transaction(self.ctx.db):
-                            job.set_snapshot_published(sent_msg.id)
+                            job.set_snapshot_published(sent_msg.id, self.ctx.owner)
                             logger.info(
-                                f"Job {job.id} completado y sellado con snapshot Msg ID: {sent_msg.id}"
+                                f"Job {job.id} completado y sellado con RemoteSnapshot Msg ID: {sent_msg.id}"
                             )
 
                     except SnapshotPublicationError as e:
                         logger.error(f"Fallo al publicar snapshot en Telegram: {e}")
-                        # Los chunks ya están en Telegram y DB; en la próxima ejecución solo reintentará publicar el snapshot
                     except Exception:
                         logger.exception(
                             f"Error inesperado en cierre de snapshot para Job {job.id}"
                         )
                 else:
-                    # El snapshot ya estaba publicado (ej. reanudación o re-ejecución)
                     if job.status != JobStatus.UPLOADED:
                         with db_transaction(self.ctx.db):
                             job.set_uploaded()
