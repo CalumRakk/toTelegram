@@ -19,7 +19,7 @@ from totelegram.models import (
     TelegramChat,
     TelegramUser,
 )
-from totelegram.schemas import SourceType, Strategy, StrategyConfig
+from totelegram.schemas import SourceType
 
 
 class TestModelsArchitecture(unittest.TestCase):
@@ -57,7 +57,7 @@ class TestModelsArchitecture(unittest.TestCase):
             )
 
     def test_job_contract_strategy_assignment(self):
-        """ADR-002: El Job determina la estrategia al nacer según los límites."""
+        """ADR-002: El Job fija el chunk_size como contrato inmutable y calcula is_chunked."""
         source = Source.create(
             path_str="data.bin",
             md5sum="hash1",
@@ -66,20 +66,18 @@ class TestModelsArchitecture(unittest.TestCase):
             mimetype="application/octet-stream",
         )
 
-        job_chunked = Job.formalize_intent(
-            source, self.chat, is_premium=False, tg_limit=100
-        )
-        self.assertEqual(job_chunked.strategy, Strategy.CHUNKED)
-        self.assertEqual(job_chunked.config.tg_max_size, 100)
+        job_chunked = Job.formalize_intent(source, self.chat, chunk_size=100)
+        self.assertTrue(job_chunked.is_chunked)
+        self.assertEqual(job_chunked.chunk_size, 100)
+        self.assertEqual(job_chunked.total_expected_parts, 2)
 
-        job_single = Job.formalize_intent(
-            source, self.chat_alternate, is_premium=True, tg_limit=200
-        )
-        self.assertEqual(job_single.strategy, Strategy.SINGLE)
-        self.assertEqual(job_single.config.tg_max_size, 200)
+        job_single = Job.formalize_intent(source, self.chat_alternate, chunk_size=200)
+        self.assertFalse(job_single.is_chunked)
+        self.assertEqual(job_single.chunk_size, 200)
+        self.assertEqual(job_single.total_expected_parts, 1)
 
     def test_job_immutability_integrity(self):
-        """Verifica que la configuración del Job queda persistida en JSON (ADR-002)."""
+        """Verifica que el contrato físico de partición (chunk_size) queda persistido (ADR-002)."""
         source = Source.create(
             path_str="test.zip",
             md5sum="hash_imm",
@@ -88,9 +86,9 @@ class TestModelsArchitecture(unittest.TestCase):
             mimetype="app/zip",
         )
 
-        job = Job.formalize_intent(source, self.chat, is_premium=False, tg_limit=100)
+        job = Job.formalize_intent(source, self.chat, chunk_size=100)
         job_from_db = Job.get_by_id(job.id)
-        self.assertEqual(job_from_db.config.tg_max_size, 100)
+        self.assertEqual(job_from_db.chunk_size, 100)
 
     def test_job_derived_completion_state(self):
         """Valida que is_completed_local se derive puramente de las piezas subidas."""
@@ -111,10 +109,7 @@ class TestModelsArchitecture(unittest.TestCase):
             job = Job.create(
                 source=source,
                 chat=self.chat,
-                strategy=Strategy.CHUNKED,
-                config=StrategyConfig(
-                    tg_max_size=100, user_is_premium=False, app_version="0.9.15"
-                ),
+                chunk_size=100,
             )
 
             mock_settings = MagicMock(exclude_files=[])
@@ -157,7 +152,7 @@ class TestModelsArchitecture(unittest.TestCase):
         source = Source.create(
             path_str="doc.pdf", md5sum="h_pdf", size=100, mtime=1.0, mimetype="app/pdf"
         )
-        job = Job.formalize_intent(source, self.chat, False, 1000)
+        job = Job.formalize_intent(source, self.chat, 1000)
         payload = Payload.create(
             job=job,
             sequence_index=0,
@@ -194,7 +189,7 @@ class TestModelsArchitecture(unittest.TestCase):
         source = Source.create(
             path_str="del.bin", md5sum="h_del", size=10, mtime=1.0, mimetype="bin"
         )
-        job = Job.formalize_intent(source, self.chat, False, 1000)
+        job = Job.formalize_intent(source, self.chat, 1000)
         payload = Payload.create(
             job=job,
             sequence_index=0,
@@ -230,7 +225,7 @@ class TestModelsArchitecture(unittest.TestCase):
             mtime=1.0,
             mimetype="application/x-tar",
         )
-        job = Job.formalize_intent(source, self.chat, False, 2000)
+        job = Job.formalize_intent(source, self.chat, 2000)
 
         self.assertIsNone(job.remote_snapshot)
         self.assertIsNone(job.snapshot_message_id)

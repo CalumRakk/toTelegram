@@ -123,8 +123,7 @@ class SnapshotService:
         )
 
         manifest = UploadManifest(
-            strategy=job.strategy,
-            chunk_size=job.config.tg_max_size,
+            chunk_size=job.chunk_size,
             created_at=job.created_at,
             chat_id=job.chat.id,
             owner_id=owner.id,

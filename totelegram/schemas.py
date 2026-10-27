@@ -41,16 +41,6 @@ class COLORS:
     TABLE_TITLE = "bold blue"
 
 
-class Strategy(str, enum.Enum):
-    SINGLE = "single-file"
-    CHUNKED = "pieces-file"
-
-    @classmethod
-    def evaluate(cls, file_size: int, tg_limit: int) -> "Strategy":
-        """Determina la estrategia de subida basado en el tamaño del archivo y el tamaño de Telegram."""
-        return cls.SINGLE if file_size <= tg_limit else cls.CHUNKED
-
-
 class JobStatus(str, enum.Enum):
     PENDING = "PENDING"
     UPLOADED = "UPLOADED"
@@ -81,16 +71,6 @@ class InfoField(BaseModel):
     default_value: Any
     is_sensitive: bool
     type_annotation: str
-
-
-class StrategyConfig(BaseModel):
-    # "Contrato de Partición".
-    tg_max_size: int
-
-    # Nos dice si el Job nació bajo el privilegio de una cuenta Premium.
-    user_is_premium: bool
-
-    app_version: str
 
 
 class ProfileRegistry(BaseModel):

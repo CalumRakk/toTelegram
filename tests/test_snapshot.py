@@ -20,8 +20,6 @@ from totelegram.packaging.snapshot import SnapshotService
 from totelegram.schemas import (
     JobStatus,
     SourceType,
-    Strategy,
-    StrategyConfig,
 )
 
 
@@ -76,13 +74,7 @@ class TestSnapshotService(unittest.TestCase):
         job = Job.create(
             source=source,
             chat=self.chat,
-            strategy=Strategy.SINGLE,
-            status=JobStatus.UPLOADED,
-            config=StrategyConfig(
-                tg_max_size=2000 * 1024 * 1024,
-                user_is_premium=False,
-                app_version="0.9.15",
-            ),
+            chunk_size=2000 * 1024 * 1024,
         )
 
         payload = Payload.create(
@@ -147,13 +139,7 @@ class TestSnapshotService(unittest.TestCase):
         job = Job.create(
             source=source,
             chat=self.chat,
-            strategy=Strategy.CHUNKED,
-            status=JobStatus.UPLOADED,
-            config=StrategyConfig(
-                tg_max_size=1000,
-                user_is_premium=False,
-                app_version="0.9.25",
-            ),
+            chunk_size=1000,
         )
 
         # Crear 2 payloads simulando volúmenes
@@ -224,11 +210,7 @@ class TestSnapshotService(unittest.TestCase):
         job = Job.create(
             source=source,
             chat=self.chat,
-            strategy=Strategy.SINGLE,
-            status=JobStatus.PENDING,
-            config=StrategyConfig(
-                tg_max_size=100, user_is_premium=False, app_version="0.9.15"
-            ),
+            chunk_size=100,
         )
 
         with self.assertRaises(ValueError):

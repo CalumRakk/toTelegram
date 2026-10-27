@@ -1,7 +1,4 @@
-# totelegram/discovery.py
-
 import logging
-import math
 import re
 import time
 from typing import TYPE_CHECKING, List, cast
@@ -396,4 +393,4 @@ class DiscoveryService:
         db_count = job.payloads.count()
         if db_count > 0:
             return db_count
-        return max(1, math.ceil(job.source.size / job.config.tg_max_size))
+        return job.total_expected_parts

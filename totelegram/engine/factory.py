@@ -106,7 +106,7 @@ class PayloadStreamFactory:
 
             raw_volume = tape.get_volume(
                 index=payload.sequence_index,
-                size=payload.job.config.tg_max_size,
+                size=payload.job.chunk_size,
                 observer=tar_observer,
             )
         else:

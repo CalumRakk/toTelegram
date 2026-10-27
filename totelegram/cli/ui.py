@@ -33,7 +33,6 @@ from totelegram.schemas import (
     AccessLevel,
     Commands,
     ScanReport,
-    Strategy,
 )
 from totelegram.telegram.types import ChatMatch
 
@@ -802,7 +801,7 @@ class DisplaySnapshotPlan:
             title_justify="left",
         )
         table.add_column("Acción", style="bold", no_wrap=True)
-        table.add_column("Estrategia", justify="center")
+        table.add_column("Estructura", justify="center")
         table.add_column("Recurso")
         table.add_column("Tamaño", justify="right")
         table.add_column("Chat Destino", style="dim")
@@ -818,15 +817,11 @@ class DisplaySnapshotPlan:
         for item in actionables:
             source = item.manifest.source
             total_parts = item.total_parts
-            strategy_str = (
-                "single"
-                if item.manifest.strategy == Strategy.SINGLE
-                else f"pieces {total_parts}"
-            )
+            structure_str = "1 parte" if total_parts == 1 else f"{total_parts} partes"
 
             table.add_row(
                 action_badges.get(item.action, str(item.action.value)),
-                strategy_str,
+                structure_str,
                 source.filename,
                 format_size(source.size),
                 str(item.target_chat_id),
@@ -836,15 +831,11 @@ class DisplaySnapshotPlan:
         for conf in plan.conflicts:
             source = conf.manifest.source
             total_parts = conf.total_parts
-            strategy_str = (
-                "single (1)"
-                if conf.manifest.strategy == Strategy.SINGLE
-                else f"pieces ({total_parts})"
-            )
+            structure_str = "1 parte" if total_parts == 1 else f"{total_parts} partes"
 
             table.add_row(
                 action_badges[PlanAction.CONFLICT],
-                strategy_str,
+                structure_str,
                 source.filename,
                 format_size(source.size),
                 str(conf.target_chat_id),
@@ -875,18 +866,14 @@ class DisplaySnapshotPlan:
 
         # Árbol para recursos incompletos / parciales
         for item in partials:
-            strat_label = (
-                "pieces-file"
-                if item.manifest.strategy == Strategy.CHUNKED
-                else "single-file"
+            parts_label = (
+                "1 parte" if item.total_parts == 1 else f"{item.total_parts} partes"
             )
             root = Tree(
                 f"[cyan]•[/] [bold]{item.manifest.source.filename}[/] "
-                f"[dim](Estrategia: {strat_label}, {item.total_parts} partes)[/]"
+                f"[dim]({parts_label})[/dim]"
             )
-            ui_logger.info(
-                f"• {item.manifest.source.filename} (Estrategia: {strat_label}, {item.total_parts} partes)"
-            )
+            ui_logger.info(f"• {item.manifest.source.filename} ({parts_label})")
 
             # Detalle de piezas de volumen / remotos
             for p in item.parts_diff:

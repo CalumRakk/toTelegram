@@ -18,7 +18,7 @@ from totelegram.packaging.schemas import (
     SourceMetadata,
     UploadManifest,
 )
-from totelegram.schemas import JobStatus, SourceType, Strategy, StrategyConfig
+from totelegram.schemas import JobStatus, SourceType
 
 
 class TestSnapshotPublisher(unittest.TestCase):
@@ -33,7 +33,6 @@ class TestSnapshotPublisher(unittest.TestCase):
             manifest_version=MANIFEST_VERSION,
             app_version="0.9.25",
             created_at=datetime.now(timezone.utc),
-            strategy=Strategy.SINGLE,
             chunk_size=1000,
             chat_id=self.chat_id,
             owner_id=12345,

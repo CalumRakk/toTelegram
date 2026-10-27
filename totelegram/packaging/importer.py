@@ -18,7 +18,6 @@ if TYPE_CHECKING:
 
 import peewee
 
-from totelegram import __VERSION__
 from totelegram.common.helpers import batched, get_utc_now
 from totelegram.database import db_transaction
 from totelegram.models import (
@@ -37,7 +36,7 @@ from totelegram.packaging.schemas import (
     UploadManifest,
 )
 from totelegram.packaging.ttape import TapeContainer
-from totelegram.schemas import SourceType, StrategyConfig
+from totelegram.schemas import SourceType
 
 logger = logging.getLogger(__name__)
 
@@ -834,16 +833,10 @@ class SnapshotImporter:
             )
 
         if job is None:
-            config = StrategyConfig(
-                tg_max_size=manifest.chunk_size,
-                user_is_premium=False,
-                app_version=f"imported-{__VERSION__}",
-            )
             job = Job.create(
                 source=source,
                 chat=chat,
-                strategy=manifest.strategy,
-                config=config,
+                chunk_size=manifest.chunk_size,
                 deleted_at=0,
                 last_verified_at=get_utc_now(),
             )

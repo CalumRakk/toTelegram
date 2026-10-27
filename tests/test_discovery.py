@@ -14,13 +14,7 @@ from totelegram.models import (
     TelegramChat,
     TelegramUser,
 )
-from totelegram.schemas import (
-    AvailabilityState,
-    JobStatus,
-    SourceType,
-    Strategy,
-    StrategyConfig,
-)
+from totelegram.schemas import AvailabilityState, JobStatus, SourceType
 
 
 class TestDiscoveryService(unittest.TestCase):
@@ -56,11 +50,7 @@ class TestDiscoveryService(unittest.TestCase):
         self.job_target = Job.create(
             source=self.source,
             chat=self.chat_target,
-            strategy=Strategy.CHUNKED,
-            status=JobStatus.PENDING,
-            config=StrategyConfig(
-                tg_max_size=1000, user_is_premium=False, app_version="0.9.15"
-            ),
+            chunk_size=1000,
         )
 
         # Payloads esperados (2 partes de 1000 bytes)
@@ -107,13 +97,7 @@ class TestDiscoveryService(unittest.TestCase):
         large_job = Job.create(
             source=large_source,
             chat=self.chat_target,
-            strategy=Strategy.SINGLE,
-            status=JobStatus.PENDING,
-            config=StrategyConfig(
-                tg_max_size=2000 * 1024 * 1024,
-                user_is_premium=False,
-                app_version="0.9.25",
-            ),
+            chunk_size=2000 * 1024 * 1024,
         )
 
         # Mock del mensaje encontrado en Telegram
@@ -148,13 +132,7 @@ class TestDiscoveryService(unittest.TestCase):
         large_job = Job.create(
             source=large_source,
             chat=self.chat_target,
-            strategy=Strategy.SINGLE,
-            status=JobStatus.PENDING,
-            config=StrategyConfig(
-                tg_max_size=2000 * 1024 * 1024,
-                user_is_premium=False,
-                app_version="0.9.25",
-            ),
+            chunk_size=2000 * 1024 * 1024,
         )
 
         mock_system_msg = MagicMock()
@@ -182,13 +160,7 @@ class TestDiscoveryService(unittest.TestCase):
         large_job = Job.create(
             source=large_source,
             chat=self.chat_target,
-            strategy=Strategy.SINGLE,
-            status=JobStatus.PENDING,
-            config=StrategyConfig(
-                tg_max_size=2000 * 1024 * 1024,
-                user_is_premium=False,
-                app_version="0.9.25",
-            ),
+            chunk_size=2000 * 1024 * 1024,
         )
 
         mock_msg = MagicMock()
@@ -251,12 +223,8 @@ class TestDiscoveryService(unittest.TestCase):
         job_mirror = Job.create(
             source=self.source,
             chat=self.chat_mirror,
-            strategy=Strategy.CHUNKED,
-            status=JobStatus.UPLOADED,
+            chunk_size=1000,
             last_verified_at=datetime.now(timezone.utc),
-            config=StrategyConfig(
-                tg_max_size=1000, user_is_premium=False, app_version="0.9.15"
-            ),
         )
         RemoteSnapshot.register(
             job=job_mirror,
@@ -304,12 +272,8 @@ class TestDiscoveryService(unittest.TestCase):
         job_mirror = Job.create(
             source=self.source,
             chat=self.chat_mirror,
-            strategy=Strategy.CHUNKED,
-            status=JobStatus.UPLOADED,
+            chunk_size=1000,
             last_verified_at=datetime.now(timezone.utc),
-            config=StrategyConfig(
-                tg_max_size=1000, user_is_premium=False, app_version="0.9.15"
-            ),
         )
         RemoteSnapshot.register(
             job=job_mirror,
@@ -350,11 +314,7 @@ class TestDiscoveryService(unittest.TestCase):
         job_mirror = Job.create(
             source=self.source,
             chat=self.chat_mirror,
-            strategy=Strategy.CHUNKED,
-            status=JobStatus.UPLOADED,
-            config=StrategyConfig(
-                tg_max_size=1000, user_is_premium=False, app_version="0.9.15"
-            ),
+            chunk_size=1000,
         )
         mp0 = Payload.create(
             job=job_mirror,

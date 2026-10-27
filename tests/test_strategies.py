@@ -19,13 +19,7 @@ from totelegram.models import (
     TelegramChat,
     TelegramUser,
 )
-from totelegram.schemas import (
-    AvailabilityState,
-    JobStatus,
-    SourceType,
-    Strategy,
-    StrategyConfig,
-)
+from totelegram.schemas import AvailabilityState, JobStatus, SourceType
 from totelegram.types import AvailabilityReport, UploadContext
 
 
@@ -123,11 +117,7 @@ class TestEngineStrategies(unittest.TestCase):
         job = Job.create(
             source=source,
             chat=self.chat,
-            strategy=Strategy.SINGLE,
-            status=JobStatus.PENDING,
-            config=StrategyConfig(
-                tg_max_size=1000, user_is_premium=False, app_version="0.9.15"
-            ),
+            chunk_size=1000,
         )
 
         strategy = FulfilledStrategy()
@@ -162,11 +152,7 @@ class TestEngineStrategies(unittest.TestCase):
             job_mirror = Job.create(
                 source=source,
                 chat=self.chat_mirror,
-                strategy=Strategy.CHUNKED,
-                status=JobStatus.UPLOADED,
-                config=StrategyConfig(
-                    tg_max_size=100, user_is_premium=False, app_version="0.9.15"
-                ),
+                chunk_size=100,
             )
             p0_mirror = Payload.create(
                 job=job_mirror,
@@ -196,11 +182,7 @@ class TestEngineStrategies(unittest.TestCase):
             job_target = Job.create(
                 source=source,
                 chat=self.chat,
-                strategy=Strategy.CHUNKED,
-                status=JobStatus.PENDING,
-                config=StrategyConfig(
-                    tg_max_size=100, user_is_premium=False, app_version="0.9.15"
-                ),
+                chunk_size=100,
             )
 
             # Simular respuestas de Pyrogram al reenviar
@@ -260,11 +242,7 @@ class TestEngineStrategies(unittest.TestCase):
             job = Job.create(
                 source=source,
                 chat=self.chat,
-                strategy=Strategy.CHUNKED,
-                status=JobStatus.PENDING,
-                config=StrategyConfig(
-                    tg_max_size=100, user_is_premium=False, app_version="0.9.15"
-                ),
+                chunk_size=100,
             )
 
             # Simular 3 mensajes subidos devueltos por Pyrogram

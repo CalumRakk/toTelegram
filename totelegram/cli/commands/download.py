@@ -132,12 +132,15 @@ def download_snapshot(
 
     # MODO B: Restauración completa estándar
     item_desc = "Carpeta" if is_folder else "Archivo"
+    total_parts = len(manifest.parts)
+    parts_desc = "Archivo único" if total_parts == 1 else "Dividido en partes"
+
     UI.print(f"Restaurando {item_desc}: [bold cyan]{source.filename}[/]")
     UI.info(
-        f"Estrategia: [bold]{manifest.strategy.value}[/] ({len(manifest.parts)} partes en Telegram)"
+        f"Estructura: [bold]{parts_desc}[/] "
+        f"({total_parts} {'parte' if total_parts == 1 else 'partes'} en Telegram)"
     )
     UI.info(f"Destino: [bold green]{target_output_dir / source.filename}[/]")
-
     if force:
         UI.warn(
             "Modo --force activo: Los archivos existentes en el destino serán sobrescritos."

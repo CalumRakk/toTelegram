@@ -58,7 +58,7 @@ class JobPlanner:
         if existing_job:
             job = existing_job
         else:
-            tg_limit = (
+            chunk_size = (
                 ctx.settings.tg_max_size_premium
                 if ctx.owner.is_premium
                 else ctx.settings.tg_max_size_normal
@@ -66,8 +66,7 @@ class JobPlanner:
             job = Job.formalize_intent(
                 source=source,
                 chat=chat_db,
-                is_premium=ctx.owner.is_premium,
-                tg_limit=tg_limit,
+                chunk_size=chunk_size,
             )
 
         return job

@@ -26,7 +26,6 @@ from totelegram.models import (
 from totelegram.packaging.snapshot import SnapshotService
 from totelegram.schemas import (
     AvailabilityState,
-    Strategy,
 )
 from totelegram.stream import FileVolume
 from totelegram.types import AvailabilityReport, StrategyResult, UploadContext
@@ -91,7 +90,7 @@ class TestEnginePipelineAndComponents(unittest.TestCase):
             mtime=1.0,
             mimetype="text/plain",
         )
-        job = Job.formalize_intent(source, self.chat, False, 1000)
+        job = Job.formalize_intent(source, self.chat, 1000)
 
         # Caso corto
         p_short = Payload.create(
@@ -137,7 +136,7 @@ class TestEnginePipelineAndComponents(unittest.TestCase):
 
         try:
             source = Source.get_or_create_from_filepath(tmp_path)
-            job = Job.formalize_intent(source, self.chat, False, 1000)
+            job = Job.formalize_intent(source, self.chat, 1000)
             job.prepare_chunks(tmp_path, self.settings)
             payload = job.payloads.first()
 
@@ -176,7 +175,8 @@ class TestEnginePipelineAndComponents(unittest.TestCase):
             self.assertIsNotNone(job)
             self.assertFalse(job.is_completed_local)
             self.assertFalse(job.is_deleted)
-            self.assertEqual(job.strategy, Strategy.CHUNKED)
+            self.assertTrue(job.is_chunked)
+            self.assertEqual(job.chunk_size, 1000)
 
             # Las piezas se generan de forma perezosa al llamar a prepare_chunks (o en la estrategia)
             payloads = job.prepare_chunks(tmp_path, self.settings)
@@ -401,7 +401,7 @@ class TestEnginePipelineAndComponents(unittest.TestCase):
             # 1. Crear tape y snapshot
             tape = tartape.record(source_dir, checksum="md5", overwrite=True)
             source = Source.create_from_tape(tape, exclusion_patterns=[])
-            job = Job.formalize_intent(source, self.chat, False, 10000)
+            job = Job.formalize_intent(source, self.chat, 10000)
             job.prepare_chunks(source_dir, self.settings)
 
             # Mock de subida de la parte 1

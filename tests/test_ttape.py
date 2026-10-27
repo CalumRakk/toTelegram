@@ -38,7 +38,7 @@ from totelegram.packaging.ttape import (
     InvalidTapeContainerError,
     TapeContainer,
 )
-from totelegram.schemas import JobStatus, SourceType, Strategy, StrategyConfig
+from totelegram.schemas import JobStatus, SourceType
 
 
 class TestTapeContainerAndBifurcation(unittest.TestCase):
@@ -92,7 +92,6 @@ class TestTapeContainerAndBifurcation(unittest.TestCase):
         manifest = UploadManifest(
             manifest_version=MANIFEST_VERSION,
             created_at=datetime.now(timezone.utc),
-            strategy=Strategy.CHUNKED,
             chunk_size=1024 * 1024,
             chat_id=self.chat.id,
             owner_id=self.user.id,
@@ -194,11 +193,7 @@ class TestTapeContainerAndBifurcation(unittest.TestCase):
         job = Job.create(
             source=source,
             chat=self.chat,
-            strategy=Strategy.SINGLE,
-            status=JobStatus.UPLOADED,
-            config=StrategyConfig(
-                tg_max_size=1000, user_is_premium=False, app_version="0.9.25"
-            ),
+            chunk_size=1000,
         )
 
         payload = Payload.create(
@@ -241,9 +236,7 @@ class TestTapeContainerAndBifurcation(unittest.TestCase):
         self.assertTrue(catalog_path.exists())
 
         source = Source.create_from_tape(tape, exclusion_patterns=[])
-        job = Job.formalize_intent(
-            source, self.chat, is_premium=False, tg_limit=1024 * 1024
-        )
+        job = Job.formalize_intent(source, self.chat, 1024 * 1024)
         job.prepare_chunks(folder, MagicMock(exclude_files=[]))
         payload = job.payloads.first()
 
@@ -278,7 +271,7 @@ class TestTapeContainerAndBifurcation(unittest.TestCase):
 
         tape = tartape.record(folder, checksum="md5", overwrite=True)
         source = Source.create_from_tape(tape, exclusion_patterns=[])
-        job = Job.formalize_intent(source, self.chat, is_premium=False, tg_limit=5120)
+        job = Job.formalize_intent(source, self.chat, 5120)
         job.prepare_chunks(folder, MagicMock(exclude_files=[]))
         payload = job.payloads.first()
 

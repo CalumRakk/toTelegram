@@ -21,13 +21,7 @@ from totelegram.models import (
     TelegramChat,
     TelegramUser,
 )
-from totelegram.schemas import (
-    JobStatus,
-    ResourceType,
-    SourceType,
-    Strategy,
-    StrategyConfig,
-)
+from totelegram.schemas import ResourceType, SourceType
 
 
 class TestConcurrencyCoordinator(unittest.TestCase):
@@ -61,11 +55,7 @@ class TestConcurrencyCoordinator(unittest.TestCase):
         self.job = Job.create(
             source=self.source,
             chat=self.chat,
-            strategy=Strategy.CHUNKED,
-            status=JobStatus.PENDING,
-            config=StrategyConfig(
-                tg_max_size=1000, user_is_premium=False, app_version="0.9.15"
-            ),
+            chunk_size=1000,
         )
 
         # Crear 3 piezas para el Job (seq 0, 1, 2)

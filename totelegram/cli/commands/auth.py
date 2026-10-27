@@ -90,22 +90,22 @@ def login_command(ctx: typer.Context):
     # Si usa credenciales públicas, advertir de forma visible
     if is_default_creds:
         warning_text = (
-            "[bold cyan]ℹ️ Aviso sobre el uso de credenciales compartidas[/bold cyan]\n\n"
-            "Estás a punto de iniciar sesión utilizando el identificador de aplicación compartido por la comunidad.\n\n"
-            "Para los servidores de Telegram, existe una relación técnica entre las sesiones que utilizan un mismo identificador. "
-            "Si alguien realiza un uso abusivo de la plataforma con estas credenciales, Telegram podría aplicar límites "
-            "de velocidad temporales ([bold]FloodWait[/bold]) que también afecten a las subidas de esta aplicación.\n\n"
-            "[bold]¿Alguien puede acceder a mis archivos al utilizar credenciales compartidas?[/bold]\n"
+            "[bold cyan]ℹ️ Aviso sobre el uso de api_id y api_hash compartidas[/bold cyan]\n\n"
+            "Estás a punto de iniciar sesión utilizando credenciales compartidas con otros usuarios.\n\n"
+            "Para los servidores de Telegram, existe una relación técnica entre las sesiones que utilizan las mismas credenciales. "
+            "Si alguien realiza un uso abusivo con las mismas credenciales, Telegram podría aplicar límites "
+            "de velocidad temporales ([bold]FloodWait[/bold]) sobre las cuentas relacionadas.\n\n"
+            "[bold]¿Alguien puede acceder a mis archivos al utilizar api_id y api_hash compartidas?[/bold]\n\n"
             "[green]No, absolutamente nadie.[/green] Las credenciales son solo el identificador de la aplicación desde la que te conectas "
             "(exactamente igual que cuando usas un cliente de terceros). "
             "Tus archivos en chats privados siguen siendo exclusivos para ti y tu sesión no se comparte con nadie.\n\n"
-            "[dim]Para pruebas y uso rápido está bien, pero si planeas utilizar toTelegram para respaldos masivos, "
-            "es altamente recomendable registrar tu propia app gratuita en [bold cyan]https://my.telegram.org[/bold cyan].[/dim]"
+            "Para pruebas y uso rápido está bien, pero si planeas utilizar toTelegram para respaldos masivos, "
+            "es altamente recomendable registrar tu propia app gratuita en [bold cyan]https://my.telegram.org[/bold cyan]."
         )
         console.print(Panel(warning_text, border_style="cyan", padding=(1, 2)))
 
         proceed = typer.confirm(
-            "¿Deseas continuar con estas credenciales?", default=True
+            "\n¿Deseas continuar con estas credenciales?", default=True
         )
         if not proceed:
             UI.info(

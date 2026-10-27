@@ -1,5 +1,6 @@
 import json
 import logging
+import math
 import time
 from datetime import datetime, timezone
 from itertools import batched
@@ -11,12 +12,11 @@ import tartape
 from tartape import calculate_file_slices
 from tartape.schemas import FileSlice
 
-from totelegram import __VERSION__
 from totelegram.common.helpers import is_expired as helpers_is_expired
 from totelegram.database import db_transaction
 from totelegram.packaging.partitioner import StatelessPartitioner
-from totelegram.packaging.schemas import VirtualChunk, VirtualTapeMember
-from totelegram.schemas import ResourceType, SourceType, Strategy
+from totelegram.packaging.schemas import VirtualChunk
+from totelegram.schemas import ResourceType, SourceType
 from totelegram.telegram.client import parse_message_json_data
 
 if TYPE_CHECKING:
@@ -27,7 +27,7 @@ if TYPE_CHECKING:
 from totelegram.common.files import create_md5sum_by_hashlib, get_mimetype
 from totelegram.common.helpers import get_utc_now
 from totelegram.database import EnumField, PydanticJSONField, db_proxy
-from totelegram.schemas import StrategyConfig, TapeCatalog
+from totelegram.schemas import TapeCatalog
 
 logger = logging.getLogger(__name__)
 
@@ -373,12 +373,20 @@ class Job(BaseModel):
 
     source = cast(Source, peewee.ForeignKeyField(Source, backref="jobs"))
     chat = peewee.ForeignKeyField(TelegramChat, backref="jobs")
-
-    strategy = cast(Strategy, EnumField(Strategy))  # type: ignore
-    config = cast(StrategyConfig, PydanticJSONField(StrategyConfig))
+    chunk_size = cast(int, peewee.BigIntegerField())
 
     deleted_at = cast(float, peewee.FloatField(default=0))
     last_verified_at = cast(datetime | None, peewee.DateTimeField(null=True))
+
+    @property
+    def is_chunked(self) -> bool:
+        """Determina si el recurso físico excede el tamaño de bloque y fue dividido."""
+        return self.source.size > self.chunk_size
+
+    @property
+    def total_expected_parts(self) -> int:
+        """Calcula de forma determinista la cantidad de piezas esperadas para este recurso."""
+        return max(1, math.ceil(self.source.size / self.chunk_size))
 
     @property
     def is_deleted(self) -> bool:
@@ -467,21 +475,15 @@ class Job(BaseModel):
     def formalize_intent(
         source: "Source",
         chat: "TelegramChat",
-        is_premium: bool,
-        tg_limit: int,
+        chunk_size: int,
     ) -> "Job":
-        """Crea un Job basado en la estrategia y la configuración de la cuenta."""
-        strategy = Strategy.evaluate(source.size, tg_limit)
-        config = StrategyConfig(
-            tg_max_size=tg_limit, user_is_premium=is_premium, app_version=__VERSION__
-        )
+        """Formaliza la intención inmutable de proyectar un Source en un TelegramChat."""
         try:
             with db_proxy.atomic():
                 return Job.create(
                     source=source,
                     chat=chat,
-                    strategy=strategy,
-                    config=config,
+                    chunk_size=chunk_size,
                 )
         except peewee.IntegrityError:
             existing = Job.get_for_source_in_chat(source, chat)
@@ -499,9 +501,9 @@ class Job(BaseModel):
         )
 
     def adopt_job(self, job: "Job") -> "Job":
-        self.strategy = job.strategy
-        self.config = job.config
-        self.save(only=[Job.strategy, Job.config, Job.updated_at])
+        """Adopta el contrato de corte de otro Job (usado en Smart Forward)."""
+        self.chunk_size = job.chunk_size
+        self.save(only=[Job.chunk_size, Job.updated_at])
         return self
 
     def mark_deleted(self):
@@ -520,6 +522,7 @@ class Job(BaseModel):
         logger.debug(f"Job {self.id} invalidado y remotos orfanados.")
 
     def prepare_chunks(self, path: Path, settings) -> List["Payload"]:
+        """Genera y persiste las piezas lógicas según el tamaño de corte del contrato."""
         if self.payloads.count() > 0:
             return cast(
                 List["Payload"], list(self.payloads.order_by(Payload.sequence_index))
@@ -527,12 +530,12 @@ class Job(BaseModel):
 
         if self.source.type == SourceType.FOLDER:
             _, chunks, _ = StatelessPartitioner.partition_folder(
-                path, self.config.tg_max_size, settings.exclude_files
+                path, self.chunk_size, settings.exclude_files
             )
             return self._persist_chunks(chunks)
         else:
             chunks = StatelessPartitioner.partition_file(
-                path, self.config.tg_max_size, self.source.md5sum
+                path, self.chunk_size, self.source.md5sum
             )
             return self._persist_chunks(chunks)
 
@@ -556,44 +559,6 @@ class Job(BaseModel):
 
         return cast(List[Payload], list(self.payloads.order_by(Payload.sequence_index)))
 
-    def _persist_folder_chunks(
-        self,
-        virtual_chunks: List[VirtualChunk],
-        virtual_members: List[VirtualTapeMember],
-    ) -> List["Payload"]:
-        database = self._meta.database
-
-        with db_transaction(database):
-            payloads_data = [
-                {
-                    "job": self,
-                    "sequence_index": vc.sequence_index,
-                    "start_offset": vc.start_offset,
-                    "end_offset": vc.end_offset,
-                    "size": vc.size,
-                    "filename": vc.filename,
-                    "filename_short": vc.filename_short,
-                }
-                for vc in virtual_chunks
-            ]
-            Payload.insert_many(payloads_data).execute()
-
-            member_inserts = [
-                {
-                    "source": self.source,
-                    "relative_path": vm.relative_path,
-                    "size": vm.size,
-                    "md5sum": vm.md5sum,
-                    "start_offset": vm.start_offset,
-                }
-                for vm in virtual_members
-            ]
-
-            for batch in batched(member_inserts, 500):
-                TapeMember.insert_many(batch).on_conflict_ignore().execute()
-
-        return cast(List[Payload], list(self.payloads.order_by(Payload.sequence_index)))
-
     def is_fresh(self) -> bool:
         """Determina si la verificación JIT del Job aún es confiable."""
         if not self.last_verified_at or self.is_deleted:
@@ -606,7 +571,8 @@ class Job(BaseModel):
         self.save(only=[Job.last_verified_at, Job.updated_at])
 
 
-# El índice compuesto único impide que existan dos jobs activos (deleted_at == 0) para el mismo archivo en el mismo chat.
+# Índice compuesto único para un Job activo por chat
+# TODO: simplificar, la eliminacion es total en la DB.
 Job.add_index(Job.source, Job.chat, Job.deleted_at, unique=True)
 
 

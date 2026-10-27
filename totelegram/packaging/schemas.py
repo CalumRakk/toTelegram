@@ -4,7 +4,7 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 
 from totelegram import __VERSION__
-from totelegram.schemas import SourceType, Strategy, TapeCatalog
+from totelegram.schemas import SourceType, TapeCatalog
 
 # Versión canónica del esquema del manifiesto en la rama principal
 MANIFEST_VERSION = "6.0"
@@ -47,13 +47,17 @@ class UploadManifest(BaseModel):
     manifest_version: str = MANIFEST_VERSION
     app_version: str = __VERSION__
     created_at: datetime
-    strategy: Strategy
     chunk_size: int
     chat_id: int
     owner_id: int
     owner_name: str
     source: SourceMetadata
     parts: list[RemotePart]
+
+    @property
+    def is_chunked(self) -> bool:
+        """Determina si el recurso físico fue dividido en múltiples partes."""
+        return len(self.parts) > 1
 
 
 class TapeContainerInfo(BaseModel):

@@ -27,7 +27,7 @@ from totelegram.packaging.schemas import (
     SourceMetadata,
     UploadManifest,
 )
-from totelegram.schemas import JobStatus, SourceType, Strategy
+from totelegram.schemas import SourceType
 
 
 class TestRehydrationEngine(unittest.TestCase):
@@ -65,7 +65,6 @@ class TestRehydrationEngine(unittest.TestCase):
         manifest = UploadManifest(
             manifest_version=manifest_version,
             created_at=datetime.now(timezone.utc),
-            strategy=Strategy.SINGLE,
             chunk_size=1024 * 1024,
             chat_id=self.chat_id,
             owner_id=self.user.id,
