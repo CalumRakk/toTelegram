@@ -3,7 +3,10 @@ import re
 import time
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, List, Literal
+from typing import TYPE_CHECKING, Any, List, Literal
+
+if TYPE_CHECKING:
+    from totelegram.telegram.types import TargetResolution
 
 import typer
 from rich.columns import Columns
@@ -1021,3 +1024,104 @@ class DisplayIndexer:
             spacing="block",
             border_style="yellow",
         )
+
+
+class DisplayTarget:
+    """Componentes visuales para la gestión de destinos (Target)."""
+
+    @staticmethod
+    def show_no_target_warning():
+        UI.warn("El perfil activo no tiene un chat destino por defecto.")
+        tip_text = (
+            "Puedes configurar un destino predeterminado con:\n"
+            "  • totelegram target me               (Tus Mensajes Guardados)\n"
+            '  • totelegram target "Mi Canal"       (Búsqueda inteligente)\n'
+            "  • totelegram target -100xxxxxxxxxx   (ID directo o @username)\n\n"
+            "O puedes subir directamente sin destino global usando:\n"
+            '  • totelegram send <archivo> --target "Mi Canal"'
+        )
+        panel = Panel(
+            tip_text,
+            title="[bold yellow]Destino Pendiente (NOT-SET)[/]",
+            border_style="yellow",
+            padding=(1, 2),
+        )
+        console.print(panel)
+
+    @staticmethod
+    def show_current_status(
+        profile_name: str, resolution: "TargetResolution", raw_chat_id
+    ):
+        from rich.panel import Panel
+
+        if resolution.is_resolved and resolution.match:
+            match = resolution.match
+            content = [
+                "[bold green]✓ Listo para subir archivos[/bold green]",
+                f"• Perfil:  [white]{profile_name}[/]",
+                f"• Título:  [bold cyan]{match.title}[/]",
+                f"• ID:      [dim]{match.id}[/]",
+                f"• Tipo:    [magenta]{match.type}[/]",
+            ]
+            if match.username:
+                content.append(f"• Alias:   @{match.username}")
+
+            panel = Panel(
+                "\n".join(content),
+                title="[bold green]Destino Actual[/bold green]",
+                border_style="green",
+                padding=(1, 2),
+            )
+            console.print(panel)
+        else:
+            content = [
+                "[bold red]! Destino con problemas[/bold red]",
+                f"• Perfil:     [white]{profile_name}[/]",
+                f"• ID guardado: [dim]{raw_chat_id}[/]",
+                f"• Motivo:     [yellow]{resolution.error_message or 'Error de acceso'}[/]",
+            ]
+            if resolution.hint:
+                content.append(f"\n[dim]{resolution.hint}[/dim]")
+
+            panel = Panel(
+                "\n".join(content),
+                title="[bold red]Destino no disponible[/bold red]",
+                border_style="red",
+                padding=(1, 2),
+            )
+            console.print(panel)
+
+    @staticmethod
+    def prompt_candidate_selection(candidates: list["ChatMatch"]) -> "ChatMatch | None":
+        """Renderiza una tabla numerada y pide al usuario que elija un candidato."""
+        table = Table(
+            title="Chats coincidentes",
+            show_header=True,
+            header_style="bold cyan",
+            title_style="bold blue",
+        )
+        table.add_column("#", justify="right", style="bold yellow")
+        table.add_column("Título", style="white")
+        table.add_column("Tipo", style="magenta")
+        table.add_column("ID / Username", style="dim")
+
+        for idx, c in enumerate(candidates, 1):
+            identifier = f"@{c.username}" if c.username else str(c.id)
+            table.add_row(str(idx), c.title, c.type, identifier)
+
+        console.print(table)
+
+        while True:
+            choice = typer.prompt(
+                f"\nSelecciona un chat (1-{len(candidates)}) o '0' para cancelar",
+                default="1",
+            )
+            if choice.strip() == "0":
+                return None
+            try:
+                selected_idx = int(choice) - 1
+                if 0 <= selected_idx < len(candidates):
+                    return candidates[selected_idx]
+            except ValueError:
+                pass
+            console.print("[red]Opción inválida. Intenta nuevamente.[/red]")

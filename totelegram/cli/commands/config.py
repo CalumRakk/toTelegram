@@ -1,7 +1,7 @@
 import json
 import time
 from functools import wraps
-from typing import TYPE_CHECKING, List, Literal, Tuple, cast
+from typing import List, Literal, Tuple, cast
 
 import typer
 
@@ -9,7 +9,6 @@ from totelegram.cli.state import CLIState
 from totelegram.cli.ui import (
     UI,
     DisplayConfig,
-    DisplayGeneric,
     DisplayIndexer,
     DisplayProfile,
 )
@@ -19,19 +18,13 @@ from totelegram.migration import DatabaseState, inspect_database
 from totelegram.models import TelegramChat
 from totelegram.schemas import NETWORK_FIELDS, VALUE_NOT_SET, Commands
 from totelegram.telegram.access import ChatAccessService
-from totelegram.telegram.search import ChatSearchService
 from totelegram.telegram.utils import (
-    is_direct_identifier,
-    is_potential_username,
     normalize_chat_id,
 )
 from totelegram.utils import (
     is_suspected_glob_expansion,
     validate_item,
 )
-
-if TYPE_CHECKING:
-    from pyrogram.types import User
 
 app = typer.Typer(help="Configuración del perfil actual.")
 
@@ -249,18 +242,13 @@ def check_config(ctx: typer.Context):
             raise typer.Exit(1)
 
         if not profile.is_trinity:
+            # TODO: la db de pyrogram guarda el api_id, con ese valor podemos deducir si el usuario esta logeandose con otras credenciales
             UI.error(f"El perfil '{profile_name}' está incompleto.")
             if not profile.has_env:
                 UI.info("Falta el archivo de configuración (.env).")
             if not profile.has_session:
                 UI.info("Falta el archivo de sesión de Telegram (.session).")
 
-            command = f"{Commands.PROFILE_CREATE} --force"
-            UI.tip(
-                "Créalo de nuevo usando el siguiente comando:",
-                commands=command,
-                spacing="top",
-            )
             raise typer.Exit(1)
 
     settings = manager.get_settings(profile_name)
@@ -313,10 +301,10 @@ def check_config(ctx: typer.Context):
     if settings.chat_id == VALUE_NOT_SET:
         UI.warn("El destino (chat_id) no está configurado.")
         UI.tip(
-            "Configura el destino usando uno de estos comandos:",
+            "Configura un destino predeterminado con:",
             commands=[
-                f"{Commands.CONFIG_SET} chat_id <ID>",
-                f"{Commands.CONFIG_SEARCH} <NOMBRE>",
+                "totelegram target me",
+                'totelegram target "Mi Canal"',
             ],
         )
         raise typer.Exit(code=1)
@@ -356,99 +344,3 @@ def check_config(ctx: typer.Context):
                 f"Destino confirmado: [bold]{access_report.chat.title}[/] "
                 f"[dim](ID: {access_report.chat.id})[/dim]"
             )
-
-
-@app.command("search")
-def search_config(
-    ctx: typer.Context,
-    query: str = typer.Argument(..., help="Nombre, @username o ID."),
-    contains: bool = typer.Option(False, "--contains", "-c"),
-    depth: int = typer.Option(100, "--depth", "-d"),
-    apply: bool = typer.Option(False, "--apply", "-a"),
-):
-    """Busca y establece el chat de destino."""
-    state: CLIState = ctx.obj
-    manager = state.manager
-    profile_name = cast(str, manager.resolve_profile_name(state.profile_name))
-
-    DisplayProfile.announce_profile_used(profile_name)
-
-    # Obtener el ID del chat destino
-    with state.get_telegram_session(profile_name) as client:
-        chat_access = ChatAccessService(client)
-        chat_searcher = ChatSearchService(client)
-
-        me = cast("User", client.get_me())
-        UI.info(f"Telegram Session: [bold]{me.username or me.first_name}[/]")
-
-        chat_id = None
-
-        if is_direct_identifier(query):
-            chat_id = normalize_chat_id(query)
-        else:
-            is_exact = not contains
-            search_desc = (
-                f"llamado exactamente '[bold]{query}[/]'"
-                if is_exact
-                else f"que contenga '[bold]{query}[/]' (sin distinción de mayúsculas y minúsculas)"
-            )
-            UI.info(f"Buscando chat {search_desc}")
-            with UI.loading("Explorando los chats recientes..."):
-                result = chat_searcher.search_by_name(query, depth, is_exact)
-
-            if result.is_resolved and result.winner:
-                chat_id = result.winner.id
-
-            elif result.is_ambiguous:
-                conflicts = len(result.conflicts)
-                UI.warn(f"Ambigüedad: Hay {conflicts} chats con ese nombre.")
-                DisplayGeneric.show_chat_table(
-                    result.conflicts, "Conflictos Encontrados"
-                )
-                UI.info("Usa el ID exacto: [bold]config set chat_id <ID>[/]")
-                raise typer.Exit(1)
-
-            elif result.needs_help:
-                DisplayGeneric.show_chat_table(
-                    result.suggestions, "Quizás quisiste decir:"
-                )
-                UI.info(
-                    "Tip: Si no encuentras lo que buscas, intenta aumentar la profundidad con --depth."
-                )
-                raise typer.Exit(1)
-            else:
-                UI.error(
-                    f"No se encontró ningún chat relacionado con '{result.query}' en los primeros {result.search_depth} chats recientes."
-                )
-                if is_potential_username(result.query):
-                    UI.tip(
-                        message="Puedes hacer una busqueda más profunda con [bold]--depth[/] o especificar el chat directamente con @username o t.me/username.",
-                        commands=[
-                            f"{Commands.CONFIG_SEARCH} {result.query} --depth 200",
-                            f"{Commands.CONFIG_SEARCH} @{result.query}",
-                        ],
-                    )
-
-                raise typer.Exit(1)
-
-        # Verificación de permisos
-        with UI.loading("Verificando permisos..."):
-            report = chat_access.verify_access(chat_id)
-
-        if not (report.is_ready and report.chat):
-            UI.warn("No tienes permisos de escritura en el chat.")
-            UI.warn("Corrige los permisos antes de intentar cualquier subida.")
-            UI.warn("Configuración 'chat_id' no actualizada.")
-            raise typer.Exit(1)
-
-        # Si llegamos aquí, todo salió bien
-        UI.success(
-            f"¡Encontrado! [bold]{report.chat.title}[/] [dim](ID: {report.chat.id})[/]"
-        )
-        UI.success("Tienes permisos de escritura.")
-
-        if apply:
-            manager.set_setting(profile_name, "chat_id", report.chat.id)
-            UI.success("Configuración 'chat_id' actualizada.")
-
-        raise typer.Exit(0)

@@ -13,7 +13,9 @@ from totelegram.concurrency import ConcurrencyCoordinator
 from totelegram.discovery import DiscoveryService
 from totelegram.identity import Settings
 from totelegram.models import TelegramUser
-from totelegram.schemas import ScanReport
+from totelegram.schemas import VALUE_NOT_SET, ScanReport
+from totelegram.telegram.resolver import TargetResolver
+from totelegram.telegram.types import TargetResolutionStatus
 from totelegram.types import UploadContext
 from totelegram.utils import has_snapshot, is_excluded
 
@@ -25,14 +27,82 @@ logger = logging.getLogger(__name__)
 
 
 def prepare_upload_context(
-    state: CLIState, client: "Client", db: peewee.Database, settings: Settings
+    state: CLIState,
+    client: "Client",
+    db: peewee.Database,
+    settings: Settings,
+    target_override: str | None = None,
 ) -> UploadContext:
+    """Prepara el contexto unificado de subida aplicando la jerarquía de resolución de destino."""
+    resolver = TargetResolver(client, db)
+    resolved_chat_id: int | str | None = None
+
+    # El usuario especificó --target dinámicamente en el comando
+    if target_override:
+        with UI.loading(f"Resolviendo destino '[bold]{target_override}[/]'..."):
+            resolution = resolver.resolve(target_override)
+
+        if resolution.status == TargetResolutionStatus.RESOLVED:
+            assert resolution.chat_id is not None
+            resolved_chat_id = resolution.chat_id
+            logger.info(
+                f"Destino temporal resuelto: {resolution.title} ({resolved_chat_id})"
+            )
+
+        elif resolution.status == TargetResolutionStatus.AMBIGUOUS:
+            UI.error(
+                f"El destino '[bold]{target_override}[/]' es ambiguo. "
+                f"Se encontraron {len(resolution.candidates)} coincidencias:"
+            )
+            for c in resolution.candidates:
+                identifier = f"@{c.username}" if c.username else str(c.id)
+                UI.print(
+                    f"  • [bold]{c.title}[/] [dim]({identifier})[/] -> Usa: [yellow]--target {c.id}[/]"
+                )
+            raise typer.Exit(1)
+
+        else:
+            UI.error(
+                resolution.error_message
+                or f"No se pudo resolver el destino '{target_override}'."
+            )
+            if resolution.hint:
+                UI.tip(resolution.hint)
+            raise typer.Exit(1)
+
+    # Fallback al chat por defecto configurado en el perfil
+    elif settings.chat_id != VALUE_NOT_SET:
+        resolved_chat_id = settings.chat_id
+
+    # Ningún destino disponible (bloqueo instructivo)
+    else:
+        UI.error("No se ha especificado un chat de destino.")
+        UI.educational_tip(
+            title="Destino requerido",
+            message=(
+                "El perfil activo no tiene un chat por defecto y no indicaste '--target'.\n\n"
+                "Tienes dos formas de continuar:\n"
+                "1. Definir el destino solo para esta subida usando [bold]--target <chat>[/].\n"
+                "2. Guardar un destino por defecto permanente usando [bold]totelegram target <chat>[/]."
+            ),
+            commands=[
+                'totelegram send ... --target "Mi Canal"',
+                "totelegram send ... --target me",
+                'totelegram target "Mi Canal"',
+            ],
+            spacing="block",
+            border_style="yellow",
+        )
+        raise typer.Exit(1)
+
+    # Obtención del objeto Chat de Pyrogram y usuario activo
     with UI.loading("Sincronizando con Telegram..."):
         try:
-            tg_chat = cast("Chat", client.get_chat(settings.chat_id))
+            tg_chat = cast("Chat", client.get_chat(resolved_chat_id))
             me = cast("User", client.get_me())
             owner = TelegramUser.get_or_create_from_tg(me)
 
+            # Auto-healing de telegram_account_id para locks distribuidos
             if settings.telegram_account_id is None:
                 profile_name = cast(
                     str, state.manager.resolve_profile_name(state.profile_name)
@@ -40,11 +110,11 @@ def prepare_upload_context(
                 state.manager.set_setting(profile_name, "telegram_account_id", owner.id)
                 settings.telegram_account_id = owner.id
                 logger.info(
-                    f"Auto-healed: telegram_account_id ({owner.id}) agregado al perfil '{profile_name}'."
+                    f"Auto-healed: telegram_account_id ({owner.id}) en perfil '{profile_name}'."
                 )
 
         except Exception as e:
-            UI.error(f"Error de conexión: {e}")
+            UI.error(f"Error de conexión con el chat destino ({resolved_chat_id}): {e}")
             raise typer.Exit(1)
 
     discovery = DiscoveryService(client, db)

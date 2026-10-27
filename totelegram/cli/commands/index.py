@@ -10,7 +10,7 @@ from totelegram.cli.ui import UI, console
 from totelegram.models import TelegramUser
 from totelegram.packaging.importer import SnapshotImporter
 from totelegram.packaging.indexer import TapeIndexService
-from totelegram.schemas import VALUE_NOT_SET, Commands
+from totelegram.schemas import VALUE_NOT_SET
 
 logger = logging.getLogger(__name__)
 
@@ -43,10 +43,10 @@ def index_tapes(
     if settings.chat_id == VALUE_NOT_SET:
         UI.error("El chat destino no está configurado.")
         UI.tip(
-            "Configura el destino usando uno de estos comandos:",
+            "Configura un destino predeterminado con:",
             commands=[
-                f"{Commands.CONFIG_SET} chat_id <ID>",
-                f"{Commands.CONFIG_SEARCH} <NOMBRE>",
+                "totelegram target me",
+                'totelegram target "Mi Canal"',
             ],
         )
         raise typer.Exit(1)

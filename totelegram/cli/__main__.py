@@ -7,13 +7,14 @@ import typer
 
 from totelegram import __VERSION__
 from totelegram.cli.commands import (
+    auth,
     backup,
     config,
     download,
     index,
-    profile,
     send,
     snapshot,
+    target,
 )
 from totelegram.cli.state import CLIState
 from totelegram.cli.ui import console
@@ -33,12 +34,20 @@ app = typer.Typer(
 )
 
 app.add_typer(config.app, name="config")
-app.add_typer(profile.app, name="profile")
+app.add_typer(auth.app, name="auth")
 app.command(name="send")(send.send_files)
 app.add_typer(snapshot.app, name="snapshot")
 app.command(name="backup")(backup.backup_folders)
 app.command(name="download")(download.download_snapshot)
-app.command(name="index")(index.index_tapes)  # <-- REGISTRAR AQUÍ
+app.command(name="index")(index.index_tapes)
+app.command(name="target")(target.manage_target)
+
+# --- ATAJOS ---
+app.command(name="login")(auth.login_command)
+app.command(name="logout")(auth.logout_command)
+app.command(name="status")(auth.status_command)
+app.command(name="whoami")(auth.status_command)
+app.command(name="switch")(auth.switch_command)
 
 
 def version_callback(value: bool):

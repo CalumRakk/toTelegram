@@ -2,6 +2,8 @@ import hashlib
 import json
 import logging
 import os
+import re
+import unicodedata
 import uuid
 from pathlib import Path
 from typing import (
@@ -50,6 +52,9 @@ ChatID = Annotated[
     BeforeValidator(normalize_chat_id),
 ]
 
+DEFAULT_TG_API_ID = 611335
+DEFAULT_TG_API_HASH = "d524b414d21f4d37f08684c1df41ac9c"
+
 TG_MAX_SIZE_SINGLE_FILE = 2000 * 1024 * 1024  # 2,097,152,000 bytes
 TG_MAX_SIZE_MULTIPLE_FILES = 4000 * 1024 * 1024  # 4,194,304,000 bytes
 
@@ -75,17 +80,23 @@ class Settings(BaseSettings):
     )
 
     api_id: int = Field(
-        default=611335,
+        default=DEFAULT_TG_API_ID,
         description="Telegram API ID",
         json_schema_extra={"is_sensitive": False, "access": AccessLevel.DEBUG_READONLY},
     )
     api_hash: str = Field(
-        default="d524b414d21f4d37f08684c1df41ac9c",
+        default=DEFAULT_TG_API_HASH,
         description="Telegram API hash",
         json_schema_extra={"is_sensitive": True, "access": AccessLevel.DEBUG_READONLY},
     )
+    has_custom_app: bool = Field(
+        default=False,
+        description="Indica si la cuenta usa credenciales propias de my.telegram.org o las públicas compartidas.",
+        json_schema_extra={"is_sensitive": False, "access": AccessLevel.DEBUG_READONLY},
+    )
     profile_name: str = Field(
-        description="Nombre de la sesión",
+        default=VALUE_NOT_SET,
+        description="Nombre o alias para la cuenta",
         json_schema_extra={"is_sensitive": False, "access": AccessLevel.DEBUG_READONLY},
     )
 
@@ -131,6 +142,11 @@ class Settings(BaseSettings):
         default=None,
         description="Ruta del archivo de log. Si está vacío, se usa la ruta por defecto en la carpeta de trabajo.",
     )
+
+    @property
+    def profile_alias(self) -> str:
+        """Alias de conveniencia para profile_name."""
+        return self.profile_name
 
     @field_validator("upload_pause_range", mode="after")
     @classmethod
@@ -660,3 +676,50 @@ class ConfigService:
 
         self.manager.set_setting(settings_name, key, info.default_value)
         return info.default_value
+
+
+def sanitize_alias(raw_name: str, max_length: int = 15) -> str:
+    """
+    Sanitiza un nombre para convertirlo en un alias de perfil válido.
+    - Normaliza caracteres Unicode (elimina acentos: 'José' -> 'jose').
+    - Pasa a minúsculas y elimina caracteres especiales (solo a-z, 0-9 y _).
+    - Trunca a max_length caracteres.
+    - Fallback a 'user' si el nombre eran solo emojis o caracteres no latinos.
+    """
+    if not raw_name:
+        return "user"
+
+    # Descomponer caracteres con acentos (NFKD) y filtrar solo caracteres ASCII
+    normalized = unicodedata.normalize("NFKD", str(raw_name))
+    ascii_text = normalized.encode("ascii", "ignore").decode("ascii")
+
+    # Minúsculas y reemplazar espacios o guiones con guión bajo
+    clean = re.sub(r"[\s\-]+", "_", ascii_text.strip().lower())
+    # Mantener estrictamente caracteres alfanuméricos y guión bajo
+    clean = re.sub(r"[^a-z0-9_]", "", clean)
+    # Evitar guiones bajos repetidos o en los extremos
+    clean = re.sub(r"_+", "_", clean).strip("_")
+
+    if not clean:
+        return "user"
+
+    return clean[:max_length]
+
+
+def generate_unique_alias(
+    base_alias: str, existing_aliases: list[str], max_length: int = 15
+) -> str:
+    """
+    Genera un alias único resolviendo colisiones numéricamente (ej: 'carlos' -> 'carlos_2').
+    """
+    clean = sanitize_alias(base_alias, max_length=max_length)
+    existing_set = {a.lower() for a in existing_aliases}
+
+    if clean not in existing_set:
+        return clean
+
+    counter = 2
+    while f"{clean}_{counter}" in existing_set:
+        counter += 1
+
+    return f"{clean}_{counter}"

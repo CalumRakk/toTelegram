@@ -19,14 +19,14 @@ NETWORK_FIELDS = {"chat_id"}
 
 
 class Commands:
-    PROFILE_CREATE = f"{CLI_BIN} profile create"
-    PROFILE_DELETE = f"{CLI_BIN} profile delete"
+    AUTH_LOGIN = f"{CLI_BIN} login"
+    AUTH_LOGOUT = f"{CLI_BIN} logout"
+    AUTH_SWITCH = f"{CLI_BIN} switch"
+    TARGET = f"{CLI_BIN} target"
     CONFIG_SET = f"{CLI_BIN} config set"
-    CONFIG_SEARCH = f"{CLI_BIN} config search"
     CONFIG_EDIT_LIST = f"{CLI_BIN} config add/remove"
     CONFIG_ADD_LIST = f"{CLI_BIN} config add"
     CONFIG_REMOVE_LIST = f"{CLI_BIN} config remove"
-    PROFILE_SWITCH = f"{CLI_BIN} profile switch"
     CLI_BIN = None
 
 

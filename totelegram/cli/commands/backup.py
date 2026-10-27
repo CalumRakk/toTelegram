@@ -12,7 +12,6 @@ from totelegram.concurrency import AccountBusyError
 from totelegram.engine.pipeline import JobPipeline
 from totelegram.engine.planner import PathLengthExceededError
 from totelegram.packaging.indexer import TapeIndexService
-from totelegram.schemas import VALUE_NOT_SET, Commands
 
 
 def backup_folders(
@@ -21,6 +20,12 @@ def backup_folders(
         ...,
         exists=True,
         help="Lista de carpetas a archivar",
+    ),
+    target: str | None = typer.Option(
+        None,
+        "--target",
+        "-t",
+        help="Nombre, @username o ID del chat destino para este backup (sobrescribe el destino por defecto).",
     ),
     force: bool = typer.Option(
         False,
@@ -45,15 +50,6 @@ def backup_folders(
         auto_truncate if auto_truncate is not None else settings.auto_truncate
     )
 
-    if settings.chat_id == VALUE_NOT_SET:
-        UI.error("El chat destino no está configurado.")
-        commands = [
-            f"{Commands.CONFIG_SET} chat_id <ID>",
-            f"{Commands.CONFIG_SEARCH} <QUERY>",
-        ]
-        UI.tip("Puedes configurarlo usando uno de estos comandos:", commands)
-        raise typer.Exit(1)
-
     if force:
         UI.warn("Forzando la subida de carpetas sin comprobar el estado del archivo.")
 
@@ -70,10 +66,16 @@ def backup_folders(
     UI.separator()
 
     with state.scope() as (client, db):
-        u_ctx = prepare_upload_context(state, client, db, settings)
+        u_ctx = prepare_upload_context(
+            state=state,
+            client=client,
+            db=db,
+            settings=settings,
+            target_override=target,
+        )
         pipeline = JobPipeline(u_ctx)
 
-        # Comprobación adaptativa del catálogo de cintas (Fase 4 & 5)
+        # Comprobación adaptativa del catálogo de cintas
         indexer = TapeIndexService(client, db)
         tape_report = indexer.auto_heal_or_report(u_ctx.tg_chat.id)
 
@@ -95,6 +97,10 @@ def backup_folders(
         user = u_ctx.owner.first_name or u_ctx.owner.username
         chat_n = u_ctx.tg_chat.title or u_ctx.tg_chat.username
         UI.success(f"Conectado como [bold]{user}[/]")
+
+        if not settings.has_custom_app:
+            UI.warn("Cuenta en modo público compartido (my.telegram.org recomendado).")
+
         UI.info(f"Destino: [bold cyan]{chat_n}[/] [dim](ID: {u_ctx.tg_chat.id})[/]")
         UI.print("", indent=False)
 

@@ -37,7 +37,7 @@ from totelegram.packaging.schemas import (
     UploadManifest,
 )
 from totelegram.packaging.ttape import TapeContainer
-from totelegram.schemas import JobStatus, SourceType, StrategyConfig
+from totelegram.schemas import SourceType, StrategyConfig
 
 logger = logging.getLogger(__name__)
 

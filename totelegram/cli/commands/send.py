@@ -9,7 +9,6 @@ from totelegram.cli.state import CLIState
 from totelegram.cli.ui import UI, DisplayUpload, console
 from totelegram.concurrency import AccountBusyError
 from totelegram.engine.pipeline import JobPipeline
-from totelegram.schemas import VALUE_NOT_SET, Commands
 
 
 @handle_config_errors
@@ -19,6 +18,12 @@ def send_files(
         ...,
         exists=True,
         help="Lista de archivos o carpetas a enviar de forma individual.",
+    ),
+    target: str | None = typer.Option(
+        None,
+        "--target",
+        "-t",
+        help="Nombre, @username o ID del chat destino para esta subida (sobrescribe el destino por defecto).",
     ),
     force: bool = typer.Option(
         False,
@@ -35,15 +40,6 @@ def send_files(
     profile_name, _ = _get_config_tools(ctx)
     settings = state.manager.get_settings(profile_name)
 
-    if settings.chat_id == VALUE_NOT_SET:
-        UI.error("El chat destino no está configurado.")
-        commands = [
-            f"{Commands.CONFIG_SET} chat_id <ID>",
-            f"{Commands.CONFIG_SEARCH} <QUERY>",
-        ]
-        UI.tip("Puedes configurarlo usando uno de estos comandos:", commands)
-        raise typer.Exit(1)
-
     if force:
         UI.warn("Forzando la subida de archivos sin comprobar el estado previo.")
 
@@ -58,7 +54,13 @@ def send_files(
         raise typer.Exit(0)
 
     with state.scope() as (client, db):
-        u_ctx = prepare_upload_context(state, client, db, settings)
+        u_ctx = prepare_upload_context(
+            state=state,
+            client=client,
+            db=db,
+            settings=settings,
+            target_override=target,
+        )
         pipeline = JobPipeline(u_ctx)
 
         from totelegram.telegram.patches import get_patch_status
@@ -72,6 +74,10 @@ def send_files(
         user = u_ctx.owner.first_name or u_ctx.owner.username
         chat_n = u_ctx.tg_chat.title or u_ctx.tg_chat.username
         UI.success(f"Conectado como [bold]{user}[/]")
+
+        if not settings.has_custom_app:
+            UI.warn("Cuenta en modo público compartido (my.telegram.org recomendado).")
+
         UI.info(f"Destino: [bold cyan]{chat_n}[/] [dim](ID: {u_ctx.tg_chat.id})[/]")
         UI.print("", indent=False)
 

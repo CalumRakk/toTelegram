@@ -35,7 +35,7 @@ class TestCliConfig(unittest.TestCase):
     def tearDown(self):
         try:
             self.tmp_dir.cleanup()
-        except Exception:
+        except Exception:  # noqa: S110
             pass
 
     def test_config_display_table(self):

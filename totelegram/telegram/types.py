@@ -93,3 +93,34 @@ class ChatResolution(BaseModel):
                 seen.add(m.id)
                 unique_matches.append(m)
         return unique_matches
+
+
+class TargetResolutionStatus(str, Enum):
+    RESOLVED = "resolved"  # Chat encontrado y con permisos de escritura confirmados
+    AMBIGUOUS = "ambiguous"  # Múltiples chats coinciden con la búsqueda
+    NOT_FOUND = "not_found"  # No se encontró ningún chat
+    NO_PERMISSIONS = (
+        "no_permissions"  # Encontrado, pero sin permisos o el usuario no es miembro
+    )
+    INVALID_INPUT = "invalid_input"  # Entrada vacía o sentinel NOT_SET
+
+
+class TargetResolution(BaseModel):
+    """Resultado unificado de la resolución de un destino (Target)."""
+
+    status: TargetResolutionStatus
+    query: str
+    chat_id: int | str | None = None
+    title: str | None = None
+    match: ChatMatch | None = None
+    candidates: List[ChatMatch] = Field(default_factory=list)
+    error_message: str | None = None
+    hint: str | None = None
+
+    @property
+    def is_resolved(self) -> bool:
+        return self.status == TargetResolutionStatus.RESOLVED
+
+    @property
+    def is_ambiguous(self) -> bool:
+        return self.status == TargetResolutionStatus.AMBIGUOUS
