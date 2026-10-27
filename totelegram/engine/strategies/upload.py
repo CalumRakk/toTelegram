@@ -10,7 +10,7 @@ from totelegram.engine.events import ProgressMultiplexer
 from totelegram.engine.factory import PayloadStreamFactory
 from totelegram.engine.strategies.base import JobStrategy
 from totelegram.models import Job, Payload, RemotePayload
-from totelegram.types import AvailabilityReport, StrategyResult, UploadContext
+from totelegram.types import StrategyResult, UploadContext
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +25,7 @@ class CooperativeUploadStrategy(JobStrategy):
         self,
         job: Job,
         ctx: UploadContext,
-        report: AvailabilityReport,
+        report: "AvailabilityReport",
     ) -> StrategyResult:
         with db_transaction(ctx.db):
             job.prepare_chunks(job.path, ctx.settings)

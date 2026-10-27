@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, List
 import peewee
 
 from totelegram.engine.events import DuplicateCandidate, NullObserver, UploadObserver
+from totelegram.schemas import ExecutionDecision
 
 if TYPE_CHECKING:
     from pyrogram.client import Client
@@ -19,7 +20,47 @@ if TYPE_CHECKING:
         RemotePayload,
         TelegramUser,
     )
-    from totelegram.schemas import AvailabilityState
+
+
+# --- EXCEPCIONES DE DOMINIO DE LA MÁQUINA DE ESTADOS ---
+
+
+class PipelineExecutionError(Exception):
+    """Excepción base para fallos en la resolución o ejecución del pipeline."""
+
+
+class IncompatibleCapacityError(PipelineExecutionError):
+    """Lanzada cuando un Job previo exige capacidades superiores a la sesión actual (ej. 4GB vs 2GB)."""
+
+    def __init__(self, job_chunk_size: int, account_max_size: int, is_premium: bool):
+        self.job_chunk_size = job_chunk_size
+        self.account_max_size = account_max_size
+        self.is_premium = is_premium
+        super().__init__(
+            f"El Job previo requiere partes de {job_chunk_size // (1024 * 1024)} MB, "
+            f"pero la cuenta activa solo soporta {account_max_size // (1024 * 1024)} MB "
+            f"({'Premium' if is_premium else 'Estándar'}). "
+            f"Usa '--force' para descartar el Job y re-particionar, o cambia de cuenta."
+        )
+
+
+class PermissionDeniedCleanupError(PipelineExecutionError):
+    """Lanzada cuando se requiere eliminar o reubicar mensajes pero faltan permisos de administrador."""
+
+    def __init__(
+        self,
+        chat_id: int | str,
+        reason: str = "Permiso 'can_delete_messages' requerido",
+    ):
+        self.chat_id = chat_id
+        self.reason = reason
+        super().__init__(
+            f"No se pueden limpiar o reordenar los mensajes en el chat {chat_id}: {reason}. "
+            f"Otorga permisos de eliminación a esta cuenta en Telegram para continuar."
+        )
+
+
+# --- CONTEXTO Y REPORTES ---
 
 
 @dataclass
@@ -42,23 +83,29 @@ class UploadContext:
 
 
 @dataclass
-class AvailabilityReport:
-    """Reporte generado por DiscoveryService tras inspeccionar un recurso."""
+class InvestigationReport:
+    """Reporte exhaustivo generado por DiscoveryService sobre el estado físico del Job en el chat."""
 
-    state: "AvailabilityState"
-    remotes: List["RemotePayload"] = field(default_factory=list)
+    decision: ExecutionDecision
+    valid_remotes: List["RemotePayload"] = field(default_factory=list)
+    orphaned_remotes: List["RemotePayload"] = field(default_factory=list)
+    missing_part_indices: List[int] = field(default_factory=list)
+    total_parts: int = 0
     potential_duplicates: List[DuplicateCandidate] = field(default_factory=list)
+    detail: str = ""
 
     @property
-    def can_forward(self) -> bool:
-        from totelegram.schemas import AvailabilityState
+    def is_fulfilled(self) -> bool:
+        return self.decision == ExecutionDecision.ALREADY_FULFILLED
 
-        return self.state == AvailabilityState.CAN_FORWARD and len(self.remotes) > 0
+    @property
+    def can_seal(self) -> bool:
+        return self.decision == ExecutionDecision.SEAL_HEALED
 
 
 @dataclass
 class StrategyResult:
-    """Resultado devuelto por la ejecución de una estrategia concreta."""
+    """Resultado devuelto por la ejecución física de subida."""
 
     strategy_name: str
     pieces_processed: int = 0
@@ -73,6 +120,7 @@ class JobExecutionResult:
 
     job: "Job"
     path: Path
+    decision: ExecutionDecision = ExecutionDecision.CLEAN_RESTART
     strategy_result: StrategyResult | None = None
     is_completed: bool = False
     snapshot_generated: bool = False

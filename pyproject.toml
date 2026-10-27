@@ -1,0 +1,10 @@
+[tool.pyright]
+typeCheckingMode = "basic" # Opciones: "off", "basic", "strict"
+include = ["src"]
+exclude = ["**/node_modules", "**/__pycache__", ".venv"]
+
+# Configura o apaga reglas específicas de diagnóstico
+reportUnusedCoroutine = false
+reportArgumentType= false
+reportReturnType= false
+reportAttributeAccessIssue= false

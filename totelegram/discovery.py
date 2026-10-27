@@ -11,15 +11,15 @@ from totelegram.common.helpers import batched
 from totelegram.database import db_transaction
 from totelegram.models import Job, Payload, RemotePayload
 from totelegram.packaging.importer import SnapshotImporter
-from totelegram.schemas import AvailabilityState
-from totelegram.types import AvailabilityReport, DuplicateCandidate
+from totelegram.schemas import ExecutionDecision
+from totelegram.telegram.access import ChatAccessService
+from totelegram.types import DuplicateCandidate, InvestigationReport
 
 if TYPE_CHECKING:
     from pyrogram.client import Client
 
 logger = logging.getLogger(__name__)
 
-# Umbral mínimo para buscar duplicados por nombre (20 MB)
 HEURISTIC_DUPLICATE_MIN_SIZE = 20 * 1024 * 1024
 
 
@@ -27,119 +27,166 @@ class DiscoveryService:
     def __init__(self, client: "Client", db: peewee.Database):
         self.client = client
         self.db = db
+        self.access_service = ChatAccessService(client)
 
-    def investigate(self, job: Job) -> AvailabilityReport:
-        """Analiza la disponibilidad del Job y devuelve un reporte con los recursos encontrados."""
+    def investigate(
+        self,
+        job: Job,
+        force: bool = False,
+        account_max_chunk_size: int | None = None,
+    ) -> InvestigationReport:
+        """
+        Analiza el estado físico del Job exclusivamente en su chat de destino.
+        Resuelve la decisión preliminar según el árbol de estados.
+        """
         logger.info(
-            f"Investigando disponibilidad de MD5 {job.source.md5sum} en chat {job.chat.id}"
+            f"Investigando disponibilidad de '{job.source.path.name}' "
+            f"(MD5: {job.source.md5sum[:12]}...) en chat {job.chat.id}"
         )
 
-        # Camino Local: ¿Ya está en la base de datos y fresco/válido?
-        if self.is_fulfilled_local(job):
-            return AvailabilityReport(state=AvailabilityState.FULFILLED)
-
-        # Descubrimiento JIT en Telegram: ¿Existe en el chat aunque no esté en la DB local?
-        if self._discover_and_hydrate_jit(job):
-            logger.info(
-                f"Recurso MD5 {job.source.md5sum} descubierto y asimilado JIT desde Telegram."
-            )
-            # Re-verificar tras hidratar la DB
-            if self.is_fulfilled_local(job):
-                return AvailabilityReport(state=AvailabilityState.FULFILLED)
-
-        # Camino Espejo: ¿Existe en otro chat para hacer Smart Forward?
-        historical_jobs = self.get_historical_jobs(job)
-        if historical_jobs.exists():
-            remotes = self.get_remotes(historical_jobs)
-            if remotes:
-                return AvailabilityReport(
-                    state=AvailabilityState.CAN_FORWARD, remotes=remotes
-                )
-
-        # Búsqueda heurística de posibles duplicados por nombre en el chat
         potential_duplicates = self._search_potential_duplicates(job)
 
-        return AvailabilityReport(
-            state=AvailabilityState.NEEDS_UPLOAD,
-            potential_duplicates=potential_duplicates,
-        )
-
-    def _search_potential_duplicates(self, job: Job) -> List[DuplicateCandidate]:
-        """Busca documentos en el chat de destino con nombres similares al recurso actual."""
-        # Evitar consultas de red para archivos pequeños
-        if not job.source.is_folder and job.source.size < HEURISTIC_DUPLICATE_MIN_SIZE:
-            return []
-
-        raw_name = job.path.name if job.source.is_folder else job.path.stem
-        # Limpiar separadores y caracteres especiales dejando palabras legibles
-        clean_name = re.sub(r"[^\w\s]", " ", raw_name).strip()
-        words = [w for w in clean_name.split() if len(w) > 1]
-        if not words:
-            return []
-
-        # Usar las primeras 4 palabras representativas
-        search_query = " ".join(words[:4])
-        if len(search_query) < 3:
-            return []
-
-        logger.debug(
-            f"Ejecutando búsqueda heurística por nombre en chat {job.chat.id}: '{search_query}'"
-        )
-
-        try:
-            from pyrogram.types import Message
-
-            found_messages = cast(
-                List[Message],
-                list(
-                    self.client.search_messages(
-                        chat_id=job.chat.id,
-                        query=search_query,
-                        filter=enums.MessagesFilter.DOCUMENT,
-                        limit=5,
-                    )  # type: ignore
-                ),
-            )
-        except Exception as e:
-            logger.debug(f"Aviso en búsqueda heurística de duplicados: {e}")
-            return []
-
-        duplicates: List[DuplicateCandidate] = []
-        for msg in found_messages:
-            if not msg.document:
-                continue
-
-            caption = msg.caption or ""
-            # Omitir snapshots, manifiestos o locks del sistema
-            if "#totelegram" in caption or "#src_" in caption:
-                continue
-
-            doc_name = msg.document.file_name or "Desconocido"
-            doc_size = msg.document.file_size or 0
-
-            duplicates.append(
-                DuplicateCandidate(
-                    message_id=msg.id,
-                    file_name=doc_name,
-                    file_size=doc_size,
-                    date=msg.date,
+        # 1. ¿Existe ya un Snapshot completado en este chat?
+        if self._is_snapshot_fulfilled_in_chat(job):
+            if not force:
+                logger.info(f"Job {job.id} ya está completado en el canal de destino.")
+                return InvestigationReport(
+                    decision=ExecutionDecision.ALREADY_FULFILLED,
+                    total_parts=job.total_expected_parts,
+                    potential_duplicates=potential_duplicates,
+                    detail="El archivo ya se encuentra 100% completado en este chat.",
                 )
+            else:
+                logger.info("Snapshot existente ignorado porque se especificó --force.")
+
+        # 2. Comprobar piezas existentes del Job en BD y validar su existencia física JIT
+        local_remotes = list(
+            RemotePayload.select(RemotePayload, Payload)
+            .join(Payload)
+            .where((Payload.job == job) & (RemotePayload.is_orphaned == False))
+            .order_by(Payload.sequence_index)
+        )
+
+        valid_remotes: List[RemotePayload] = []
+        orphaned_remotes: List[RemotePayload] = []
+
+        if local_remotes:
+            valid_remotes, orphaned_remotes = self._validate_jit_batch(local_remotes)
+
+        expected_count = self._get_expected_count(job)
+        valid_count = len(valid_remotes)
+
+        # 3. ¿Están todas las partes físicas subidas pero falta el snapshot? (SEAL_HEALED)
+        if valid_count == expected_count and expected_count > 0:
+            logger.info(
+                f"Job {job.id}: Todas las piezas ({valid_count}/{expected_count}) "
+                "están en Telegram. Requiere únicamente sellado de snapshot."
+            )
+            return InvestigationReport(
+                decision=ExecutionDecision.SEAL_HEALED,
+                valid_remotes=valid_remotes,
+                total_parts=expected_count,
+                potential_duplicates=potential_duplicates,
+                detail="Todas las partes físicas ya están en Telegram. Solo falta sellar el Snapshot.",
             )
 
-        return duplicates
+        # 4. Si hay partes parciales (subida a medias):
+        if valid_count > 0:
+            # A) Comprobación de corte incompatible (ej. Job de 4 GB con cuenta degradada a 2 GB)
+            if account_max_chunk_size and job.chunk_size > account_max_chunk_size:
+                if not force:
+                    logger.warning(
+                        f"Job {job.id} exige bloques de {job.chunk_size // (1024 * 1024)} MB, "
+                        f"pero la cuenta solo soporta {account_max_chunk_size // (1024 * 1024)} MB."
+                    )
+                    return InvestigationReport(
+                        decision=ExecutionDecision.INCOMPATIBLE_CAPACITY,
+                        valid_remotes=valid_remotes,
+                        orphaned_remotes=orphaned_remotes,
+                        total_parts=expected_count,
+                        potential_duplicates=potential_duplicates,
+                        detail="El corte previo del archivo supera el límite de subida de la cuenta activa.",
+                    )
+                else:
+                    # Con --force, el usuario desea descartar el corte incompatible y reiniciar en 2GB.
+                    # Requiere permiso para eliminar los trozos de 4GB viejos de Telegram.
+                    if not self.access_service.can_delete_messages(job.chat.id):
+                        return InvestigationReport(
+                            decision=ExecutionDecision.PERMISSION_DENIED_CLEANUP,
+                            valid_remotes=valid_remotes,
+                            total_parts=expected_count,
+                            detail="Faltan permisos para eliminar los trozos viejos con corte incompatible.",
+                        )
+                    return InvestigationReport(
+                        decision=ExecutionDecision.CLEAN_RESTART,
+                        valid_remotes=valid_remotes,
+                        total_parts=expected_count,
+                        potential_duplicates=potential_duplicates,
+                        detail="Reinicio limpio: se eliminarán partes de 4GB viejas y se reanudará en 2GB.",
+                    )
+
+            # B) Corte compatible con --force (Anti-Waste TOC): Reubicar al fondo
+            if force:
+                if not self.access_service.can_delete_messages(job.chat.id):
+                    logger.warning(
+                        f"No se puede reubicar trozos en chat {job.chat.id}: falta permiso can_delete_messages."
+                    )
+                    return InvestigationReport(
+                        decision=ExecutionDecision.PERMISSION_DENIED_CLEANUP,
+                        valid_remotes=valid_remotes,
+                        total_parts=expected_count,
+                        detail="Faltan permisos para eliminar los trozos antiguos al reordenar el chat.",
+                    )
+
+                logger.info(
+                    f"Job {job.id} a medias ({valid_count}/{expected_count}) con --force: "
+                    "Reubicación atómica al fondo del chat (Anti-Waste TOC)."
+                )
+                return InvestigationReport(
+                    decision=ExecutionDecision.RELOCATED_AND_RESUMED,
+                    valid_remotes=valid_remotes,
+                    orphaned_remotes=orphaned_remotes,
+                    total_parts=expected_count,
+                    potential_duplicates=potential_duplicates,
+                    detail="Subida a medias con corte compatible y --force. Se reubicarán trozos al fondo.",
+                )
+
+            # C) Corte compatible sin --force: Reanudar en el sitio
+            return InvestigationReport(
+                decision=ExecutionDecision.RESUMED_IN_PLACE,
+                valid_remotes=valid_remotes,
+                orphaned_remotes=orphaned_remotes,
+                total_parts=expected_count,
+                potential_duplicates=potential_duplicates,
+                detail="Subida incompleta compatible. Reanudando partes faltantes en su sitio.",
+            )
+
+        # 5. Sin partes previas válidas -> Subida limpia desde cero
+        return InvestigationReport(
+            decision=ExecutionDecision.CLEAN_RESTART,
+            orphaned_remotes=orphaned_remotes,
+            total_parts=expected_count,
+            potential_duplicates=potential_duplicates,
+            detail="No hay partes previas válidas. Requiere subida limpia.",
+        )
+
+    def _is_snapshot_fulfilled_in_chat(self, job: Job) -> bool:
+        """Verifica si existe un Snapshot válido y activo en este chat (DB + Telegram JIT)."""
+        if job.is_completed_local and job.has_remote_snapshot:
+            # Si el job o el snapshot remoto fueron verificados recientemente, es válido de inmediato
+            if job.is_fresh() or (job.remote_snapshot and job.remote_snapshot.is_fresh):
+                return True
+            if self._validate_job_snapshot_jit(job):
+                return True
+
+        return self._discover_and_hydrate_jit(job)
 
     def _discover_and_hydrate_jit(self, job: Job) -> bool:
-        """Busca el snapshot del recurso en Telegram. Si lo encuentra, delega su hidratación en SQLite.
-
-        Retorna True si encontró y asimiló un snapshot con éxito.
-        """
+        """Busca el snapshot del recurso en el chat destino en Telegram. Si lo encuentra, lo asimila."""
         from totelegram.telegram.captions import ManifestCaption
 
         target_short_hash = job.source.short_hash
         query = f"#src_{target_short_hash}"
-        logger.debug(
-            f"Buscando snapshot en Telegram JIT en chat {job.chat.id} con query '{query}'"
-        )
 
         try:
             from pyrogram.types import Message
@@ -152,47 +199,22 @@ class DiscoveryService:
                         query=query,
                         filter=enums.MessagesFilter.DOCUMENT,
                         limit=5,
-                    )  # type: ignore
+                    )
                 ),
             )
 
-            # Filtrar validando con el contrato formal ManifestCaption
-            manifest_msg = None
             for m in found_messages:
                 if not m.document or not m.caption:
                     continue
                 parsed = ManifestCaption.parse(m.caption)
                 if parsed and parsed.source_short_hash == target_short_hash:
-                    manifest_msg = m
-                    break
+                    return SnapshotImporter.rehydrate_from_message(
+                        client=self.client,
+                        message=m,
+                        db=self.db,
+                    )
 
-            if not manifest_msg:
-                logger.debug(
-                    f"No se encontró mensaje de snapshot en Telegram para {query}"
-                )
-                return False
-
-            logger.info(
-                f"Snapshot detectado en Telegram (Msg ID: {manifest_msg.id}). Hidratando DB..."
-            )
-
-            # Delegación directa al motor centralizado
-            succeeded = SnapshotImporter.rehydrate_from_message(
-                client=self.client,
-                message=manifest_msg,
-                db=self.db,
-            )
-
-            if succeeded:
-                logger.info(
-                    f"Hidratación JIT completada con éxito para Job {job.id} "
-                    f"(Snapshot Msg ID: {manifest_msg.id})"
-                )
-            else:
-                logger.warning(f"Fallo al aplicar la importación JIT para Job {job.id}")
-
-            return succeeded
-
+            return False
         except RPCError as e:
             logger.warning(f"Error de Telegram durante búsqueda JIT: {e}")
             return False
@@ -200,26 +222,8 @@ class DiscoveryService:
             logger.exception("Excepción inesperada en búsqueda JIT de snapshot")
             return False
 
-    def get_historical_jobs(self, job: Job) -> peewee.ModelSelect:
-        """Busca Jobs completados para el mismo Source en otros chats con snapshot activo."""
-        from totelegram.models import RemoteSnapshot
-
-        return (
-            Job.select()
-            .join(RemoteSnapshot)
-            .where(
-                (Job.source == job.source)
-                & (Job.chat != job.chat)
-                & (RemoteSnapshot.is_orphaned == False)
-            )
-            .order_by(Job.updated_at.desc())  # type: ignore
-        )
-
     def _validate_job_snapshot_jit(self, job: Job) -> bool:
-        """Comprueba mediante una sola llamada si el mensaje del snapshot sigue existiendo en Telegram.
-
-        Si el snapshot no existe, solo orfana el RemoteSnapshot sin destruir el Job si las piezas están vivas.
-        """
+        """Comprueba si el mensaje del snapshot sigue existiendo en Telegram."""
         remote_snap = job.remote_snapshot
         if not remote_snap:
             return False
@@ -232,12 +236,12 @@ class DiscoveryService:
                 self.client.get_messages(job.chat.id, remote_snap.message_id),
             )
 
-            # Si el mensaje no existe o está vacío en Telegram
-            if msg is None or getattr(msg, "empty", True) or not msg.document:
-                logger.warning(
-                    f"Snapshot (Msg {remote_snap.message_id}) no encontrado en chat {job.chat.id}. "
-                    f"Marcando RemoteSnapshot como huérfano."
-                )
+            # Usamos `is True` estricto para no confundir MagicMocks con mensajes vacíos
+            if (
+                msg is None
+                or getattr(msg, "empty", False) is True
+                or not getattr(msg, "document", None)
+            ):
                 with db_transaction(self.db):
                     remote_snap.mark_orphaned()
                 return False
@@ -246,107 +250,29 @@ class DiscoveryService:
                 remote_snap.mark_verified()
                 job.mark_verified()
             return True
-
         except RPCError as e:
             logger.warning(
-                f"Error de acceso en Telegram para Snapshot (Chat: {job.chat.id}, "
-                f"Msg: {remote_snap.message_id}): {e}. Marcando como huérfano."
+                f"Error de acceso a snapshot en Telegram ({job.chat.id}, msg {remote_snap.message_id}): {e}"
             )
             with db_transaction(self.db):
                 remote_snap.mark_orphaned()
             return False
 
-    def is_fulfilled_local(self, job: Job) -> bool:
-        """Verifica si el Job actual ya está completo en el destino."""
-        # Si el Job está completo en local y tiene snapshot registrado sin borrarse
-        if job.is_completed_local and job.has_remote_snapshot:
-            # Camino ultrarrápido O(1): Si está fresco (< 30 min), es válido sin tocar la red
-            if job.is_fresh:
-                logger.debug(
-                    f"Job {job.id} está fresco (verificado recientemente). Disponibilidad confirmada en local."
-                )
-                return True
-
-            # Si expiró la frescura (> 30 min), comprobamos el snapshot en Telegram (50ms)
-            logger.debug(
-                f"Job {job.id} expiró frescura TTL. Verificando snapshot en Telegram..."
-            )
-            if self._validate_job_snapshot_jit(job):
-                return True
-            # Si el snapshot en Telegram no existe o fue borrado, continuamos abajo para auditar los chunks
-
-        # Recuperar todas las piezas que no estén huérfanas
-        local_remotes = list(
-            RemotePayload.select()
-            .join(Payload)
-            .where((Payload.job == job) & (RemotePayload.is_orphaned == False))
-            .order_by(Payload.sequence_index)
-        )
-
-        # Si existen piezas previas (completas o parciales), verificamos que sigan vivas en Telegram
-        if local_remotes:
-            self._validate_jit_batch(local_remotes)
-
-        expected = self._get_expected_count(job)
-
-        # Re-contar piezas válidas que sobrevivieron a la validación JIT
-        valid_remotes_count = (
-            RemotePayload.select()
-            .join(Payload)
-            .where((Payload.job == job) & (RemotePayload.is_orphaned == False))
-            .count()
-        )
-
-        return bool(valid_remotes_count == expected and expected > 0)
-
-    def get_remotes(self, historical_jobs) -> List[RemotePayload] | None:
-        """Valida que el Job espejo tenga todas sus partes en Telegram verificando su Snapshot y sus Chunks."""
-        for hist_job in historical_jobs:
-            # Si el snapshot del espejo expiró frescura, comprobar que siga existiendo en Telegram
-            if not hist_job.is_fresh and not self._validate_job_snapshot_jit(hist_job):
-                continue
-
-            remotes = list(
-                RemotePayload.select(RemotePayload, Payload)
-                .join(Payload)
-                .where((Payload.job == hist_job) & (RemotePayload.is_orphaned == False))
-                .order_by(Payload.sequence_index)
-            )
-
-            expected_count = self._get_expected_count(hist_job)
-            if len(remotes) != expected_count:
-                continue
-
-            # Confirmar que los chunks existan en Telegram
-            if not self._validate_jit_batch(remotes):
-                logger.warning(
-                    f"Espejo Job {hist_job.id} tiene piezas huérfanas en Telegram. Omitiendo espejo."
-                )
-                continue
-
-            logger.info(f"Espejo íntegro confirmado vía JIT batch: Job {hist_job.id}")
-            return remotes
-
-        return None
-
-    def _validate_jit_batch(self, remotes: List[RemotePayload]) -> bool:
-        """Verifica en Telegram si los mensajes de un Job siguen existiendo.
-        Usa caché interna para evitar peticiones redundantes.
+    def _validate_jit_batch(
+        self, remotes: List[RemotePayload]
+    ) -> tuple[List[RemotePayload], List[RemotePayload]]:
         """
-        logger.debug(
-            f"Iniciando validación JIT en Telegram para {len(remotes)} mensajes"
-        )
+        Verifica en Telegram si los mensajes de las piezas siguen vivos y no fueron borrados.
+        Retorna (valid_remotes, orphaned_remotes).
+        """
         if not remotes:
-            return False
+            return [], []
 
-        to_verify = [r for r in remotes if not r.is_fresh]
+        chat_id = remotes[0].chat_id
+        msg_ids = [r.message_id for r in remotes]
 
-        if not to_verify:
-            return True
-
-        chat_id = to_verify[0].chat_id
-        msg_ids = [r.message_id for r in to_verify]
-        is_integral = True
+        valid_remotes: List[RemotePayload] = []
+        orphaned_remotes: List[RemotePayload] = []
 
         from pyrogram.types import Message
 
@@ -359,31 +285,87 @@ class DiscoveryService:
                 if isinstance(messages, Message):
                     messages = [messages]
 
-                for msg in messages:
-                    remote = next(
-                        (r for r in to_verify if r.message_id == msg.id), None
-                    )
-                    if not remote:
+                msg_map = {
+                    m.id: m
+                    for m in messages
+                    if m and getattr(m, "empty", False) is not True
+                }
+
+                for r in remotes:
+                    if r.message_id not in batch_ids:
                         continue
 
-                    # Si un solo mensaje del set falló, el espejo no es íntegro
-                    if msg is None or getattr(msg, "empty", True) or not msg.document:
-                        remote.mark_orphaned()
-                        is_integral = False
+                    msg = msg_map.get(r.message_id)
+
+                    if (
+                        not msg
+                        or not msg.document
+                        or msg.document.file_size != r.payload.size
+                    ):
+                        r.mark_orphaned()
+                        orphaned_remotes.append(r)
                         logger.warning(
-                            f"Mensaje {remote.message_id} no encontrado o vacío en Telegram. Marcando como huérfano."
+                            f"Mensaje {r.message_id} huérfano o alterado en Telegram. Marcado como huérfano."
                         )
-                        continue
-
-                    # Verificación extra: ¿El tamaño coincide? (Anti-edición)
-                    if msg.document.file_size != remote.payload.size:
-                        remote.mark_orphaned()
-                        is_integral = False
                     else:
-                        remote.mark_verified(msg)
+                        r.mark_verified(msg)
+                        valid_remotes.append(r)
 
-                time.sleep(0.5)
-            return is_integral
+                time.sleep(0.3)
+
+        return valid_remotes, orphaned_remotes
+
+    def _search_potential_duplicates(self, job: Job) -> List[DuplicateCandidate]:
+        """Busca heurísticamente documentos con nombres similares en el chat de destino."""
+        if not job.source.is_folder and job.source.size < HEURISTIC_DUPLICATE_MIN_SIZE:
+            return []
+
+        raw_name = job.path.name if job.source.is_folder else job.path.stem
+        clean_name = re.sub(r"[^\w\s]", " ", raw_name).strip()
+        words = [w for w in clean_name.split() if len(w) > 1]
+        if not words:
+            return []
+
+        search_query = " ".join(words[:4])
+        if len(search_query) < 3:
+            return []
+
+        try:
+            from pyrogram.types import Message
+
+            found_messages = cast(
+                List[Message],
+                list(
+                    self.client.search_messages(
+                        chat_id=job.chat.id,
+                        query=search_query,
+                        filter=enums.MessagesFilter.DOCUMENT,
+                        limit=5,
+                    )
+                ),
+            )
+        except Exception:
+            return []
+
+        duplicates: List[DuplicateCandidate] = []
+        for msg in found_messages:
+            if not msg.document:
+                continue
+
+            caption = msg.caption or ""
+            if "#totelegram" in caption or "#src_" in caption:
+                continue
+
+            duplicates.append(
+                DuplicateCandidate(
+                    message_id=msg.id,
+                    file_name=msg.document.file_name or "Desconocido",
+                    file_size=msg.document.file_size or 0,
+                    date=msg.date,
+                )
+            )
+
+        return duplicates
 
     def _get_expected_count(self, job: Job) -> int:
         db_count = job.payloads.count()

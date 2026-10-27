@@ -15,6 +15,7 @@ from totelegram.engine.events import ProgressMultiplexer, UploadObserver
 from totelegram.engine.factory import PayloadStreamFactory, UploadStream
 from totelegram.engine.pipeline import JobPipeline
 from totelegram.engine.planner import JobPlanner, PathLengthExceededError
+from totelegram.engine.strategies.upload import CooperativeUploadStrategy
 from totelegram.models import (
     Job,
     Payload,
@@ -25,10 +26,10 @@ from totelegram.models import (
 )
 from totelegram.packaging.snapshot import SnapshotService
 from totelegram.schemas import (
-    AvailabilityState,
+    ExecutionDecision,
 )
 from totelegram.stream import FileVolume
-from totelegram.types import AvailabilityReport, StrategyResult, UploadContext
+from totelegram.types import InvestigationReport, StrategyResult, UploadContext
 
 
 class TestEnginePipelineAndComponents(unittest.TestCase):
@@ -204,8 +205,9 @@ class TestEnginePipelineAndComponents(unittest.TestCase):
 
             mock_del_snap.assert_called_once_with(tmp_path)
 
+            # En la nueva arquitectura, JobPlanner preserva el Job para que Discovery decida
             self.assertEqual(Job.select().count(), 1)
-            self.assertEqual(job_2.payloads.count(), 0)
+            self.assertEqual(job_2.id, job_1.id)
         finally:
             if tmp_path.exists():
                 tmp_path.unlink()
@@ -233,8 +235,6 @@ class TestEnginePipelineAndComponents(unittest.TestCase):
             tmp_path = Path(tmp.name)
 
         try:
-            mock_strategy = MagicMock()
-
             # Simulamos el comportamiento de las estrategias reales (preparar los chunks)
             def fake_execute(job, ctx, report):
                 job.prepare_chunks(tmp_path, self.settings)
@@ -246,18 +246,17 @@ class TestEnginePipelineAndComponents(unittest.TestCase):
                     message="Subida OK",
                 )
 
-            mock_strategy.execute.side_effect = fake_execute
-
-            self.ctx.discovery.investigate.return_value = AvailabilityReport(  # type: ignore
-                state=AvailabilityState.NEEDS_UPLOAD
+            self.ctx.discovery.investigate.return_value = InvestigationReport(
+                decision=ExecutionDecision.CLEAN_RESTART
             )
 
             pipeline = JobPipeline(self.ctx)
             mock_sent_msg = MagicMock(id=98765)
             with (
-                patch(
-                    "totelegram.engine.pipeline.StrategyResolver.resolve",
-                    return_value=mock_strategy,
+                patch.object(
+                    CooperativeUploadStrategy,
+                    "execute",
+                    side_effect=fake_execute,
                 ),
                 patch.object(
                     SnapshotService,
@@ -298,24 +297,22 @@ class TestEnginePipelineAndComponents(unittest.TestCase):
 
         try:
             self.settings.upload_pause_range = [1, 1]  # Pausa forzada de 1 minuto (60s)
-            self.ctx.discovery.investigate.return_value = AvailabilityReport(  # type: ignore
-                state=AvailabilityState.NEEDS_UPLOAD
-            )
-
-            mock_strategy = MagicMock()
-            mock_strategy.execute.return_value = StrategyResult(
-                strategy_name="MockStrategy",
-                pieces_processed=1,
-                did_upload_bytes=True,
-                is_completed=True,
+            self.ctx.discovery.investigate.return_value = InvestigationReport(
+                decision=ExecutionDecision.CLEAN_RESTART
             )
 
             pipeline = JobPipeline(self.ctx)
 
             with (
-                patch(
-                    "totelegram.engine.pipeline.StrategyResolver.resolve",
-                    return_value=mock_strategy,
+                patch.object(
+                    CooperativeUploadStrategy,
+                    "execute",
+                    return_value=StrategyResult(
+                        strategy_name="MockStrategy",
+                        pieces_processed=1,
+                        did_upload_bytes=True,
+                        is_completed=True,
+                    ),
                 ),
                 patch.object(
                     SnapshotService,
@@ -346,25 +343,23 @@ class TestEnginePipelineAndComponents(unittest.TestCase):
 
         try:
             duplicate_candidate = MagicMock()
-            self.ctx.discovery.investigate.return_value = AvailabilityReport(  # type: ignore
-                state=AvailabilityState.NEEDS_UPLOAD,
+            self.ctx.discovery.investigate.return_value = InvestigationReport(
+                decision=ExecutionDecision.CLEAN_RESTART,
                 potential_duplicates=[duplicate_candidate],
-            )
-
-            mock_strategy = MagicMock()
-            mock_strategy.execute.return_value = StrategyResult(
-                strategy_name="MockStrategy",
-                pieces_processed=1,
-                did_upload_bytes=True,
-                is_completed=True,
             )
 
             pipeline = JobPipeline(self.ctx)
 
             with (
-                patch(
-                    "totelegram.engine.pipeline.StrategyResolver.resolve",
-                    return_value=mock_strategy,
+                patch.object(
+                    CooperativeUploadStrategy,
+                    "execute",
+                    return_value=StrategyResult(
+                        strategy_name="MockStrategy",
+                        pieces_processed=1,
+                        did_upload_bytes=True,
+                        is_completed=True,
+                    ),
                 ),
                 patch(
                     "totelegram.packaging.snapshot.SnapshotService.generate_snapshot",
@@ -411,7 +406,7 @@ class TestEnginePipelineAndComponents(unittest.TestCase):
                 {
                     "id": 881,
                     "chat": {"id": self.chat.id, "type": "channel"},
-                    "link": f"https://t.me/c/123456/881",
+                    "link": "https://t.me/c/123456/881",
                 }
             )
             RemotePayload.register_upload(payload, mock_msg, self.user)

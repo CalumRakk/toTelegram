@@ -18,6 +18,38 @@ ID_PREFIX_RE = re.compile(r"^id:", re.IGNORECASE)
 NETWORK_FIELDS = {"chat_id"}
 
 
+class ExecutionDecision(str, enum.Enum):
+    """Decisión de ejecución resuelta por el motor para un Job en su chat destino."""
+
+    ALREADY_FULFILLED = "already_fulfilled"
+    # El archivo ya está 100% en el canal (Snapshot verificado JIT). No transfiere bytes.
+
+    SEAL_HEALED = "seal_healed"
+    # Todos los trozos físicos (N/N) están en Telegram, pero faltaba el snapshot.
+    # Se genera y publica el snapshot sin transferir datos de archivo.
+
+    RESUMED_IN_PLACE = "resumed_in_place"
+    # Reanudación estándar sin --force. Respeta las partes ya subidas y continúa
+    # subiendo las partes faltantes desde el último offset.
+
+    RELOCATED_AND_RESUMED = "relocated_and_resumed"
+    # Reanudación con --force y corte compatible (Anti-Waste TOC).
+    # Reubica las partes viejas al fondo del chat con copy_message, borra las viejas
+    # y sube las partes restantes de forma consecutiva.
+
+    CLEAN_RESTART = "clean_restart"
+    # Reinicio limpio con --force ante cambio de corte incompatible (ej. 4GB -> 2GB).
+    # Elimina trozos viejos en Telegram, purga el Job previo y sube desde cero.
+
+    INCOMPATIBLE_CAPACITY = "incompatible_capacity"
+    # Bloqueo: El Job previo exige una capacidad mayor a la que la sesión activa posee
+    # (ej. Job de 4 GB iniciado con Premium, ejecutado hoy por cuenta normal de 2 GB).
+
+    PERMISSION_DENIED_CLEANUP = "permission_denied_cleanup"
+    # Bloqueo: Se requiere limpiar o reubicar mensajes en Telegram, pero la cuenta
+    # carece del permiso de administrador 'can_delete_messages'.
+
+
 class Commands:
     AUTH_LOGIN = f"{CLI_BIN} login"
     AUTH_LOGOUT = f"{CLI_BIN} logout"

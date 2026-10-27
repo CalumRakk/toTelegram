@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Optional, Union, cast
+from typing import TYPE_CHECKING, Optional, cast
 
 from totelegram.telegram.types import AccessReport, AccessStatus, ChatMatch
 from totelegram.telegram.utils import normalize_chat_id
@@ -31,7 +31,7 @@ class ChatAccessService:
         except Exception as e:
             logger.debug(f"Error refrescando peers: {e}")
 
-    def _get_membership(self, chat: "Chat") -> Optional["ChatMember"]:
+    def _get_membership(self, chat: "Chat") -> Optional["ChatMember"]:  # noqa: UP045
         """
         Obtiene el objeto ChatMember del usuario actual para el chat dado.
 
@@ -49,7 +49,7 @@ class ChatAccessService:
         # Dificil que ocurra, pero se contempla por las dudas.
 
         try:
-            return self.client.get_chat_member(chat.id, "me")  # type: ignore
+            return self.client.get_chat_member(chat.id, "me")
         except UserNotParticipant:
             return None
         except RPCError as e:
@@ -139,12 +139,12 @@ class ChatAccessService:
         from pyrogram.enums import ChatAction
 
         try:
-            self.client.send_chat_action(chat.id, ChatAction.TYPING)  # type: ignore
+            self.client.send_chat_action(chat.id, ChatAction.TYPING)
             return True
         except ValueError:
             return False
 
-    def get_chat(self, chat_id: str | int) -> Optional["Chat"]:
+    def get_chat(self, chat_id: str | int) -> Optional["Chat"]:  # noqa: UP045
         """
         Obtiene el objeto Chat correspondiente al identificador dado.
 
@@ -224,3 +224,33 @@ class ChatAccessService:
             chat=ChatMatch.from_chat(chat),
             reason="Acceso verificado correctamente.",
         )
+
+    def can_delete_messages(self, chat_or_id: "Chat | int | str") -> bool:
+        """
+        Determina si el usuario actual tiene permisos para eliminar mensajes en el chat.
+        - En chats privados: Siempre True.
+        - En canales y supergrupos: Solo Propietarios o Administradores
+        con el privilegio explícito 'can_delete_messages'.
+        - En grupos comunes como miembro regular: False (no puede borrar mensajes ajenos).
+        """
+        from pyrogram.enums import ChatMemberStatus, ChatType
+        from pyrogram.types import Chat
+
+        chat = chat_or_id if isinstance(chat_or_id, Chat) else self.get_chat(chat_or_id)
+        if not chat:
+            return False
+
+        if chat.type == ChatType.PRIVATE:
+            return True
+
+        member = self._get_membership(chat)
+        if member is None:
+            return False
+
+        if member.status == ChatMemberStatus.OWNER:
+            return True
+
+        if member.status == ChatMemberStatus.ADMINISTRATOR:
+            return bool(member.privileges and member.privileges.can_delete_messages)
+
+        return False

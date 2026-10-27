@@ -5,7 +5,6 @@ import peewee
 import tartape
 from tartape.exceptions import PathConstraintReportError, TarIntegrityError
 
-from totelegram.database import db_transaction
 from totelegram.models import Job, Source, TelegramChat
 from totelegram.types import UploadContext
 from totelegram.utils import delete_snapshot
@@ -41,19 +40,14 @@ class JobPlanner:
         else:
             source = cls._resolve_file_source(path, ctx)
 
+        # Buscamos si existe un Job previo en este chat (incompleto o completado)
         existing_job = Job.get_for_source_in_chat(source, chat_db)
 
-        # Si se fuerza, respaldamos snapshots físicos en disco para no perder datos históricos
         if force:
             delete_snapshot(path)
 
-        if existing_job and force:
-            logger.info(
-                f"Forzando reinicio del Job previo {existing_job.id} para {path.name}"
-            )
-            existing_job.purge(ctx.db)
-            existing_job = None
-
+        # Si ya existe un Job, NO lo purgamos aquí. Lo devolvemos para que
+        # DiscoveryService evalúe sus piezas y la Máquina de Estados decida.
         if existing_job:
             job = existing_job
         else:
