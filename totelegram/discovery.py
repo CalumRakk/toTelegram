@@ -201,10 +201,7 @@ class DiscoveryService:
             return False
 
     def get_historical_jobs(self, job: Job) -> peewee.ModelSelect:
-        """Busca Jobs completados para el mismo Source en otros chats.
-
-        Solo se consideran Jobs que cuenten con un Snapshot activo en Telegram.
-        """
+        """Busca Jobs completados para el mismo Source en otros chats con snapshot activo."""
         from totelegram.models import RemoteSnapshot
 
         return (
@@ -213,7 +210,6 @@ class DiscoveryService:
             .where(
                 (Job.source == job.source)
                 & (Job.chat != job.chat)
-                & (Job.deleted_at == 0)
                 & (RemoteSnapshot.is_orphaned == False)
             )
             .order_by(Job.updated_at.desc())  # type: ignore

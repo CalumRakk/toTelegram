@@ -1,5 +1,3 @@
-# tests/test_models.py
-
 import json
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -184,10 +182,10 @@ class TestModelsArchitecture(unittest.TestCase):
         remote.save()
         self.assertFalse(remote.is_fresh)
 
-    def test_job_mark_deleted_orphans_remotes(self):
-        """Al marcar un Job como borrado, is_deleted es True y orfana sus remotos."""
+    def test_job_purge_cascades_cleanly(self):
+        """Al purgar un Job, se eliminan en cascada sus Payloads, Remotes y Snapshots sin violar FKs."""
         source = Source.create(
-            path_str="del.bin", md5sum="h_del", size=10, mtime=1.0, mimetype="bin"
+            path_str="del.bin", md5sum="h_del_clean", size=10, mtime=1.0, mimetype="bin"
         )
         job = Job.formalize_intent(source, self.chat, 1000)
         payload = Payload.create(
@@ -204,17 +202,78 @@ class TestModelsArchitecture(unittest.TestCase):
         mock_msg.__str__.return_value = json.dumps(
             {"id": 777, "chat": {"id": self.chat.id}}
         )
-        remote = RemotePayload.register_upload(payload, mock_msg, self.user)
+        remote_payload = RemotePayload.register_upload(payload, mock_msg, self.user)
+        remote_snapshot = RemoteSnapshot.register(job, 888, self.chat, self.user)
 
-        job.mark_deleted()
+        job_id = job.id
+        payload_id = payload.id
+        remote_p_id = remote_payload.id
+        remote_s_id = remote_snapshot.id
 
-        job_refreshed = Job.get_by_id(job.id)
-        self.assertTrue(job_refreshed.is_deleted)
-        self.assertGreater(job_refreshed.deleted_at, 0)
-        self.assertFalse(job_refreshed.is_completed_local)
+        # Ejecutamos la purga atómica
+        job.purge()
 
-        remote_refreshed = RemotePayload.get_by_id(remote.id)
-        self.assertTrue(remote_refreshed.is_orphaned)
+        # Verificar que absolutamente todo fue eliminado físicamente
+        self.assertIsNone(Job.get_or_none(Job.id == job_id))
+        self.assertIsNone(Payload.get_or_none(Payload.id == payload_id))
+        self.assertIsNone(RemotePayload.get_or_none(RemotePayload.id == remote_p_id))
+        self.assertIsNone(RemoteSnapshot.get_or_none(RemoteSnapshot.id == remote_s_id))
+
+    def test_multiple_completed_jobs_coexistence(self):
+        """Valida que puedan convivir múltiples Jobs legítimos para el mismo Source y Chat."""
+        source = Source.create(
+            path_str="multijob.mkv",
+            md5sum="hash_multijob_coexistence",
+            size=4000,
+            mtime=1.0,
+            mimetype="video/x-matroska",
+        )
+
+        # Job 1: Subida con bloques de 2000 bytes
+        job_1 = Job.create(source=source, chat=self.chat, chunk_size=2000)
+        p1 = Payload.create(
+            job=job_1,
+            sequence_index=0,
+            start_offset=0,
+            end_offset=2000,
+            size=2000,
+            filename="multijob.mkv.01-02",
+            filename_short="m.mkv.01-02",
+        )
+        p2 = Payload.create(
+            job=job_1,
+            sequence_index=1,
+            start_offset=2000,
+            end_offset=4000,
+            size=2000,
+            filename="multijob.mkv.02-02",
+            filename_short="m.mkv.02-02",
+        )
+        msg1 = MagicMock(id=101, chat=MagicMock(id=self.chat.id), empty=False)
+        msg1.__str__.return_value = json.dumps(
+            {"id": 101, "chat": {"id": self.chat.id}}
+        )
+        RemotePayload.register_upload(p1, msg1, self.user)
+        RemotePayload.register_upload(p2, msg1, self.user)
+        self.assertTrue(job_1.is_completed_local)
+
+        # Job 2: Subida posterior con bloques de 4000 bytes (Premium) para el mismo chat
+        job_2 = Job.create(source=source, chat=self.chat, chunk_size=4000)
+        p3 = Payload.create(
+            job=job_2,
+            sequence_index=0,
+            start_offset=0,
+            end_offset=4000,
+            size=4000,
+            filename="multijob.mkv",
+            filename_short="m.mkv",
+        )
+        RemotePayload.register_upload(p3, msg1, self.user)
+        self.assertTrue(job_2.is_completed_local)
+
+        # Ambos Jobs deben coexistir sin colisionar
+        completed = Job.get_completed_for_source_in_chat(source, self.chat)
+        self.assertEqual(len(completed), 2)
 
     def test_remote_snapshot_lifecycle_and_job_properties(self):
         """Valida que RemoteSnapshot se registre y Job exponga sus propiedades dinámicamente."""

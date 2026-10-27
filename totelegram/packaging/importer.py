@@ -379,10 +379,9 @@ class SnapshotImportPlanner:
 
             existing_job: Job | None = None
             if existing_source:
-                existing_job = Job.get_or_none(
-                    (Job.source == existing_source)
-                    & (Job.chat == target_chat_id)
-                    & (Job.deleted_at == 0)
+                existing_job = Job.get_for_source_in_chat(
+                    existing_source,
+                    target_chat_id,  # type: ignore
                 )
 
             # Auditoría de archivos de cinta TAR: en v6.0 proviene exclusivamente de tape_catalog
@@ -828,16 +827,13 @@ class SnapshotImporter:
         if existing_job is not None:
             job = existing_job
         else:
-            job = Job.get_or_none(
-                (Job.source == source) & (Job.chat == chat) & (Job.deleted_at == 0)
-            )
+            job = Job.get_for_source_in_chat(source, chat)
 
         if job is None:
             job = Job.create(
                 source=source,
                 chat=chat,
                 chunk_size=manifest.chunk_size,
-                deleted_at=0,
                 last_verified_at=get_utc_now(),
             )
 

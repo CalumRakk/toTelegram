@@ -174,7 +174,7 @@ class TestEnginePipelineAndComponents(unittest.TestCase):
 
             self.assertIsNotNone(job)
             self.assertFalse(job.is_completed_local)
-            self.assertFalse(job.is_deleted)
+
             self.assertTrue(job.is_chunked)
             self.assertEqual(job.chunk_size, 1000)
 
@@ -187,25 +187,25 @@ class TestEnginePipelineAndComponents(unittest.TestCase):
                 tmp_path.unlink()
 
     def test_job_planner_force_resets_previous_job(self):
-        """Con force=True, JobPlanner debe invalidar el Job previo (mark_deleted) y crear uno nuevo."""
+        """Con force=True, JobPlanner debe purgar físicamente el Job previo y crear uno nuevo."""
         with NamedTemporaryFile(delete=False) as tmp:
             tmp.write(b"M" * 500)
             tmp_path = Path(tmp.name)
 
         try:
             job_1 = JobPlanner.plan(tmp_path, self.ctx)
-            job_1_id = job_1.id
+            # Preparamos chunks para simular que job_1 tenía datos
+            job_1.prepare_chunks(tmp_path, self.settings)
+            self.assertEqual(job_1.payloads.count(), 1)
 
             # Planificar de nuevo con force=True
             with patch("totelegram.engine.planner.delete_snapshot") as mock_del_snap:
                 job_2 = JobPlanner.plan(tmp_path, self.ctx, force=True)
 
             mock_del_snap.assert_called_once_with(tmp_path)
-            self.assertNotEqual(job_1_id, job_2.id)
 
-            old_job = Job.get_by_id(job_1_id)
-            self.assertTrue(old_job.is_deleted)
-            self.assertTrue(old_job.deleted_at > 0)
+            self.assertEqual(Job.select().count(), 1)
+            self.assertEqual(job_2.payloads.count(), 0)
         finally:
             if tmp_path.exists():
                 tmp_path.unlink()

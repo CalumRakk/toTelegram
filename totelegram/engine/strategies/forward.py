@@ -40,7 +40,9 @@ class SmartForwardStrategy(JobStrategy):
             ):
                 Payload.delete().where(Payload.job == job).execute()
 
-            job_adopted = job.adopt_job(mirror_job)
+            job.chunk_size = mirror_job.chunk_size
+            job.save(only=[Job.chunk_size, Job.updated_at])
+            job_adopted = job
             payloads = job_adopted.prepare_chunks(job_adopted.source.path, ctx.settings)
 
         pieces_forwarded = 0

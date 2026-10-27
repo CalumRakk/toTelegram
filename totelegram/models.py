@@ -1,7 +1,6 @@
 import json
 import logging
 import math
-import time
 from datetime import datetime, timezone
 from itertools import batched
 from pathlib import Path
@@ -375,7 +374,6 @@ class Job(BaseModel):
     chat = peewee.ForeignKeyField(TelegramChat, backref="jobs")
     chunk_size = cast(int, peewee.BigIntegerField())
 
-    deleted_at = cast(float, peewee.FloatField(default=0))
     last_verified_at = cast(datetime | None, peewee.DateTimeField(null=True))
 
     @property
@@ -389,18 +387,11 @@ class Job(BaseModel):
         return max(1, math.ceil(self.source.size / self.chunk_size))
 
     @property
-    def is_deleted(self) -> bool:
-        """Indica si el Job fue cancelado o descartado."""
-        return self.deleted_at > 0
-
-    @property
     def is_completed_local(self) -> bool:
         """
         Determina si todas las piezas físicas del Job están registradas en la base de datos local.
         Es una verdad matemática pura derivada de Payload y RemotePayload (Cero Split-Brain).
         """
-        if self.is_deleted:
-            return False
         total = self.payloads.count()
         if total == 0:
             return False
@@ -478,48 +469,77 @@ class Job(BaseModel):
         chunk_size: int,
     ) -> "Job":
         """Formaliza la intención inmutable de proyectar un Source en un TelegramChat."""
-        try:
-            with db_proxy.atomic():
-                return Job.create(
-                    source=source,
-                    chat=chat,
-                    chunk_size=chunk_size,
-                )
-        except peewee.IntegrityError:
-            existing = Job.get_for_source_in_chat(source, chat)
-            if existing:
-                return existing
-            raise
+        with db_proxy.atomic():
+            # Si ya existe un intento incompleto previo con el mismo corte, lo reutilizamos
+            incomplete = Job.get_incomplete_for_source_in_chat(source, chat)
+            if incomplete and incomplete.chunk_size == chunk_size:
+                return incomplete
+
+            return Job.create(
+                source=source,
+                chat=chat,
+                chunk_size=chunk_size,
+            )
+
+    @staticmethod
+    def get_incomplete_for_source_in_chat(
+        source: "Source", chat: "TelegramChat"
+    ) -> Optional["Job"]:
+        """Busca si existe un Job incompleto previo para este Source en este chat."""
+        query = (
+            Job.select()
+            .where((Job.source == source) & (Job.chat == chat))
+            .order_by(Job.created_at.desc())
+        )
+        for job in query:
+            if not job.is_completed_local:
+                return job
+        return None
+
+    @staticmethod
+    def get_completed_for_source_in_chat(
+        source: "Source", chat: "TelegramChat"
+    ) -> List["Job"]:
+        """Retorna todos los Jobs completados para este Source en este chat (historial legítimo)."""
+        query = (
+            Job.select()
+            .where((Job.source == source) & (Job.chat == chat))
+            .order_by(Job.created_at.desc())
+        )
+        return [j for j in query if j.is_completed_local]
 
     @staticmethod
     def get_for_source_in_chat(
         source: "Source", chat: "TelegramChat"
     ) -> Optional["Job"]:
-        """Devuelve el Job activo que existe para el source en el chat especificado."""
-        return Job.get_or_none(
-            (Job.source == source) & (Job.chat == chat) & (Job.deleted_at == 0)
-        )
+        """Devuelve el Job activo relevante. Prioriza el incompleto; si no hay, devuelve el completado más reciente."""
+        incomplete = Job.get_incomplete_for_source_in_chat(source, chat)
+        if incomplete:
+            return incomplete
+        completed = Job.get_completed_for_source_in_chat(source, chat)
+        return completed[0] if completed else None
 
-    def adopt_job(self, job: "Job") -> "Job":
-        """Adopta el contrato de corte de otro Job (usado en Smart Forward)."""
-        self.chunk_size = job.chunk_size
-        self.save(only=[Job.chunk_size, Job.updated_at])
-        return self
+    def purge(self, db: peewee.Database | None = None) -> None:
+        """
+        Elimina físicamente el Job y todos sus registros dependientes en SQLite.
+        Garantiza limpieza atómica sin violar restricciones de clave foránea.
+        """
+        target_db = db or self._meta.database
+        with db_transaction(target_db):
+            # Eliminar RemotePayloads asociados
+            RemotePayload.delete().where(
+                RemotePayload.payload << self.payloads
+            ).execute()
 
-    def mark_deleted(self):
-        """Invalida el Job y marca como huérfanos sus payloads y snapshots remotos."""
-        RemotePayload.update(is_orphaned=True).where(
-            RemotePayload.payload << self.payloads
-        ).execute()
+            # Eliminar RemoteSnapshots asociados
+            RemoteSnapshot.delete().where(RemoteSnapshot.job == self).execute()
 
-        RemoteSnapshot.update(is_orphaned=True).where(
-            RemoteSnapshot.job == self
-        ).execute()
+            # Eliminar Payloads
+            Payload.delete().where(Payload.job == self).execute()
 
-        self.deleted_at = time.time()
-        self.save(only=[Job.deleted_at, Job.updated_at])
-
-        logger.debug(f"Job {self.id} invalidado y remotos orfanados.")
+            # Eliminar el Job
+            self.delete_instance()
+            logger.debug(f"Job {self.id} purgado físicamente de la base de datos.")
 
     def prepare_chunks(self, path: Path, settings) -> List["Payload"]:
         """Genera y persiste las piezas lógicas según el tamaño de corte del contrato."""
@@ -561,7 +581,7 @@ class Job(BaseModel):
 
     def is_fresh(self) -> bool:
         """Determina si la verificación JIT del Job aún es confiable."""
-        if not self.last_verified_at or self.is_deleted:
+        if not self.last_verified_at:
             return False
         return not helpers_is_expired(self.last_verified_at, grace_period_seconds=1800)
 
@@ -573,7 +593,7 @@ class Job(BaseModel):
 
 # Índice compuesto único para un Job activo por chat
 # TODO: simplificar, la eliminacion es total en la DB.
-Job.add_index(Job.source, Job.chat, Job.deleted_at, unique=True)
+# Job.add_index(Job.source, Job.chat, Job.deleted_at, unique=True)
 
 
 class Payload(BaseModel):
@@ -583,11 +603,13 @@ class Payload(BaseModel):
     payloads: Generator["Payload", None, None]
     job_id: int
 
-    job = cast(Job, peewee.ForeignKeyField(Job, backref="payloads"))
+    job = cast(
+        Job, peewee.ForeignKeyField(Job, backref="payloads", on_delete="CASCADE")
+    )
     md5sum = cast(str | None, peewee.CharField(null=True))
 
-    filename = cast(str, peewee.CharField())  # Nombre "Humano" (foto...png.01-10)
-    filename_short = cast(str, peewee.CharField())  # Nombre "Técnico" (hash.png.01-10)
+    filename = cast(str, peewee.CharField())
+    filename_short = cast(str, peewee.CharField())
     sequence_index = cast(int, peewee.IntegerField())
     start_offset = cast(int, peewee.BigIntegerField())
     end_offset = cast(int, peewee.BigIntegerField())
@@ -622,7 +644,7 @@ class RemotePayload(BaseModel):
     payload_id: int
     chat_id: int
 
-    payload = peewee.ForeignKeyField(Payload, backref="remotes")
+    payload = peewee.ForeignKeyField(Payload, backref="remotes", on_delete="CASCADE")
     message_id = cast(int, peewee.IntegerField())
     chat = peewee.ForeignKeyField(TelegramChat, backref="remote_contents")
     owner = cast(
@@ -689,7 +711,10 @@ class RemoteSnapshot(BaseModel):
     """Representa el mensaje del Snapshot (.ttape / .json.xz) alojado en Telegram."""
 
     id: int
-    job = cast(Job, peewee.ForeignKeyField(Job, backref="remote_snapshots"))
+    job = cast(
+        Job,
+        peewee.ForeignKeyField(Job, backref="remote_snapshots", on_delete="CASCADE"),
+    )
     chat = cast(
         TelegramChat, peewee.ForeignKeyField(TelegramChat, backref="remote_snapshots")
     )

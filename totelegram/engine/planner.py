@@ -51,9 +51,8 @@ class JobPlanner:
             logger.info(
                 f"Forzando reinicio del Job previo {existing_job.id} para {path.name}"
             )
-            with db_transaction(ctx.db):
-                existing_job.mark_deleted()
-                existing_job = None
+            existing_job.purge(ctx.db)
+            existing_job = None
 
         if existing_job:
             job = existing_job
