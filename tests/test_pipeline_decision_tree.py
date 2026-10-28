@@ -8,7 +8,7 @@ from totelegram.concurrency import ConcurrencyCoordinator
 from totelegram.database import DatabaseSession
 from totelegram.engine.events import UploadObserver
 from totelegram.engine.pipeline import JobPipeline
-from totelegram.engine.strategies.upload import CooperativeUploadStrategy
+from totelegram.engine.uploader import CooperativeUploader
 from totelegram.models import (
     Job,
     Payload,
@@ -126,7 +126,7 @@ class TestPipelineDecisionTree(unittest.TestCase):
 
             pipeline = JobPipeline(self.ctx)
 
-            with patch.object(CooperativeUploadStrategy, "execute") as mock_exec:
+            with patch.object(CooperativeUploader, "upload") as mock_exec:
                 result = pipeline.process(file_path, force=False)
 
             self.assertTrue(result.is_completed)
@@ -213,7 +213,7 @@ class TestPipelineDecisionTree(unittest.TestCase):
             mock_published_msg = MagicMock(id=9999)
 
             with (
-                patch.object(CooperativeUploadStrategy, "execute") as mock_exec,
+                patch.object(CooperativeUploader, "upload") as mock_exec,
                 patch.object(
                     SnapshotService,
                     "generate_snapshot",
@@ -268,9 +268,9 @@ class TestPipelineDecisionTree(unittest.TestCase):
                     "totelegram.engine.pipeline.ChunkRelocator.relocate"
                 ) as mock_relocate,
                 patch.object(
-                    CooperativeUploadStrategy,
-                    "execute",
-                    side_effect=lambda j, c, r: self._simulate_strategy_success(
+                    CooperativeUploader,
+                    "upload",
+                    side_effect=lambda j, c: self._simulate_strategy_success(
                         j, file_path
                     ),
                 ) as mock_exec,
@@ -332,9 +332,9 @@ class TestPipelineDecisionTree(unittest.TestCase):
 
             with (
                 patch.object(
-                    CooperativeUploadStrategy,
-                    "execute",
-                    side_effect=lambda j, c, r: self._simulate_strategy_success(
+                    CooperativeUploader,
+                    "upload",
+                    side_effect=lambda j, c: self._simulate_strategy_success(
                         j, file_path
                     ),
                 ),
@@ -382,9 +382,9 @@ class TestPipelineDecisionTree(unittest.TestCase):
                     "totelegram.engine.pipeline.ChunkRelocator.relocate"
                 ) as mock_relocate,
                 patch.object(
-                    CooperativeUploadStrategy,
-                    "execute",
-                    side_effect=lambda j, c, r: self._simulate_strategy_success(
+                    CooperativeUploader,
+                    "upload",
+                    side_effect=lambda j, c: self._simulate_strategy_success(
                         j, file_path
                     ),
                 ) as mock_exec,

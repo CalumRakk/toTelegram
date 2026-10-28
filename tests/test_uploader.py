@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 from totelegram.concurrency import ConcurrencyCoordinator
 from totelegram.database import DatabaseSession
 from totelegram.engine.events import UploadObserver
-from totelegram.engine.strategies.upload import CooperativeUploadStrategy
+from totelegram.engine.uploader import CooperativeUploader
 from totelegram.models import (
     Job,
     Payload,
@@ -15,11 +15,11 @@ from totelegram.models import (
     TelegramChat,
     TelegramUser,
 )
-from totelegram.schemas import AvailabilityState, ExecutionDecision, SourceType
-from totelegram.types import InvestigationReport, UploadContext
+from totelegram.schemas import SourceType
+from totelegram.types import UploadContext
 
 
-class TestCooperativeUploadStrategy(unittest.TestCase):
+class TestCooperativeUploader(unittest.TestCase):
     def setUp(self):
         self.db_session = DatabaseSession("sqlite:///:memory:", auto_init_schema=True)
         self.db = self.db_session.start()
@@ -74,7 +74,7 @@ class TestCooperativeUploadStrategy(unittest.TestCase):
         )
         return msg
 
-    def test_cooperative_upload_strategy_full_flow(self):
+    def test_cooperative_uploader_full_flow(self):
         """Valida la subida física cooperativa pieza a pieza con notificación a eventos."""
         with NamedTemporaryFile(delete=False) as tmp:
             tmp.write(b"Z" * 250)
@@ -102,12 +102,10 @@ class TestCooperativeUploadStrategy(unittest.TestCase):
             msg_up2 = self._create_mock_tg_message(703, self.chat.id)
             self.mock_client.send_document.side_effect = [msg_up0, msg_up1, msg_up2]
 
-            report = InvestigationReport(decision=ExecutionDecision.CLEAN_RESTART)
-
-            strategy = CooperativeUploadStrategy()
+            uploader = CooperativeUploader()
 
             with patch("time.sleep", return_value=None):
-                result = strategy.execute(job, self.ctx, report)
+                result = uploader.upload(job, self.ctx)
 
             self.assertTrue(result.is_completed)
             self.assertTrue(result.did_upload_bytes)

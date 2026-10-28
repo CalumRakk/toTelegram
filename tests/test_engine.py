@@ -15,7 +15,7 @@ from totelegram.engine.events import ProgressMultiplexer, UploadObserver
 from totelegram.engine.factory import PayloadStreamFactory, UploadStream
 from totelegram.engine.pipeline import JobPipeline
 from totelegram.engine.planner import JobPlanner, PathLengthExceededError
-from totelegram.engine.strategies.upload import CooperativeUploadStrategy
+from totelegram.engine.uploader import CooperativeUploader
 from totelegram.models import (
     Job,
     Payload,
@@ -236,10 +236,10 @@ class TestEnginePipelineAndComponents(unittest.TestCase):
 
         try:
             # Simulamos el comportamiento de las estrategias reales (preparar los chunks)
-            def fake_execute(job, ctx, report):
+            def fake_execute(job, ctx):
                 job.prepare_chunks(tmp_path, self.settings)
                 return StrategyResult(
-                    strategy_name="MockStrategy",
+                    strategy_name="MockUploader",
                     pieces_processed=1,
                     did_upload_bytes=True,
                     is_completed=True,
@@ -253,11 +253,7 @@ class TestEnginePipelineAndComponents(unittest.TestCase):
             pipeline = JobPipeline(self.ctx)
             mock_sent_msg = MagicMock(id=98765)
             with (
-                patch.object(
-                    CooperativeUploadStrategy,
-                    "execute",
-                    side_effect=fake_execute,
-                ),
+                patch.object(CooperativeUploader, "upload", side_effect=fake_execute),
                 patch.object(
                     SnapshotService,
                     "generate_snapshot",
@@ -305,10 +301,10 @@ class TestEnginePipelineAndComponents(unittest.TestCase):
 
             with (
                 patch.object(
-                    CooperativeUploadStrategy,
-                    "execute",
+                    CooperativeUploader,
+                    "upload",
                     return_value=StrategyResult(
-                        strategy_name="MockStrategy",
+                        strategy_name="MockUploader",
                         pieces_processed=1,
                         did_upload_bytes=True,
                         is_completed=True,
@@ -352,10 +348,10 @@ class TestEnginePipelineAndComponents(unittest.TestCase):
 
             with (
                 patch.object(
-                    CooperativeUploadStrategy,
-                    "execute",
+                    CooperativeUploader,
+                    "upload",
                     return_value=StrategyResult(
-                        strategy_name="MockStrategy",
+                        strategy_name="MockUploader",
                         pieces_processed=1,
                         did_upload_bytes=True,
                         is_completed=True,

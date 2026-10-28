@@ -8,24 +8,22 @@ from totelegram.common.streams import ThrottledFile
 from totelegram.database import db_transaction
 from totelegram.engine.events import ProgressMultiplexer
 from totelegram.engine.factory import PayloadStreamFactory
-from totelegram.engine.strategies.base import JobStrategy
 from totelegram.models import Job, Payload, RemotePayload
 from totelegram.types import StrategyResult, UploadContext
 
 logger = logging.getLogger(__name__)
 
 
-class CooperativeUploadStrategy(JobStrategy):
+class CooperativeUploader:
     """
-    Estrategia de subida física cooperativa.
+    Componente de subida física cooperativa.
     Reclama atómicamente piezas libres del Job y las transmite con heartbeat activo y telemetría visual.
     """
 
-    def execute(
+    def upload(
         self,
         job: Job,
         ctx: UploadContext,
-        report: "AvailabilityReport",
     ) -> StrategyResult:
         with db_transaction(ctx.db):
             job.prepare_chunks(job.path, ctx.settings)
@@ -112,7 +110,7 @@ class CooperativeUploadStrategy(JobStrategy):
             is_completed = pending_total == 0
 
         return StrategyResult(
-            strategy_name="CooperativeUploadStrategy",
+            strategy_name="CooperativeUploader",
             pieces_processed=pieces_uploaded,
             did_upload_bytes=pieces_uploaded > 0,
             is_completed=is_completed,
