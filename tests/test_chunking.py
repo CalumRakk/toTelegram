@@ -1,7 +1,9 @@
+import tempfile
 import unittest
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 
+import tartape
 from tartape.chunker import calculate_segments
 
 from totelegram.packaging.partitioner import (
@@ -107,3 +109,39 @@ class TestChunkingMath(unittest.TestCase):
         finally:
             if tmp_path.exists():
                 tmp_path.unlink()
+
+    def test_partition_folder_generates_virtual_chunks(self):
+        """StatelessPartitioner.partition_folder genera VirtualChunk sin extraer miembros SQL."""
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir) / "test_data"
+            root.mkdir()
+            (root / "a.bin").write_bytes(b"A" * 1500)
+            (root / "b.bin").write_bytes(b"B" * 1500)
+
+            tartape.record(root, checksum="md5", overwrite=True)
+
+            chunks = StatelessPartitioner.partition_folder(
+                path=root,
+                max_chunk_size=1000,
+            )
+
+            self.assertGreater(len(chunks), 1)
+            self.assertEqual(chunks[0].sequence_index, 0)
+
+            # Validar que el padding y numeración sean consistentes con el total de partes
+            total_parts = len(chunks)
+            expected_first = f".tar.01-{total_parts:02d}"
+            expected_last = f".tar.{total_parts:02d}-{total_parts:02d}"
+
+            self.assertTrue(
+                chunks[0].filename.endswith(expected_first),
+                f"Esperado sufijo '{expected_first}', obtenido: '{chunks[0].filename}'",
+            )
+            self.assertTrue(
+                chunks[-1].filename.endswith(expected_last),
+                f"Esperado sufijo '{expected_last}', obtenido: '{chunks[-1].filename}'",
+            )
+
+
+if __name__ == "__main__":
+    unittest.main()

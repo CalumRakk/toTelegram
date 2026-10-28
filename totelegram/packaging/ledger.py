@@ -228,13 +228,13 @@ class ReceiptLedger:
     @classmethod
     def assimilate_legacy_snapshot(cls, file_path: Path | str) -> bool:
         """
-        Detecta y asimila snapshots heredados (.json.xz o .ttape) para file_path.
-        Aplica cascada heurística para soportar tanto v6.0 como esquemas arqueológicos.
+        Detecta y asimila snapshots existentes (.ttape o .json.xz) para file_path.
+        Prioriza el estándar moderno v6.0 y cuenta con fallback de rescate para
+        snapshots históricos previos a v6.0 (evitando re-subidas en 'status').
         """
         path = Path(file_path).resolve()
         dir_path = path.parent
 
-        # Buscar posibles sidecars en disco
         targets = [
             dir_path / f"{path.name}.json.xz",
             dir_path / f"{path.stem}.json.xz",
@@ -246,7 +246,7 @@ class ReceiptLedger:
             return False
 
         try:
-            # Caso 1: Contenedor .ttape
+            # 1. Contenedor .ttape (siempre es v6.0)
             if sidecar.suffix == ".ttape" or sidecar.name.endswith(".ttape"):
                 from totelegram.packaging.ttape import TapeContainer
 
@@ -254,81 +254,101 @@ class ReceiptLedger:
                 cls.record_upload(
                     file_path=path,
                     chat_id=manifest.chat_id,
-                    snapshot_message_id=(
-                        manifest.parts[0].message_id if manifest.parts else 0
-                    ),
+                    snapshot_message_id=manifest.parts[0].message_id
+                    if manifest.parts
+                    else 0,
                     chunk_size=manifest.chunk_size,
                     total_parts=len(manifest.parts),
                     md5=manifest.source.md5sum,
                 )
                 return True
 
-            # Caso 2: Snapshot comprimido .json.xz
+            # 2. Snapshot comprimido .json.xz
             with lzma.open(sidecar, "rt", encoding="utf-8") as f:
                 raw_data = json.load(f)
 
             if not isinstance(raw_data, dict):
                 return False
 
-            # Cascada para chat_id
-            chat_id = raw_data.get("chat_id") or raw_data.get("config", {}).get(
-                "chat_id"
-            )
-            if not chat_id and raw_data.get("parts"):
-                chat_id = raw_data["parts"][0].get("chat_id")
+            # Vía A: Intentar validación formal moderna (v6.0)
+            from totelegram.packaging.schemas import MANIFEST_VERSION, UploadManifest
 
-            if not chat_id:
-                return False
-
-            # Cascada para parts
-            raw_parts = raw_data.get("parts", [])
-            total_parts = len(raw_parts) or 1
-
-            # Cascada heurística para chunk_size (moderno vs arqueológico)
-            chunk_size = (
-                raw_data.get("chunk_size")
-                or raw_data.get("config", {}).get("tg_max_size")
-                or (
-                    raw_parts[0].get("size") or raw_parts[0].get("part_size")
-                    if len(raw_parts) > 1
-                    else None
+            if raw_data.get("manifest_version") == MANIFEST_VERSION:
+                manifest = UploadManifest.model_validate(raw_data)
+                cls.record_upload(
+                    file_path=path,
+                    chat_id=manifest.chat_id,
+                    snapshot_message_id=manifest.parts[0].message_id
+                    if manifest.parts
+                    else 0,
+                    chunk_size=manifest.chunk_size,
+                    total_parts=len(manifest.parts),
+                    md5=manifest.source.md5sum,
                 )
-                or raw_data.get("source", {}).get("size")
-                or (path.stat().st_size if path.exists() else 2000 * 1024 * 1024)
-            )
+                return True
 
-            # Cascada para snapshot_message_id
-            msg_id = (
-                raw_data.get("snapshot_message_id")
-                or raw_data.get("message_id")
-                or (raw_parts[0].get("message_id") if raw_parts else 0)
-            )
+            # Vía B: Rescate arqueológico (Pre-v6.0 para status / prune)
+            fallback = cls._extract_legacy_fallback(raw_data, path)
+            if fallback:
+                chat_id, chunk_size, msg_id, total_parts, md5 = fallback
+                cls.record_upload(
+                    file_path=path,
+                    chat_id=chat_id,
+                    snapshot_message_id=msg_id,
+                    chunk_size=chunk_size,
+                    total_parts=total_parts,
+                    md5=md5,
+                )
+                logger.info(
+                    f"Snapshot histórico '{sidecar.name}' asimilado exitosamente en {LEDGER_FILENAME}."
+                )
+                return True
 
-            # Cascada para MD5
-            md5sum = (
-                raw_data.get("source", {}).get("md5sum")
-                or raw_data.get("md5")
-                or (raw_parts[0].get("part_md5sum") if raw_parts else "")
-            )
-
-            cls.record_upload(
-                file_path=path,
-                chat_id=int(chat_id),
-                snapshot_message_id=int(msg_id),
-                chunk_size=int(chunk_size),
-                total_parts=total_parts,
-                md5=str(md5sum),
-            )
-            logger.info(
-                f"Snapshot heredado '{sidecar.name}' asimilado exitosamente en {LEDGER_FILENAME}."
-            )
-            return True
+            return False
 
         except Exception as e:
-            logger.debug(
-                f"No se pudo asimilar el snapshot heredado '{sidecar.name}': {e}"
-            )
+            logger.debug(f"No se pudo asimilar snapshot '{sidecar.name}': {e}")
             return False
+
+    @staticmethod
+    def _extract_legacy_fallback(
+        raw: dict, path: Path
+    ) -> tuple[int, int, int, int, str] | None:
+        """Rescata de forma segura los metadatos de snapshots anteriores a v6.0."""
+        # 1. Chat ID
+        chat_id = raw.get("chat_id") or raw.get("config", {}).get("chat_id")
+        if not chat_id and raw.get("parts"):
+            chat_id = raw["parts"][0].get("chat_id")
+        if not chat_id:
+            return None
+
+        # 2. Parts
+        parts = raw.get("parts", [])
+        total_parts = len(parts) or 1
+
+        # 3. Chunk size
+        chunk_size = (
+            raw.get("chunk_size")
+            or raw.get("config", {}).get("tg_max_size")
+            or (parts[0].get("size") if parts and len(parts) > 1 else None)
+            or (path.stat().st_size if path.exists() else 2000 * 1024 * 1024)
+        )
+
+        # 4. Message ID
+        msg_id = (
+            raw.get("snapshot_message_id")
+            or raw.get("message_id")
+            or (parts[0].get("message_id") if parts else 0)
+        )
+
+        # 5. MD5
+        md5 = (
+            raw.get("source", {}).get("md5sum")
+            or raw.get("md5")
+            or (parts[0].get("part_md5sum") if parts else "")
+        )
+
+        return int(chat_id), int(chunk_size), int(msg_id), int(total_parts), str(md5)
 
     @classmethod
     def heal_directory_from_db(

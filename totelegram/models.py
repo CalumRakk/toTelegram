@@ -331,34 +331,13 @@ class Source(BaseModel):
         if not self.is_folder:
             return
 
-        # Si ya fueron indexados para este Source, no repetir
         if self.members.count() > 0:  # type: ignore
             return
 
         try:
             assert tape.catalog_path is not None
-            with (
-                tartape.open_catalog(tape.catalog_path, read_only=True) as cat,
-                cat.db_session,
-            ):
-                cursor = cat.db_session.db.execute_sql(
-                    "SELECT arc_path, size, checksum, start_offset FROM track WHERE is_dir = 0"
-                )
-                tracks = cursor.fetchall()
-
-                member_inserts = [
-                    {
-                        "source": self,
-                        "relative_path": row[0],
-                        "size": row[1],
-                        "md5sum": row[2] or "",
-                        "start_offset": row[3] or 0,
-                    }
-                    for row in tracks
-                ]
-
-                for batch in batched(member_inserts, 500):
-                    TapeMember.insert_many(batch).on_conflict_ignore().execute()
+            with tartape.open_catalog(tape.catalog_path, read_only=True) as cat:
+                TapeMember.bulk_insert_from_catalog(self, cat)
         except Exception as e:
             logger.warning(
                 f"Aviso al indexar miembros de cinta para '{self.path_str}': {e}"
@@ -541,7 +520,7 @@ class Job(BaseModel):
             self.delete_instance()
             logger.debug(f"Job {self.id} purgado físicamente de la base de datos.")
 
-    def prepare_chunks(self, path: Path, settings) -> List["Payload"]:
+    def prepare_chunks(self, path: Path, settings=None) -> List["Payload"]:
         """Genera y persiste las piezas lógicas según el tamaño de corte del contrato."""
         if self.payloads.count() > 0:
             return cast(
@@ -549,9 +528,7 @@ class Job(BaseModel):
             )
 
         if self.source.type == SourceType.FOLDER:
-            _, chunks, _ = StatelessPartitioner.partition_folder(
-                path, self.chunk_size, settings.exclude_files
-            )
+            chunks = StatelessPartitioner.partition_folder(path, self.chunk_size)
             return self._persist_chunks(chunks)
         else:
             chunks = StatelessPartitioner.partition_file(
@@ -772,11 +749,6 @@ class RemoteSnapshot(BaseModel):
 
 
 class TapeMember(BaseModel):
-    """
-    Representa un archivo individual dentro de una carpeta archivada.
-    Es el registro lógico para búsquedas.
-    """
-
     id: int
     source = cast("Source", peewee.ForeignKeyField(Source, backref="members"))
     relative_path = cast(str, peewee.CharField())
@@ -801,6 +773,36 @@ class TapeMember(BaseModel):
             file_size=self.size,
             volume_size=volume_size,
         )
+
+    @classmethod
+    def bulk_insert_from_catalog(
+        cls, source: "Source", catalog: tartape.Catalog, batch_size: int = 500
+    ) -> int:
+        """
+        Extrae e inserta en lote las pistas (archivos no-directorio) desde un tartape.Catalog
+        hacia la tabla TapeMember asociada a un Source.
+        """
+        with catalog.db_session:
+            cursor = catalog.db_session.db.execute_sql(
+                "SELECT arc_path, size, checksum, start_offset FROM track WHERE is_dir = 0"
+            )
+            tracks = cursor.fetchall()
+
+        member_inserts = [
+            {
+                "source": source,
+                "relative_path": row[0],
+                "size": row[1],
+                "md5sum": row[2] or "",
+                "start_offset": row[3] or 0,
+            }
+            for row in tracks
+        ]
+
+        total_inserted = 0
+        for batch in batched(member_inserts, batch_size):
+            total_inserted += cls.insert_many(batch).on_conflict_ignore().execute()
+        return total_inserted
 
 
 class Claim(BaseModel):

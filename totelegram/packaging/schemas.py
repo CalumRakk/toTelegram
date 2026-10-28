@@ -1,7 +1,8 @@
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from totelegram import __VERSION__
 from totelegram.schemas import SourceType, TapeCatalog
@@ -71,36 +72,14 @@ class TapeContainerInfo(BaseModel):
     total_container_bytes: int
 
 
-# Modelos virtuales para el particionado en memoria
-class VirtualChunk(BaseModel):
-    sequence_index: int = Field(
-        ..., description="Índice secuencial de la pieza (0, 1, 2...)"
-    )
-    start_offset: int = Field(
-        ..., description="Offset de byte inicial en el recurso de origen"
-    )
-    end_offset: int = Field(
-        ..., description="Offset de byte final en el recurso de origen"
-    )
-    size: int = Field(..., description="Tamaño total en bytes de esta partición")
-    filename: str = Field(..., description="Nombre amigable propuesto para Telegram")
-    filename_short: str = Field(..., description="Nombre corto o hash propuesto")
-    md5sum: str | None = Field(default=None, description="MD5 del volumen físico")
+@dataclass(slots=True)
+class VirtualChunk:
+    """Representación ligera en memoria de una partición lógica."""
 
-
-class VirtualTapeMember(BaseModel):
-    """Representación ligera de un archivo de la carpeta durante la indexación inicial."""
-
-    relative_path: str
+    sequence_index: int
+    start_offset: int
+    end_offset: int
     size: int
-    md5sum: str
-    start_offset: int = 0
-
-
-class VirtualTapeCatalog(BaseModel):
-    fingerprint: str
-    total_size: int
-    total_files: int
-    tartape_version: str
-    created_at: float
-    exclude_patterns: str
+    filename: str
+    filename_short: str
+    md5sum: str | None = None

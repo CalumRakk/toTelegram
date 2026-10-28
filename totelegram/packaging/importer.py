@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 
 import peewee
 
-from totelegram.common.helpers import batched, get_utc_now
+from totelegram.common.helpers import get_utc_now
 from totelegram.database import db_transaction
 from totelegram.models import (
     Job,
@@ -923,31 +923,14 @@ class SnapshotImporter:
 
     @staticmethod
     def _bulk_ingest_tape_members(source: Source, snapshot_path: Path) -> None:
-        """Vuelca los archivos de la cinta TAR abriendo el SQLite de tartape en bloques de 500 filas."""
+        """Vuelca los archivos de la cinta TAR abriendo el SQLite de tartape en bloques."""
         if not (
             snapshot_path.suffix == ".ttape" or snapshot_path.name.endswith(".ttape")
         ):
             return
 
-        with TapeContainer.open_catalog(snapshot_path) as cat, cat.db_session:
-            cursor = cat.db_session.db.execute_sql(
-                "SELECT arc_path, size, checksum, start_offset FROM track WHERE is_dir = 0"
-            )
-            tracks = cursor.fetchall()
-
-            member_inserts = [
-                {
-                    "source": source,
-                    "relative_path": row[0],
-                    "size": row[1],
-                    "md5sum": row[2] or "",
-                    "start_offset": row[3] or 0,
-                }
-                for row in tracks
-            ]
-
-            for batch in batched(member_inserts, 500):
-                TapeMember.insert_many(batch).on_conflict_ignore().execute()
+        with TapeContainer.open_catalog(snapshot_path) as cat:
+            TapeMember.bulk_insert_from_catalog(source, cat)
 
     @classmethod
     def rehydrate_from_message(

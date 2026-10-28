@@ -5,11 +5,7 @@ import tartape
 from tartape.chunker import calculate_segments
 
 from totelegram.packaging.coordinates import PartCoordinate
-from totelegram.packaging.schemas import (
-    VirtualChunk,
-    VirtualTapeCatalog,
-    VirtualTapeMember,
-)
+from totelegram.packaging.schemas import VirtualChunk
 from totelegram.schemas import SourceType
 
 
@@ -56,7 +52,7 @@ class StatelessPartitioner:
         )
         total_parts = len(segments)
 
-        chunks = []
+        chunks: List[VirtualChunk] = []
         for idx, (start, end) in enumerate(segments):
             filename, filename_short = build_payload_names_pure(
                 path=path,
@@ -79,11 +75,8 @@ class StatelessPartitioner:
         return chunks
 
     @staticmethod
-    @staticmethod
-    def partition_folder(
-        path: Path, max_chunk_size: int, exclude_patterns: List[str]
-    ) -> Tuple[VirtualTapeCatalog, List[VirtualChunk], List[VirtualTapeMember]]:
-        """Empaqueta virtualmente una carpeta usando tartape sin tocar la base de datos."""
+    def partition_folder(path: Path, max_chunk_size: int) -> List[VirtualChunk]:
+        """Calcula las particiones lógicas para los volúmenes TAR de una carpeta."""
         catalog_path = tartape.discover(path)
         tape = (
             tartape.Tape(path, catalog_path=catalog_path)
@@ -91,24 +84,15 @@ class StatelessPartitioner:
             else tartape.Tape(path)
         )
 
-        catalog = VirtualTapeCatalog(
-            fingerprint=tape.fingerprint,
-            total_size=tape.total_size,
-            total_files=tape.count_files,
-            tartape_version=tartape.__version__,
-            created_at=tape.created_at,
-            exclude_patterns=str(exclude_patterns),
-        )
-
         segments = list(calculate_segments(tape.total_size, max_chunk_size))
         total_parts = len(segments)
 
-        chunks = []
+        chunks: List[VirtualChunk] = []
         for idx, (start, end) in enumerate(segments):
             filename, filename_short = build_payload_names_pure(
                 path=path,
                 source_type=SourceType.FOLDER,
-                md5sum=catalog.fingerprint,
+                md5sum=tape.fingerprint,
                 idx=idx,
                 total=total_parts,
             )
@@ -123,26 +107,4 @@ class StatelessPartitioner:
                 )
             )
 
-        # Transmisión de miembros de cinta leyendo directamente los tracks (ADR-009)
-        members = []
-        if catalog_path and Path(catalog_path).is_file():
-            with (
-                tartape.open_catalog(catalog_path, read_only=True) as cat,
-                cat.db_session,
-            ):
-                # TODO:Hay varias partes en el código que genera un query para leer la db de tartape
-                # Analizar si esto rompe la responsabilidad de totelegram al conocer como está estructurada la db de tartape
-                cursor = cat.db_session.db.execute_sql(
-                    "SELECT arc_path, size, checksum, start_offset FROM track WHERE is_dir = 0"
-                )
-                for row in cursor.fetchall():
-                    members.append(
-                        VirtualTapeMember(
-                            relative_path=row[0],
-                            size=row[1],
-                            md5sum=row[2] or "",
-                            start_offset=row[3] or 0,
-                        )
-                    )
-
-        return catalog, chunks, members
+        return chunks
