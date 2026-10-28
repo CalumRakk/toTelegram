@@ -187,15 +187,69 @@ def login_command(ctx: typer.Context):
 
 
 @app.command("status")
-def status_command(ctx: typer.Context):
+def status_command(
+    ctx: typer.Context,
+    path: Path | None = typer.Argument(
+        None,
+        help="Ruta a una carpeta o archivo para auditar su estado de respaldo local. "
+        "Si se omite, muestra el estado de la cuenta activa.",
+    ),
+    target: str | None = typer.Option(
+        None,
+        "--target",
+        "-t",
+        help="Filtrar auditoría por un destino de Telegram específico.",
+    ),
+):
     """
-    Muestra el estado de la cuenta activa, el usuario conectado y el chat de destino.
+    Muestra el estado de la cuenta activa o audita los archivos respaldados de una carpeta local.
     """
-    from rich.panel import Panel
-
     state: CLIState = ctx.obj
     manager = state.manager
 
+    # MODO A: Auditoría de archivos locales si se proporcionó una ruta
+    if path is not None:
+        target_path = path.resolve()
+        resolved_chat_id: int | str | None = None
+
+        if target:
+            with state.scope() as (client, db):
+                resolver = TargetResolver(client, db)
+                res = resolver.resolve(target)
+                if res.is_resolved:
+                    resolved_chat_id = res.chat_id
+                else:
+                    UI.error(res.error_message or f"Destino '{target}' inválido.")
+                    raise typer.Exit(1)
+
+        from totelegram.cli.ui import DisplayLedger
+        from totelegram.packaging.ledger import ReceiptLedger
+
+        if target_path.is_file():
+            # Auditar solo el archivo específico dentro de su carpeta
+            audit_list = ReceiptLedger.audit_directory(
+                target_path.parent, target_chat_id=resolved_chat_id
+            )
+            audit_list = [a for a in audit_list if a.filename == target_path.name]
+            UI.separator()
+            DisplayLedger.show_directory_status(
+                target_path.parent, audit_list, target_chat_id=resolved_chat_id
+            )
+        elif target_path.is_dir():
+            audit_list = ReceiptLedger.audit_directory(
+                target_path, target_chat_id=resolved_chat_id
+            )
+            UI.separator()
+            DisplayLedger.show_directory_status(
+                target_path, audit_list, target_chat_id=resolved_chat_id
+            )
+        else:
+            UI.error(f"La ruta '{path}' no existe.")
+            raise typer.Exit(1)
+
+        return
+
+    # MODO B: Estado de la cuenta de Telegram (Comportamiento habitual)
     active_name = manager.get_active_profile_name()
     if not active_name or not manager.settings_exists(active_name):
         UI.warn("No hay una cuenta activa configurada.")
@@ -213,7 +267,6 @@ def status_command(ctx: typer.Context):
         resolver = TargetResolver(client)
         resolution = resolver.resolve(settings.chat_id)
 
-    # Construcción del Panel de Estado
     content = [
         f"• Cuenta activa: [bold green]{active_name}[/]",
         f"• Usuario:       [bold]{me.first_name}[/] [dim](@{me.username or 'sin_alias'})[/]",

@@ -5,7 +5,10 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, List, Literal
 
+from totelegram.types import IncompatibleCapacityError, PermissionDeniedCleanupError
+
 if TYPE_CHECKING:
+    from totelegram.packaging.ledger import FileAuditResult
     from totelegram.telegram.types import TargetResolution
 
 import typer
@@ -422,6 +425,48 @@ class DisplayUpload:
         UI.tip(
             "Si quieres archivarlas de todas formas, deberás forzar una subida completa "
             "(comando próximamente).",
+        )
+
+    @staticmethod
+    def show_incompatible_capacity_panel(err: "IncompatibleCapacityError"):
+        """Muestra un panel visual explicando la degradación de capacidad de la cuenta."""
+        job_mb = err.job_chunk_size // (1024 * 1024)
+        acc_mb = err.account_max_size // (1024 * 1024)
+        account_type = "Premium" if err.is_premium else "Estándar"
+
+        msg = (
+            f"Este archivo tiene una subida pendiente iniciada con bloques de [bold]{job_mb} MB[/].\n"
+            f"La cuenta activa actual es [bold]{account_type}[/] y solo puede transferir bloques de hasta [bold]{acc_mb} MB[/].\n\n"
+            f"[dim]Para mantener la integridad matemática de los fragmentos, no se pueden mezclar trozos de diferente tamaño.[/dim]"
+        )
+        UI.educational_tip(
+            message=msg,
+            title="Incompatibilidad de Capacidad",
+            commands=[
+                "totelegram switch <cuenta_premium>    # Cambiar a una cuenta con capacidad suficiente",
+                "totelegram send ... --force           # Descartar intento previo y reiniciar con la capacidad actual",
+            ],
+            spacing="block",
+            border_style="yellow",
+        )
+
+    @staticmethod
+    def show_permission_denied_panel(err: "PermissionDeniedCleanupError"):
+        """Muestra un panel visual advirtiendo la falta de permisos de eliminación."""
+        msg = (
+            f"Se requiere limpiar o reorganizar mensajes antiguos en el chat [bold]{err.chat_id}[/], "
+            f"pero la cuenta activa carece del permiso de administrador [bold red]'Eliminar mensajes'[/] (can_delete_messages).\n\n"
+            f"[dim]toTelegram se detiene aquí para proteger la higiene del canal y no dejar trozos huérfanos abandonados.[/dim]"
+        )
+        UI.educational_tip(
+            message=msg,
+            title="Permisos Insuficientes en Telegram",
+            commands=[
+                "# Otorga a esta cuenta el permiso 'Eliminar mensajes' en los ajustes de administradores del canal.",
+                "totelegram send ... --use <cuenta_admin>  # Usar una cuenta que tenga permisos de administración",
+            ],
+            spacing="block",
+            border_style="red",
         )
 
 
@@ -1112,3 +1157,102 @@ class DisplayTarget:
             except ValueError:
                 pass
             console.print("[red]Opción inválida. Intenta nuevamente.[/red]")
+
+
+class DisplayLedger:
+    """Componentes visuales para la auditoría de directorios y liberación de espacio (Prune)."""
+
+    @staticmethod
+    def show_directory_status(
+        dir_path: Path,
+        audit_results: list["FileAuditResult"],
+        target_chat_id: int | str | None = None,
+    ) -> None:
+        from tartape.units import format_size
+
+        if not audit_results:
+            UI.info(
+                f"El directorio '[bold]{dir_path.name}[/]' no contiene archivos para auditar."
+            )
+            return
+
+        table = Table(
+            title=f"Estado de Respaldo Local — {dir_path.name}",
+            show_header=True,
+            header_style="bold cyan",
+            title_style="bold blue",
+            expand=True,
+        )
+        table.add_column("Archivo", style="white")
+        table.add_column("Tamaño", justify="right", style="dim")
+        table.add_column("Destinos en Telegram", style="dim")
+        table.add_column("Estado", justify="center")
+
+        for res in audit_results:
+            size_str = format_size(res.size)
+
+            # Destinos formateados
+            if res.destinations:
+                dest_labels = []
+                for cid, dest in res.destinations.items():
+                    title = dest.chat_title or f"Chat {cid}"
+                    dest_labels.append(f"{title} [dim]({dest.total_parts}p)[/]")
+                dest_str = ", ".join(dest_labels)
+            else:
+                dest_str = "[dim]--[/]"
+
+            # Estado
+            if not res.is_on_disk:
+                status_str = "[dim red]☁ Solo en Telegram[/dim red]"
+            elif res.is_modified:
+                status_str = "[bold yellow]! Modificado localmente[/bold yellow]"
+            elif res.is_backed_up:
+                status_str = "[bold green]✓ Respaldado[/bold green]"
+            else:
+                status_str = "[dim]Pendiente de subida[/dim]"
+
+            table.add_row(res.filename, size_str, dest_str, status_str)
+
+        console.print(table)
+        log_table(table, f"Estado de Respaldo Local — {dir_path.name}")
+
+    @staticmethod
+    def show_prune_candidates(
+        candidates: list["FileAuditResult"], total_bytes: int
+    ) -> None:
+        from tartape.units import format_size
+
+        table = Table(
+            title="Archivos Respaldados Listos para Liberar Espacio",
+            show_header=True,
+            header_style="bold green",
+            title_style="bold green",
+            expand=True,
+        )
+        table.add_column("Archivo a eliminar", style="bold white")
+        table.add_column("Tamaño", justify="right", style="dim cyan")
+        table.add_column("Verificado en Telegram", style="dim")
+
+        for c in candidates:
+            dest_titles = [
+                d.chat_title or str(cid) for cid, d in c.destinations.items()
+            ]
+            table.add_row(c.filename, format_size(c.size), ", ".join(dest_titles))
+
+        console.print(table)
+        UI.info(
+            f"Total de espacio a recuperar: [bold cyan]{format_size(total_bytes)}[/] en [bold]{len(candidates)}[/] archivos."
+        )
+
+    @staticmethod
+    def show_prune_summary(deleted_count: int, freed_bytes: int) -> None:
+        from tartape.units import format_size
+
+        UI.success(
+            f"Liberación completada: Se eliminaron [bold]{deleted_count}[/] archivos locales "
+            f"recuperando [bold cyan]{format_size(freed_bytes)}[/] de espacio en disco."
+        )
+        UI.tip(
+            "El recibo '.totelegram.json' se ha conservado intacto. "
+            "Puedes restaurar cualquiera de estos archivos cuando lo necesites usando 'totelegram download'."
+        )

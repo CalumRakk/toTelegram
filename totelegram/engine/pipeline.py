@@ -128,13 +128,13 @@ class JobPipeline:
                 logger.info(
                     f"Job {job.id}: Ejecutando reubicación atómica de {len(report.valid_remotes)} trozos..."
                 )
+                self.ctx.observer.on_relocation_start(len(report.valid_remotes))
                 ChunkRelocator.relocate(
                     client=self.ctx.client,
                     db=self.ctx.db,
                     chat_id=self.ctx.tg_chat.id,
                     remotes=report.valid_remotes,
                 )
-                # Una vez reubicadas las partes viejas al fondo, subimos las faltantes
                 strategy = CooperativeUploadStrategy()
                 strategy_result = strategy.execute(job, self.ctx, report)
 
@@ -144,11 +144,21 @@ class JobPipeline:
                 and force
                 and job.payloads.count() > 0
             ):
+                old_msg_ids = [r.message_id for r in report.valid_remotes]
+
+                # Si hay mensajes en Telegram y no se activó --yes, solicitar confirmación
+                if old_msg_ids and not self.ctx.yes and self.ctx.confirm_cleanup:
+                    confirmed = self.ctx.confirm_cleanup(len(old_msg_ids), path.name)
+                    if not confirmed:
+                        from totelegram.types import PipelineCancelledError
+
+                        raise PipelineCancelledError(
+                            f"Operación cancelada por el usuario para {path.name}."
+                        )
+
                 logger.info(
                     f"Job {job.id}: Purgando intento previo para reinicio limpio con --force..."
                 )
-                # Eliminar mensajes viejos de Telegram
-                old_msg_ids = [r.message_id for r in report.valid_remotes]
                 if old_msg_ids:
                     try:
                         self.ctx.client.delete_messages(

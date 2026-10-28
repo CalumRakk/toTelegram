@@ -94,6 +94,10 @@ class UploadObserver(Protocol):
     def on_job_complete(self, job: "Job", snapshot_created: bool) -> None:
         """Llamado cuando el Job finaliza completamente."""
 
+    def on_relocation_start(self, pieces_count: int) -> None:
+        """Llamado cuando trozos existentes van a ser reubicados al fondo del chat (Anti-Waste TOC)."""
+        ...
+
 
 class NullObserver:
     """Implementación no-op útil para tests unitarios o ejecución desatendida."""
@@ -145,6 +149,9 @@ class NullObserver:
         pass
 
     def on_job_complete(self, job: "Job", snapshot_created: bool) -> None:
+        pass
+
+    def on_relocation_start(self, pieces_count: int) -> None:
         pass
 
 

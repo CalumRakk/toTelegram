@@ -7,11 +7,19 @@ import typer
 from totelegram.cli.commands.config import _get_config_tools
 from totelegram.cli.logic import InventoryEngine, prepare_upload_context
 from totelegram.cli.state import CLIState
-from totelegram.cli.ui import UI, DisplayIndexer, DisplayUpload, console
+from totelegram.cli.ui import (
+    UI,
+    DisplayIndexer,
+    DisplayUpload,
+    IncompatibleCapacityError,
+    PermissionDeniedCleanupError,
+    console,
+)
 from totelegram.concurrency import AccountBusyError
 from totelegram.engine.pipeline import JobPipeline
 from totelegram.engine.planner import PathLengthExceededError
 from totelegram.packaging.indexer import TapeIndexService
+from totelegram.types import PipelineCancelledError
 
 
 def backup_folders(
@@ -38,6 +46,12 @@ def backup_folders(
         "--auto-truncate/--no-auto-truncate",
         help="Activa o desactiva la truncación de nombres largos. Sobrescribe la configuración global.",
     ),
+    yes: bool = typer.Option(
+        False,
+        "--yes",
+        "-y",
+        help="Omite confirmaciones interactivas (ej. al purgar piezas previas con --force).",
+    ),
 ):
     """
     Convierte una carpeta en una Cinta de Datos (TAR) y la distribuye en volúmenes.
@@ -54,13 +68,13 @@ def backup_folders(
         UI.warn("Forzando la subida de carpetas sin comprobar el estado del archivo.")
 
     with state.scope() as (client, db):
-        # Resolvemos y validamos destino y permisos primero
         u_ctx = prepare_upload_context(
             state=state,
             client=client,
             db=db,
             settings=settings,
             target_override=target,
+            yes=yes,
         )
         pipeline = JobPipeline(u_ctx)
 
@@ -134,7 +148,15 @@ def backup_folders(
                     UI.info(
                         f"Procesamiento parcial de [bold]{folder.name}[/]: {result.message}"
                     )
-
+            except IncompatibleCapacityError as e:
+                DisplayUpload.show_incompatible_capacity_panel(e)
+                raise typer.Exit(1)
+            except PermissionDeniedCleanupError as e:
+                DisplayUpload.show_permission_denied_panel(e)
+                raise typer.Exit(1)
+            except PipelineCancelledError as e:
+                UI.info(str(e))
+                raise typer.Exit(0)
             except PathLengthExceededError:
                 UI.error(f"Error al empaquetar la carpeta: [bold]{folder.name}[/]")
                 UI.print(

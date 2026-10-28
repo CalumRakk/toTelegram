@@ -11,7 +11,9 @@ from totelegram.cli.commands import (
     backup,
     config,
     download,
+    forward,
     index,
+    prune,
     send,
     snapshot,
     target,
@@ -41,6 +43,9 @@ app.command(name="backup")(backup.backup_folders)
 app.command(name="download")(download.download_snapshot)
 app.command(name="index")(index.index_tapes)
 app.command(name="target")(target.manage_target)
+app.command(name="forward")(forward.forward_snapshot)
+app.command(name="prune")(prune.prune_files)
+app.command(name="clean")(prune.prune_files)
 
 # --- ATAJOS ---
 app.command(name="login")(auth.login_command)

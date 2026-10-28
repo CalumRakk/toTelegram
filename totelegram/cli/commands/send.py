@@ -6,9 +6,16 @@ import typer
 from totelegram.cli.commands.config import _get_config_tools, handle_config_errors
 from totelegram.cli.logic import InventoryEngine, prepare_upload_context
 from totelegram.cli.state import CLIState
-from totelegram.cli.ui import UI, DisplayUpload, console
+from totelegram.cli.ui import (
+    UI,
+    DisplayUpload,
+    IncompatibleCapacityError,
+    PermissionDeniedCleanupError,
+    console,
+)
 from totelegram.concurrency import AccountBusyError
 from totelegram.engine.pipeline import JobPipeline
+from totelegram.types import PipelineCancelledError
 
 
 @handle_config_errors
@@ -31,6 +38,12 @@ def send_files(
         "-f",
         help="Fuerza ignorando el estado del archivo en el sistema",
     ),
+    yes: bool = typer.Option(
+        False,
+        "--yes",
+        "-y",
+        help="Omite confirmaciones interactivas (ej. al purgar piezas previas con --force).",
+    ),
 ):
     """
     Envía archivos a Telegram. Si recibe una carpeta, envía su contenido (recursivo)
@@ -50,6 +63,7 @@ def send_files(
             db=db,
             settings=settings,
             target_override=target,
+            yes=yes,
         )
         pipeline = JobPipeline(u_ctx)
 
@@ -104,6 +118,15 @@ def send_files(
                         f"Procesamiento parcial de [bold]{path.name}[/]: {result.message}"
                     )
 
+            except IncompatibleCapacityError as e:
+                DisplayUpload.show_incompatible_capacity_panel(e)
+                raise typer.Exit(1)
+            except PermissionDeniedCleanupError as e:
+                DisplayUpload.show_permission_denied_panel(e)
+                raise typer.Exit(1)
+            except PipelineCancelledError as e:
+                UI.info(str(e))
+                raise typer.Exit(0)
             except AccountBusyError as e:
                 UI.error(str(e))
                 raise typer.Exit(1)

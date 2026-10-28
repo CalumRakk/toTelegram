@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, List
@@ -63,6 +64,10 @@ class PermissionDeniedCleanupError(PipelineExecutionError):
 # --- CONTEXTO Y REPORTES ---
 
 
+class PipelineCancelledError(PipelineExecutionError):
+    """Lanzada cuando el usuario cancela interactivamente una operación destructiva."""
+
+
 @dataclass
 class UploadContext:
     """Contexto unificado de ejecución para operaciones de carga."""
@@ -76,6 +81,8 @@ class UploadContext:
     state: "CLIState"
     coordinator: "ConcurrencyCoordinator"
     observer: UploadObserver = field(default_factory=NullObserver)
+    yes: bool = False
+    confirm_cleanup: Callable[[int, str], bool] | None = None
 
     @property
     def account_id(self) -> int | None:

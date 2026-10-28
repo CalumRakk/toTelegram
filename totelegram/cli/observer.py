@@ -37,6 +37,13 @@ class RichUploadObserver:
         self._hash_progress: Progress | None = None
         self._hash_task_id = None
 
+    def on_relocation_start(self, pieces_count: int) -> None:
+        """Notifica al usuario sobre la reubicación de piezas al fondo del canal."""
+        UI.info(
+            f"Reorganizando [bold]{pieces_count}[/] piezas previas al fondo del canal "
+            f"[dim cyan](Anti-Waste TOC: 0 bytes transferidos)[/]..."
+        )
+
     def on_potential_duplicates(self, duplicates: list["DuplicateCandidate"]) -> None:
         """Muestra un panel visual alertando sobre coincidencias similares en el chat."""
         if not duplicates:

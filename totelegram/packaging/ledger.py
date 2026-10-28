@@ -3,6 +3,7 @@ import logging
 import lzma
 import os
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict
@@ -14,6 +15,24 @@ logger = logging.getLogger(__name__)
 
 LEDGER_FILENAME = ".totelegram.json"
 LEDGER_SCHEMA_VERSION = 1
+
+
+@dataclass
+class FileAuditResult:
+    """Resultado de la auditoría de un archivo respecto al recibo y disco."""
+
+    filename: str
+    path: Path | None
+    size: int
+    is_on_disk: bool
+    is_backed_up: bool
+    is_modified: bool
+    destinations: Dict[str, "BackupDestinationRecord"]
+
+    @property
+    def is_safe_to_prune(self) -> bool:
+        """Solo es seguro borrar si existe en disco, está respaldado y no fue alterado."""
+        return self.is_on_disk and self.is_backed_up and not self.is_modified
 
 
 def is_mtime_matching(cached_mtime: float, current_mtime: float) -> bool:
@@ -350,6 +369,7 @@ class ReceiptLedger:
             if stat.st_size == job.source.size and is_mtime_matching(
                 job.source.mtime, stat.st_mtime
             ):
+                assert job.remote_snapshot is not None
                 cls.record_upload(
                     file_path=source_file,
                     chat_id=job.chat.id,
@@ -395,3 +415,106 @@ class ReceiptLedger:
             cls.save(dir_path, receipt)
             return True
         return False
+
+    @classmethod
+    def audit_directory(
+        cls,
+        dir_path: Path | str,
+        target_chat_id: int | str | None = None,
+    ) -> list[FileAuditResult]:
+        """
+        Audita el estado de todos los archivos de un directorio contrastando
+        el sistema de archivos local contra el .totelegram.json.
+        """
+        target_dir = Path(dir_path).resolve()
+        if not target_dir.is_dir():
+            return []
+
+        receipt = cls.load(target_dir)
+        results: list[FileAuditResult] = []
+        seen_filenames: set[str] = set()
+
+        # Auditar archivos que existen físicamente en disco
+        for item in sorted(target_dir.iterdir()):
+            if not item.is_file():
+                continue
+
+            # Ignorar archivos internos y metadatos
+            name = item.name
+            if name.startswith(".totelegram") or name.endswith(
+                (".json.xz", ".ttape", ".tartape")
+            ):
+                continue
+
+            seen_filenames.add(name)
+            stat = item.stat()
+            current_size = stat.st_size
+            current_mtime = stat.st_mtime
+
+            entry = receipt.entries.get(name)
+
+            if entry is None and cls.assimilate_legacy_snapshot(item):
+                # Comprobar si hay snapshot heredado que se pueda asimilar
+                receipt = cls.load(target_dir)
+                entry = receipt.entries.get(name)
+
+            if entry is not None:
+                is_fresh = entry.is_fresh(current_size, current_mtime)
+                destinations = entry.destinations
+
+                if target_chat_id is not None:
+                    dest_key = str(target_chat_id)
+                    is_backed_up = dest_key in destinations and is_fresh
+                else:
+                    is_backed_up = len(destinations) > 0 and is_fresh
+
+                results.append(
+                    FileAuditResult(
+                        filename=name,
+                        path=item,
+                        size=current_size,
+                        is_on_disk=True,
+                        is_backed_up=is_backed_up,
+                        is_modified=not is_fresh,
+                        destinations=destinations,
+                    )
+                )
+            else:
+                results.append(
+                    FileAuditResult(
+                        filename=name,
+                        path=item,
+                        size=current_size,
+                        is_on_disk=True,
+                        is_backed_up=False,
+                        is_modified=False,
+                        destinations={},
+                    )
+                )
+
+        # Archivos presentes en el recibo pero ya eliminados del disco
+        for name, entry in receipt.entries.items():
+            if name in seen_filenames:
+                continue
+
+            destinations = entry.destinations
+            if target_chat_id is not None:
+                dest_key = str(target_chat_id)
+                has_dest = dest_key in destinations
+            else:
+                has_dest = len(destinations) > 0
+
+            if has_dest:
+                results.append(
+                    FileAuditResult(
+                        filename=name,
+                        path=None,
+                        size=entry.size,
+                        is_on_disk=False,
+                        is_backed_up=True,
+                        is_modified=False,
+                        destinations=destinations,
+                    )
+                )
+
+        return results

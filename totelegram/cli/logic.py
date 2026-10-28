@@ -8,7 +8,7 @@ import typer
 
 from totelegram.cli.observer import RichUploadObserver
 from totelegram.cli.state import CLIState
-from totelegram.cli.ui import UI
+from totelegram.cli.ui import UI, console
 from totelegram.concurrency import ConcurrencyCoordinator
 from totelegram.discovery import DiscoveryService
 from totelegram.identity import Settings
@@ -33,6 +33,7 @@ def prepare_upload_context(
     db: peewee.Database,
     settings: Settings,
     target_override: str | None = None,
+    yes: bool = False,
 ) -> UploadContext:
     """Prepara el contexto unificado de subida aplicando la jerarquía de resolución de destino."""
     resolver = TargetResolver(client, db)
@@ -126,6 +127,14 @@ def prepare_upload_context(
     )
     observer = RichUploadObserver()
 
+    def confirm_cleanup_handler(count: int, filename: str) -> bool:
+        console.print()
+        UI.warn(
+            f"Existen [bold]{count}[/] partes previas en Telegram del archivo '[bold]{filename}[/]'.\n"
+            f"Al continuar con [bold]--force[/], se eliminarán de Telegram para reiniciar la subida desde cero."
+        )
+        return typer.confirm("¿Deseas eliminarlas y continuar?", default=False)
+
     return UploadContext(
         client=client,
         db=db,
@@ -136,6 +145,8 @@ def prepare_upload_context(
         state=state,
         coordinator=coordinator,
         observer=observer,
+        yes=yes,
+        confirm_cleanup=confirm_cleanup_handler,
     )
 
 
