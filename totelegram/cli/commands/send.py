@@ -43,16 +43,6 @@ def send_files(
     if force:
         UI.warn("Forzando la subida de archivos sin comprobar el estado previo.")
 
-    with console.status(f"[dim]Escaneando {len(paths)} archivos[/dim]"):
-        scan_report = InventoryEngine(settings, force).scan_granular(paths)
-
-    DisplayUpload.show_skip_report(scan_report, "archivo")
-
-    candidates = scan_report.found
-    if not candidates:
-        UI.warn("No se encontraron archivos para enviar.")
-        raise typer.Exit(0)
-
     with state.scope() as (client, db):
         u_ctx = prepare_upload_context(
             state=state,
@@ -81,6 +71,22 @@ def send_files(
         UI.info(f"Destino: [bold cyan]{chat_n}[/] [dim](ID: {u_ctx.tg_chat.id})[/]")
         UI.print("", indent=False)
 
+        # Escaneamos filtrando por el chat destino resuelto
+        with console.status(f"[dim]Escaneando {len(paths)} rutas...[/dim]"):
+            scan_report = InventoryEngine(
+                settings=settings,
+                force=force,
+                target_chat_id=u_ctx.tg_chat.id,
+            ).scan_granular(paths)
+
+        DisplayUpload.show_skip_report(scan_report, "archivo")
+
+        candidates = scan_report.found
+        if not candidates:
+            UI.warn("No se encontraron archivos pendientes para este destino.")
+            raise typer.Exit(0)
+
+        # Procesamiento de los archivos candidatos
         for idx, path in enumerate(candidates, 1):
             is_last = idx == len(candidates)
             UI.separator()

@@ -13,11 +13,12 @@ from totelegram.concurrency import ConcurrencyCoordinator
 from totelegram.discovery import DiscoveryService
 from totelegram.identity import Settings
 from totelegram.models import TelegramUser
+from totelegram.packaging.ledger import ReceiptLedger
 from totelegram.schemas import VALUE_NOT_SET, ScanReport
 from totelegram.telegram.resolver import TargetResolver
 from totelegram.telegram.types import TargetResolutionStatus
 from totelegram.types import UploadContext
-from totelegram.utils import has_snapshot, is_excluded
+from totelegram.utils import is_excluded
 
 if TYPE_CHECKING:
     from pyrogram.client import Client
@@ -139,29 +140,35 @@ def prepare_upload_context(
 
 
 class InventoryEngine:
-    def __init__(self, settings: Settings, force: bool = False):
+    def __init__(
+        self,
+        settings: Settings,
+        force: bool = False,
+        target_chat_id: int | str | None = None,
+    ):
         self.settings = settings
         self.patterns = settings.exclude_files
         self.max_size = settings.max_filesize_bytes
         self.force = force
+        self.target_chat_id = target_chat_id
 
     def _validate_file(
         self, path: Path, report: ScanReport, check_snapshot: bool
     ) -> bool:
-        """
-        Comprueba: Patrones, Tamaño y (opcionalmente) Snapshot.
-        """
-        # Ignorar snapshots de toTelegram y catalogos sidecar de TarTape
+        # Ignorar archivos internos de toTelegram y tartape
         if path.suffix == ".xz" and path.name.endswith(".json.xz"):
             return False
-
-        if path.suffix == ".tartape" or path.name.endswith(".tartape"):
+        if path.name == ".totelegram.json" or path.name.startswith(".totelegram.tmp"):
+            return False
+        if path.suffix in (".tartape", ".ttape") or path.name.endswith(
+            (".tartape", ".ttape")
+        ):
             return False
 
-        if path.suffix == ".ttape" or path.name.endswith(".ttape"):
-            return False
-
-        if check_snapshot and has_snapshot(path) and not self.force:
+        # Validación contra el Ledger por Canal
+        if (check_snapshot and not self.force) and ReceiptLedger.is_backed_up(
+            path, self.target_chat_id
+        ):
             report.log_skip(path, "snapshot")
             return False
 
@@ -176,16 +183,12 @@ class InventoryEngine:
         return True
 
     def _validate_container(self, path: Path, report: ScanReport) -> bool:
-        """
-        Comprueba Patrones, Snapshot y integridad de cinta de la carpeta. No comprueba tamaño.
-        """
-        # Si la carpeta está en la lista de exclusión (ej: node_modules), se salta entera.
         if is_excluded(path, self.patterns):
             report.log_skip(path, "exclusion")
             return False
 
-        # Si la carpeta ya fue archivada como tal.
-        if has_snapshot(path) and not self.force:
+        # Comprobación de carpeta en el Ledger
+        if not self.force and ReceiptLedger.is_backed_up(path, self.target_chat_id):
             report.log_skip(path, "snapshot")
             return False
 

@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from tempfile import NamedTemporaryFile, TemporaryDirectory
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch
 
 import tartape
 from tartape.exceptions import PathConstraintReportError
@@ -283,7 +283,7 @@ class TestEnginePipelineAndComponents(unittest.TestCase):
                 self.mock_observer.on_job_complete.assert_called_once_with(
                     result.job, True
                 )
-                mock_snapshot.assert_called_once_with(result.job)
+                mock_snapshot.assert_called_once_with(result.job, staging_dir=ANY)
                 mock_publish.assert_called_once()
         finally:
             if tmp_path.exists():
@@ -393,7 +393,7 @@ class TestEnginePipelineAndComponents(unittest.TestCase):
             (source_dir / "app.py").write_text("print('hello')")
             (source_dir / "__init__.py").write_bytes(b"")  # 0 bytes
 
-            # 1. Crear tape y snapshot
+            # Crear tape y snapshot
             tape = tartape.record(source_dir, checksum="md5", overwrite=True)
             source = Source.create_from_tape(tape, exclusion_patterns=[])
             job = Job.formalize_intent(source, self.chat, 10000)
@@ -413,7 +413,7 @@ class TestEnginePipelineAndComponents(unittest.TestCase):
 
             manifest, snapshot_path = SnapshotService.generate_snapshot(job)
 
-            # 2. Restaurar quirúrgicamente el archivo vacío de 0 bytes
+            # Restaurar quirúrgicamente el archivo vacío de 0 bytes
             restore_dir = base_dir / "restored"
             engine = DownloadEngine(client=self.mock_client)
 

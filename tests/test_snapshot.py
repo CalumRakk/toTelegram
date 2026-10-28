@@ -130,7 +130,7 @@ class TestSnapshotService(unittest.TestCase):
         sub_dir.mkdir()
         (sub_dir / "archivo.txt").write_bytes(b"A" * 800)
 
-        # 1. tartape genera el catálogo SQLite T0 (.tartape)
+        # tartape genera el catálogo SQLite T0 (.tartape)
         tape = tartape.record(folder_path, checksum="md5", overwrite=True)
         self.assertTrue(tape.catalog_path.exists())
 
@@ -174,7 +174,7 @@ class TestSnapshotService(unittest.TestCase):
             RemotePayload.register_upload(payload=p2, tg_message=msg2, owner=self.user)
             manifest, _ = SnapshotService.generate_snapshot(job)
 
-        # 2. Validaciones bajo el estándar v6.0 (.ttape)
+        # Validaciones bajo el estándar v6.0 (.ttape)
         self.assertEqual(len(manifest.parts), 2)
 
         # Debe generar físicamente el contenedor .ttape

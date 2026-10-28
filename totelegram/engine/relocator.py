@@ -63,7 +63,7 @@ class ChunkRelocator:
             f"Iniciando reubicación atómica de {len(sorted_remotes)} trozos en chat {chat_id}..."
         )
 
-        # 1. Copiar mensajes secuencialmente al fondo del chat
+        # Copiar mensajes secuencialmente al fondo del chat
         try:
             for r in sorted_remotes:
                 from pyrogram.types import Message
@@ -89,7 +89,7 @@ class ChunkRelocator:
                 f"Fallo al copiar trozos al fondo del canal: {e}"
             ) from e
 
-        # 2. Eliminar mensajes antiguos de Telegram
+        # Eliminar mensajes antiguos de Telegram
         old_message_ids = [r.message_id for r in sorted_remotes]
         try:
             client.delete_messages(chat_id=chat_id, message_ids=old_message_ids)
@@ -106,7 +106,7 @@ class ChunkRelocator:
                 reason=f"No se pudieron eliminar los trozos antiguos ({old_message_ids}): {e}",
             ) from e
 
-        # 3. Actualizar la base de datos local en una transacción atómica
+        # Actualizar la base de datos local en una transacción atómica
         with db_transaction(db):
             for remote_obj, new_msg in copied_records:
                 remote_obj.message_id = new_msg.id

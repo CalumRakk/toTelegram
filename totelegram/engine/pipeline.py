@@ -1,5 +1,6 @@
 import logging
 import random
+import tempfile
 import time
 from pathlib import Path
 
@@ -8,7 +9,8 @@ from totelegram.engine.planner import JobPlanner
 from totelegram.engine.relocator import ChunkRelocator
 from totelegram.engine.strategies.upload import CooperativeUploadStrategy
 from totelegram.models import Job
-from totelegram.packaging.publisher import SnapshotPublicationError, SnapshotPublisher
+from totelegram.packaging.ledger import ReceiptLedger
+from totelegram.packaging.publisher import SnapshotPublisher
 from totelegram.packaging.snapshot import SnapshotService
 from totelegram.schemas import ExecutionDecision
 from totelegram.types import (
@@ -40,7 +42,7 @@ class JobPipeline:
     ) -> JobExecutionResult:
         logger.info(f"=== Iniciando Pipeline para: {path.name} ===")
 
-        # 1. Planificación de la intención
+        # Planificación de la intención
         job = JobPlanner.plan(
             path=path,
             ctx=self.ctx,
@@ -58,7 +60,7 @@ class JobPipeline:
         )
 
         with self.ctx.coordinator.guard_account(self.ctx.account_id):
-            # 2. Investigación física JIT en el chat destino
+            # Investigación física JIT en el chat destino
             report = self.ctx.discovery.investigate(
                 job=job,
                 force=force,
@@ -70,9 +72,9 @@ class JobPipeline:
 
             logger.info(f"Decisión de ejecución resuelta: {report.decision.value}")
 
-            # 3. Despacho determinista de los 7 estados resolutivos
+            # Despacho determinista de los 7 estados resolutivos
 
-            # CASO A: Ya completado en el canal (0 bytes transferidos)
+            # Ya completado en el canal (0 bytes transferidos)
             if report.decision == ExecutionDecision.ALREADY_FULFILLED:
                 strategy_result = StrategyResult(
                     strategy_name="None",
@@ -92,7 +94,7 @@ class JobPipeline:
                     message=strategy_result.message,
                 )
 
-            # CASO B: Bloqueo por falta de permisos de eliminación
+            # Bloqueo por falta de permisos de eliminación
             if report.decision == ExecutionDecision.PERMISSION_DENIED_CLEANUP:
                 raise PermissionDeniedCleanupError(
                     chat_id=self.ctx.tg_chat.id,
@@ -100,7 +102,7 @@ class JobPipeline:
                     or "Permiso 'can_delete_messages' requerido para limpiar el canal.",
                 )
 
-            # CASO C: Bloqueo por incompatibilidad de capacidad (ej: Job 4GB con cuenta 2GB)
+            # Bloqueo por incompatibilidad de capacidad (ej: Job 4GB con cuenta 2GB)
             if report.decision == ExecutionDecision.INCOMPATIBLE_CAPACITY:
                 raise IncompatibleCapacityError(
                     job_chunk_size=job.chunk_size,
@@ -108,7 +110,7 @@ class JobPipeline:
                     is_premium=self.ctx.owner.is_premium,
                 )
 
-            # CASO D: Todas las piezas ya estaban en Telegram, solo falta sellar Snapshot
+            # Todas las piezas ya estaban en Telegram, solo falta sellar Snapshot
             if report.decision == ExecutionDecision.SEAL_HEALED:
                 logger.info(
                     f"Job {job.id}: Sellando snapshot faltante (SEAL_HEALED)..."
@@ -121,7 +123,7 @@ class JobPipeline:
                     message="Todas las partes ya estaban en Telegram. Snapshot sellado exitosamente.",
                 )
 
-            # CASO E: Reubicación al fondo con copy_message + delete (Anti-Waste TOC)
+            # Reubicación al fondo con copy_message + delete (Anti-Waste TOC)
             elif report.decision == ExecutionDecision.RELOCATED_AND_RESUMED:
                 logger.info(
                     f"Job {job.id}: Ejecutando reubicación atómica de {len(report.valid_remotes)} trozos..."
@@ -136,7 +138,7 @@ class JobPipeline:
                 strategy = CooperativeUploadStrategy()
                 strategy_result = strategy.execute(job, self.ctx, report)
 
-            # CASO F: Reinicio limpio (--force ante cambio de corte incompatible)
+            # Reinicio limpio (--force ante cambio de corte incompatible)
             elif (
                 report.decision == ExecutionDecision.CLEAN_RESTART
                 and force
@@ -145,7 +147,7 @@ class JobPipeline:
                 logger.info(
                     f"Job {job.id}: Purgando intento previo para reinicio limpio con --force..."
                 )
-                # 1. Eliminar mensajes viejos de Telegram
+                # Eliminar mensajes viejos de Telegram
                 old_msg_ids = [r.message_id for r in report.valid_remotes]
                 if old_msg_ids:
                     try:
@@ -157,7 +159,7 @@ class JobPipeline:
                             f"Aviso limpiando mensajes viejos en Telegram: {e}"
                         )
 
-                # 2. Purgar Job en SQLite y recrearlo con el nuevo chunk_size adecuado
+                # Purgar Job en SQLite y recrearlo con el nuevo chunk_size adecuado
                 with db_transaction(self.ctx.db):
                     source = job.source
                     chat = job.chat
@@ -169,12 +171,12 @@ class JobPipeline:
                 strategy = CooperativeUploadStrategy()
                 strategy_result = strategy.execute(job, self.ctx, report)
 
-            # CASO G: Reanudación estándar en su sitio o subida nueva
+            # Reanudación estándar en su sitio o subida nueva
             else:
                 strategy = CooperativeUploadStrategy()
                 strategy_result = strategy.execute(job, self.ctx, report)
 
-            # 4. Sellado de Snapshot si todas las piezas quedaron subidas
+            # Sellado de Snapshot si todas las piezas quedaron subidas
             is_completed = False
             snapshot_generated = False
 
@@ -182,29 +184,38 @@ class JobPipeline:
                 is_completed = True
 
                 if job.remote_snapshot is None:
-                    try:
-                        manifest, snapshot_path = SnapshotService.generate_snapshot(job)
-                        snapshot_generated = True
+                    # Crear directorio temporal aislado para el staging
+                    with tempfile.TemporaryDirectory() as staging_dir:
+                        staging_path = Path(staging_dir)
+                        manifest, temp_snapshot_file = (
+                            SnapshotService.generate_snapshot(
+                                job, staging_dir=staging_path
+                            )
+                        )
 
+                        # Publicar el snapshot físico en Telegram
                         sent_msg = SnapshotPublisher.publish(
                             client=self.ctx.client,
                             chat_id=self.ctx.tg_chat.id,
-                            snapshot_path=snapshot_path,
+                            snapshot_path=temp_snapshot_file,
                             manifest=manifest,
                         )
 
+                        # Persistir en SQLite
                         with db_transaction(self.ctx.db):
                             job.set_snapshot_published(sent_msg.id, self.ctx.owner)
-                            logger.info(
-                                f"Job {job.id} sellado con RemoteSnapshot Msg ID: {sent_msg.id}"
-                            )
 
-                    except SnapshotPublicationError as e:
-                        logger.error(f"Fallo al publicar snapshot en Telegram: {e}")
-                    except Exception:
-                        logger.exception(
-                            f"Error inesperado en cierre de snapshot para Job {job.id}"
+                        # Registrar en el Recibo Agregado Local (.totelegram.json)
+                        ReceiptLedger.record_upload(
+                            file_path=job.path,
+                            chat_id=self.ctx.tg_chat.id,
+                            snapshot_message_id=sent_msg.id,
+                            chunk_size=job.chunk_size,
+                            total_parts=job.payloads.count(),
+                            md5=job.source.md5sum,
+                            chat_title=self.ctx.tg_chat.title,
                         )
+                        snapshot_generated = True
 
             self.ctx.observer.on_job_complete(job, snapshot_generated)
 

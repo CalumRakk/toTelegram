@@ -73,8 +73,13 @@ class SnapshotService:
         )
 
     @staticmethod
-    def generate_snapshot(job: Job) -> tuple[UploadManifest, Path]:
+    def generate_snapshot(
+        job: Job, staging_dir: Path | None = None
+    ) -> tuple[UploadManifest, Path]:
         """Genera el snapshot en disco bifurcando entre .json.xz (archivo) y .ttape (carpeta).
+
+        Si se especifica `staging_dir`, el archivo se genera en ese directorio temporal
+        para evitar contaminar la carpeta del usuario.
 
         Retorna una tupla (UploadManifest, Path del archivo generado).
         """
@@ -132,10 +137,15 @@ class SnapshotService:
             parts=parts,
         )
 
-        # Bifurcación física de almacenamiento
-        output_path = SnapshotService.resolve_snapshot_path(
-            original_file_path, source.md5sum, source.type
-        )
+        # Bifurcación física de almacenamiento: Staging o Directorio Local
+        extension = TTAPE_EXTENSION if source.type == SourceType.FOLDER else ".json.xz"
+
+        if staging_dir is not None:
+            output_path = Path(staging_dir) / f"{original_file_path.name}{extension}"
+        else:
+            output_path = SnapshotService.resolve_snapshot_path(
+                original_file_path, source.md5sum, source.type
+            )
 
         if source.type == SourceType.FOLDER:
             catalog_file = tartape.discover(original_file_path)

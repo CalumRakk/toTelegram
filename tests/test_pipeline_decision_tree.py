@@ -352,11 +352,11 @@ class TestPipelineDecisionTree(unittest.TestCase):
                 result = pipeline.process(file_path, force=True)
 
             self.assertTrue(result.is_completed)
-            # 1. Verificamos que se ordenó borrar el mensaje incompatible de Telegram
+            # Verificamos que se ordenó borrar el mensaje incompatible de Telegram
             self.mock_client.delete_messages.assert_called_with(
                 chat_id=self.chat.id, message_ids=[201]
             )
-            # 2. Verificamos que el Job resultante se ajustó al tamaño de corte de la cuenta activa (2000)
+            # Verificamos que el Job resultante se ajustó al tamaño de corte de la cuenta activa (2000)
             self.assertEqual(result.job.chunk_size, 2000)
         finally:
             file_path.unlink(missing_ok=True)

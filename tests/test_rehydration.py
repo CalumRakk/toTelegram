@@ -104,7 +104,7 @@ class TestRehydrationEngine(unittest.TestCase):
         msg.document = MagicMock(file_name=doc_name, file_size=1000)
         return msg
 
-    # 1. PRUEBAS DE REHIDRATACIÓN INDIVIDUAL (JIT)
+    # PRUEBAS DE REHIDRATACIÓN INDIVIDUAL (JIT)
 
     def test_rehydrate_from_message_success(self):
         """Valida que un mensaje con snapshot válido reconstruya el Job y sus piezas en SQLite."""
@@ -188,7 +188,7 @@ class TestRehydrationEngine(unittest.TestCase):
         self.assertFalse(success)
         self.assertEqual(Source.select().count(), 0)
 
-    # 2. PRUEBAS DE REHIDRATACIÓN EN LOTE (BATCH / INDEXER)
+    # PRUEBAS DE REHIDRATACIÓN EN LOTE (BATCH / INDEXER)
 
     def test_rehydrate_from_messages_batch_with_mixed_results(self):
         """Procesa un lote mixto: 2 mensajes válidos y 1 fallido, reportando progreso."""
@@ -234,7 +234,7 @@ class TestRehydrationEngine(unittest.TestCase):
         self.assertEqual(Source.select().count(), 2)
         self.assertEqual(Job.select().count(), 2)
 
-    # 3. PRUEBAS DE LA POLÍTICA DE VERSIONES (SnapshotInspector)
+    # PRUEBAS DE LA POLÍTICA DE VERSIONES (SnapshotInspector)
 
     def test_snapshot_inspector_version_evaluation(self):
         """Verifica que SnapshotInspector discrimine entre v6.0, versiones viejas y futuras."""

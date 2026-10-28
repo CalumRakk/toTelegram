@@ -53,19 +53,8 @@ def backup_folders(
     if force:
         UI.warn("Forzando la subida de carpetas sin comprobar el estado del archivo.")
 
-    with console.status("[dim]Escaneando directorios...[/]"):
-        scan_report = InventoryEngine(settings, force).scan_backup_inventory(paths)
-
-    DisplayUpload.show_skip_report(scan_report, "carpeta", force_verbose=False)
-
-    candidates = scan_report.found
-    if not candidates:
-        UI.warn("No se encontraron carpetas válidas para procesar.")
-        raise typer.Exit(0)
-
-    UI.separator()
-
     with state.scope() as (client, db):
+        # Resolvemos y validamos destino y permisos primero
         u_ctx = prepare_upload_context(
             state=state,
             client=client,
@@ -74,6 +63,21 @@ def backup_folders(
             target_override=target,
         )
         pipeline = JobPipeline(u_ctx)
+
+        # Escaneamos carpetas filtrando por el target_chat_id resuelto
+        with console.status("[dim]Escaneando directorios...[/]"):
+            scan_report = InventoryEngine(
+                settings=settings,
+                force=force,
+                target_chat_id=u_ctx.tg_chat.id,
+            ).scan_backup_inventory(paths)
+
+        DisplayUpload.show_skip_report(scan_report, "carpeta", force_verbose=False)
+
+        candidates = scan_report.found
+        if not candidates:
+            UI.warn("No se encontraron carpetas pendientes para este destino.")
+            raise typer.Exit(0)
 
         # Comprobación adaptativa del catálogo de cintas
         indexer = TapeIndexService(client, db)
@@ -104,6 +108,7 @@ def backup_folders(
         UI.info(f"Destino: [bold cyan]{chat_n}[/] [dim](ID: {u_ctx.tg_chat.id})[/]")
         UI.print("", indent=False)
 
+        # Procesamiento secuencial de carpetas
         for index, folder in enumerate(candidates, 1):
             is_last = index == len(candidates)
             DisplayUpload.show_backup_header(folder.name, index, len(candidates))
@@ -135,14 +140,11 @@ def backup_folders(
                 UI.print(
                     "[dim]El formato TAR tiene un límite estricto para la longitud de los nombres y rutas de archivos.[/dim]"
                 )
-                UI.print(
-                    "[dim]Algunos archivos dentro de esta carpeta superan este límite.[/dim]"
-                )
                 UI.educational_tip(
                     title="Nombres de archivo demasiado largos",
                     message="Tienes dos opciones para resolver esto:\n"
                     "1. Renombrar manualmente los archivos con rutas largas.\n"
-                    "2. Dejar que toTelegram trunque (recorte) los nombres automáticamente al subirlos.",
+                    "2. Dejar que toTelegram trunque los nombres automáticamente al subirlos.",
                     commands=[
                         f'totelegram backup "{folder}" --auto-truncate',
                         "totelegram config set auto_truncate true",

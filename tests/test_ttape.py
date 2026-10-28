@@ -75,11 +75,11 @@ class TestTapeContainerAndBifurcation(unittest.TestCase):
         )
         return msg
 
-    # 1. PRUEBAS DEL CONTENEDOR HÍBRIDO TAPE CONTAINER (.ttape)
+    # PRUEBAS DEL CONTENEDOR HÍBRIDO TAPE CONTAINER (.ttape)
 
     def test_tape_container_build_and_read_manifest_o1(self):
         """Valida que TapeContainer empaquete el ZIP y permita leer manifest.json sin descomprimir SQLite."""
-        # 1. Crear carpeta con archivos dummy y catalogar con tartape
+        # Crear carpeta con archivos dummy y catalogar con tartape
         folder = self.base_path / "proyecto_codigo"
         folder.mkdir()
         (folder / "main.py").write_text("print('hello world')")
@@ -88,7 +88,7 @@ class TestTapeContainerAndBifurcation(unittest.TestCase):
         tape = tartape.record(folder, checksum="md5", overwrite=True)
         self.assertTrue(tape.catalog_path.exists())
 
-        # 2. Construir un UploadManifest de prueba (v6.0)
+        # Construir un UploadManifest de prueba (v6.0)
         manifest = UploadManifest(
             manifest_version=MANIFEST_VERSION,
             created_at=datetime.now(timezone.utc),
@@ -121,7 +121,7 @@ class TestTapeContainerAndBifurcation(unittest.TestCase):
 
         ttape_dest = self.base_path / "proyecto_codigo.ttape"
 
-        # 3. Empaquetar
+        # Empaquetar
         built_path = TapeContainer.build(
             output_path=ttape_dest,
             manifest=manifest,
@@ -132,20 +132,20 @@ class TestTapeContainerAndBifurcation(unittest.TestCase):
         self.assertTrue(built_path.exists())
         self.assertTrue(TapeContainer.is_valid(built_path))
 
-        # 4. Lectura O(1) de manifest.json
+        # Lectura O(1) de manifest.json
         loaded_manifest = TapeContainer.read_manifest(built_path)
         self.assertEqual(loaded_manifest.manifest_version, MANIFEST_VERSION)
         self.assertEqual(loaded_manifest.source.filename, "proyecto_codigo")
         self.assertEqual(len(loaded_manifest.parts), 1)
         self.assertEqual(loaded_manifest.parts[0].message_id, 501)
 
-        # 5. Inspección de tamaños y compresión
+        # Inspección de tamaños y compresión
         info = TapeContainer.inspect(built_path)
         self.assertGreater(info.total_container_bytes, 0)
         self.assertGreater(info.catalog_compressed_bytes, 0)
         self.assertGreater(info.catalog_uncompressed_bytes, 0)
 
-        # 6. Context manager open_catalog para consultas relacionales B-Tree
+        # Context manager open_catalog para consultas relacionales B-Tree
         with TapeContainer.open_catalog(built_path) as cat:
             self.assertEqual(cat.fingerprint, tape.fingerprint)
             self.assertEqual(cat.file_count, 3)  # root + main.py + config.json
@@ -159,13 +159,13 @@ class TestTapeContainerAndBifurcation(unittest.TestCase):
         """Valida que un archivo dañado o sin los artefactos requeridos lance InvalidTapeContainerError."""
         corrupt_file = self.base_path / "corrupto.ttape"
 
-        # Caso A: Archivo binario no ZIP
+        # Archivo binario no ZIP
         corrupt_file.write_bytes(b"esto no es un zip")
         self.assertFalse(TapeContainer.is_valid(corrupt_file))
         with self.assertRaises(InvalidTapeContainerError):
             TapeContainer.read_manifest(corrupt_file)
 
-        # Caso B: Archivo ZIP pero sin catalog.tartape
+        # Archivo ZIP pero sin catalog.tartape
         corrupt_file.unlink()
         with zipfile.ZipFile(corrupt_file, "w") as zf:
             zf.writestr(TTAPE_MANIFEST_FILENAME, "{}")
@@ -174,7 +174,7 @@ class TestTapeContainerAndBifurcation(unittest.TestCase):
         with self.assertRaises(InvalidTapeContainerError):
             TapeContainer.extract_catalog(corrupt_file, self.base_path / "out.tartape")
 
-    # 2. PRUEBAS DE BIFURCACIÓN EN SNAPSHOT SERVICE
+    # PRUEBAS DE BIFURCACIÓN EN SNAPSHOT SERVICE
 
     def test_snapshot_service_bifurcation_file_generates_json_xz(self):
         """Un SourceType.FILE debe generar exclusivamente .json.xz."""
@@ -230,7 +230,7 @@ class TestTapeContainerAndBifurcation(unittest.TestCase):
         (folder / "foto1.jpg").write_bytes(b"\xff\xd8\xff" + b"A" * 100)
         (folder / "foto2.jpg").write_bytes(b"\xff\xd8\xff" + b"B" * 200)
 
-        # 1. tartape genera el catálogo sidecar (.tartape) en disco
+        # tartape genera el catálogo sidecar (.tartape) en disco
         tape = tartape.record(folder, checksum="md5", overwrite=True)
         catalog_path = tape.catalog_path
         self.assertTrue(catalog_path.exists())
@@ -243,10 +243,10 @@ class TestTapeContainerAndBifurcation(unittest.TestCase):
         mock_msg = self._create_mock_message(201, self.chat.id, "https://t.me/c/1/201")
         RemotePayload.register_upload(payload, mock_msg, self.user)
 
-        # 2. Generar snapshot
+        # Generar snapshot
         manifest, _ = SnapshotService.generate_snapshot(job)
 
-        # 3. Comprobaciones de almacenamiento
+        # Comprobaciones de almacenamiento
         expected_ttape = folder.with_name(f"{folder.name}{TTAPE_EXTENSION}")
         self.assertTrue(expected_ttape.exists())
 
@@ -260,7 +260,7 @@ class TestTapeContainerAndBifurcation(unittest.TestCase):
         self.assertEqual(loaded.source.type, SourceType.FOLDER)
         self.assertIsNotNone(loaded.source.tape_catalog)
 
-    # 3. PRUEBAS DE INTEGRACIÓN: INSPECTOR & IMPORTADOR
+    # PRUEBAS DE INTEGRACIÓN: INSPECTOR & IMPORTADOR
 
     def test_snapshot_inspector_and_importer_direct_sql_from_ttape(self):
         """Valida que SnapshotInspector reconozca el .ttape y SnapshotImporter vuelque tracks a TapeMember."""

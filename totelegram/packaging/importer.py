@@ -238,7 +238,7 @@ class SnapshotInspector:
         manifest: UploadManifest | None = None
         raw_version: str | None = None
 
-        # Caso 1: Contenedor híbrido .ttape (Carpetas)
+        # Contenedor híbrido .ttape (Carpetas)
         if path.suffix == ".ttape" or path.name.endswith(".ttape"):
             try:
                 if not TapeContainer.is_valid(path):
@@ -256,7 +256,7 @@ class SnapshotInspector:
                     error_detail=f"Error leyendo contenedor .ttape: {e}",
                 )
 
-        # Caso 2: Snapshot de archivo individual (.json.xz)
+        # Snapshot de archivo individual (.json.xz)
         elif path.suffix == ".xz" or path.name.endswith(".json.xz"):
             try:
                 with lzma.open(path, "rt", encoding="utf-8") as f:
@@ -406,7 +406,7 @@ class SnapshotImportPlanner:
                 max(0, total_inventory - existing_members_count) if is_folder else 0
             )
 
-            # CASO A: Recurso completamente nuevo o Job no existente en este chat
+            # Recurso completamente nuevo o Job no existente en este chat
             if existing_job is None:
                 create_source = not source_exists
                 create_job = True
@@ -459,7 +459,7 @@ class SnapshotImportPlanner:
                 planned_jobs.add(job_key)
                 continue
 
-            # CASO B: El Job ya existe en BD. Análisis diferencial granular
+            # El Job ya existe en BD. Análisis diferencial granular
             existing_payloads = {
                 p.sequence_index: p for p in cast(list[Payload], existing_job.payloads)
             }
@@ -679,8 +679,27 @@ class SnapshotImporter:
         ):
             cls._bulk_ingest_tape_members(source, item.inspection.path)
 
+        # Sincronizar el Recibo Agregado local si el archivo/carpeta original existe en disco
+        try:
+            source_file = Path(source.path_str).resolve()
+            if source_file.exists():
+                from totelegram.packaging.ledger import ReceiptLedger
+
+                ReceiptLedger.record_upload(
+                    file_path=source_file,
+                    chat_id=chat.id,
+                    snapshot_message_id=resolved_snapshot_msg_id,
+                    chunk_size=job.chunk_size,
+                    total_parts=len(manifest.parts),
+                    md5=source.md5sum,
+                    chat_title=chat.title,
+                )
+        except Exception as e:
+            logger.debug(
+                f"Aviso actualizando ReceiptLedger desde SnapshotImporter: {e}"
+            )
+
         # AUTO-ENLACE / PUBLICACIÓN EN TELEGRAM
-        # Si el Job no tiene RemoteSnapshot y tenemos cliente activo, resolvemos en Telegram
         if not job.remote_snapshot and client is not None:
             cls._resolve_or_publish_remote_snapshot(
                 client=client,

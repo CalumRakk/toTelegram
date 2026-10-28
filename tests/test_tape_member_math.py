@@ -16,7 +16,7 @@ class TestTapeMemberMath(unittest.TestCase):
             root = Path(tmp_dir) / "test_folder"
             root.mkdir()
 
-            # 1. Crear archivos con casos límite respecto a un chunk_size de 10 KB (10240 bytes)
+            # Crear archivos con casos límite respecto a un chunk_size de 10 KB (10240 bytes)
             # - Archivo pequeño: Cabe entero en Volumen 0
             (root / "small.txt").write_bytes(b"A" * 500)
 
@@ -29,10 +29,10 @@ class TestTapeMemberMath(unittest.TestCase):
             # - Archivo vacío: 0 bytes (no debe tener contenido ni fragmentos de datos)
             (root / "empty.txt").write_bytes(b"")
 
-            # 2. Registrar la cinta con tartape
+            # Registrar la cinta con tartape
             tape = tartape.record(root, checksum="md5", overwrite=True)
 
-            # 3. Particionar usando el motor de toTelegram con chunks de 10 KB (10240 bytes)
+            # Particionar usando el motor de toTelegram con chunks de 10 KB (10240 bytes)
             chunk_size = 10 * 1024
             _, _, virtual_members = StatelessPartitioner.partition_folder(
                 root, max_chunk_size=chunk_size, exclude_patterns=[]
@@ -40,7 +40,7 @@ class TestTapeMemberMath(unittest.TestCase):
 
             self.assertGreater(len(virtual_members), 0)
 
-            # 4. Comprobación 1:1 para cada archivo
+            # Comprobación 1:1 para cada archivo
             for vm in virtual_members:
                 # Caso archivo vacío (0 bytes)
                 if vm.size == 0:

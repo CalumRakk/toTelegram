@@ -46,7 +46,7 @@ class DiscoveryService:
 
         potential_duplicates = self._search_potential_duplicates(job)
 
-        # 1. ¿Existe ya un Snapshot completado en este chat?
+        # ¿Existe ya un Snapshot completado en este chat?
         if self._is_snapshot_fulfilled_in_chat(job):
             if not force:
                 logger.info(f"Job {job.id} ya está completado en el canal de destino.")
@@ -59,7 +59,7 @@ class DiscoveryService:
             else:
                 logger.info("Snapshot existente ignorado porque se especificó --force.")
 
-        # 2. Comprobar piezas existentes del Job en BD y validar su existencia física JIT
+        # Comprobar piezas existentes del Job en BD y validar su existencia física JIT
         local_remotes = list(
             RemotePayload.select(RemotePayload, Payload)
             .join(Payload)
@@ -76,7 +76,7 @@ class DiscoveryService:
         expected_count = self._get_expected_count(job)
         valid_count = len(valid_remotes)
 
-        # 3. ¿Están todas las partes físicas subidas pero falta el snapshot? (SEAL_HEALED)
+        # ¿Están todas las partes físicas subidas pero falta el snapshot? (SEAL_HEALED)
         if valid_count == expected_count and expected_count > 0:
             logger.info(
                 f"Job {job.id}: Todas las piezas ({valid_count}/{expected_count}) "
@@ -90,7 +90,7 @@ class DiscoveryService:
                 detail="Todas las partes físicas ya están en Telegram. Solo falta sellar el Snapshot.",
             )
 
-        # 4. Si hay partes parciales (subida a medias):
+        # Si hay partes parciales (subida a medias):
         if valid_count > 0:
             # A) Comprobación de corte incompatible (ej. Job de 4 GB con cuenta degradada a 2 GB)
             if account_max_chunk_size and job.chunk_size > account_max_chunk_size:
@@ -161,7 +161,7 @@ class DiscoveryService:
                 detail="Subida incompleta compatible. Reanudando partes faltantes en su sitio.",
             )
 
-        # 5. Sin partes previas válidas -> Subida limpia desde cero
+        # Sin partes previas válidas -> Subida limpia desde cero
         return InvestigationReport(
             decision=ExecutionDecision.CLEAN_RESTART,
             orphaned_remotes=orphaned_remotes,
