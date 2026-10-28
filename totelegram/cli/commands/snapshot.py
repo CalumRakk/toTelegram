@@ -5,7 +5,8 @@ from typing import List
 import typer
 
 from totelegram.cli.state import CLIState
-from totelegram.cli.ui import UI, DisplaySnapshotPlan, console
+from totelegram.cli.ui import UI, console
+from totelegram.cli.views.snapshots import DisplaySnapshotPlan
 from totelegram.packaging.importer import (
     SnapshotImportPlanner,
     SnapshotInspector,

@@ -3,7 +3,8 @@ import logging
 import typer
 
 from totelegram.cli.state import CLIState
-from totelegram.cli.ui import UI, DisplayTarget
+from totelegram.cli.ui import UI
+from totelegram.cli.views.settings import DisplayTarget
 from totelegram.database import DatabaseSession
 from totelegram.schemas import VALUE_NOT_SET
 from totelegram.telegram.resolver import TargetResolver

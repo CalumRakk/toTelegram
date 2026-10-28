@@ -445,7 +445,7 @@ def list_accounts(
     """
     Lista todas las cuentas registradas en este equipo.
     """
-    from totelegram.cli.ui import DisplayProfile
+    from totelegram.cli.views.settings import DisplayProfile
 
     state: CLIState = ctx.obj
     manager = state.manager

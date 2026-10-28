@@ -6,12 +6,9 @@ from typing import List, Literal, Tuple, cast
 import typer
 
 from totelegram.cli.state import CLIState
-from totelegram.cli.ui import (
-    UI,
-    DisplayConfig,
-    DisplayIndexer,
-    DisplayProfile,
-)
+from totelegram.cli.ui import UI
+from totelegram.cli.views.settings import DisplayConfig, DisplayProfile
+from totelegram.cli.views.upload import DisplayIndexer
 from totelegram.database import DatabaseSession
 from totelegram.identity import ConfigService
 from totelegram.migration import DatabaseState, inspect_database

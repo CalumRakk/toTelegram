@@ -5,7 +5,8 @@ from typing import List
 import typer
 
 from totelegram.cli.state import CLIState
-from totelegram.cli.ui import UI, DisplayLedger, console
+from totelegram.cli.ui import UI, console
+from totelegram.cli.views.ledger import DisplayLedger
 from totelegram.packaging.ledger import FileAuditResult, ReceiptLedger
 from totelegram.telegram.resolver import TargetResolver
 from totelegram.telegram.types import TargetResolutionStatus
