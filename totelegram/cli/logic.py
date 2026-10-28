@@ -300,7 +300,7 @@ def run_upload_flow(
             target_chat_id=u_ctx.tg_chat.id,
         )
 
-        # 1. Escaneo de inventario
+        # Escaneo de inventario
         if is_backup:
             with console.status("[dim]Escaneando directorios...[/]"):
                 scan_report = inventory.scan_backup_inventory(paths)
@@ -328,7 +328,7 @@ def run_upload_flow(
                 UI.warn("No se encontraron archivos pendientes para este destino.")
                 raise typer.Exit(0)
 
-        # 2. Diagnóstico de runtime patches y banner de sesión
+        # Diagnóstico de runtime patches y banner de sesión
         status = get_patch_status()
         if status["applied"]:
             UI.success("Core Engine: Pyrogram Runtime Patches [ACTIVE]")
@@ -345,7 +345,7 @@ def run_upload_flow(
         UI.info(f"Destino: [bold cyan]{chat_n}[/] [dim](ID: {u_ctx.tg_chat.id})[/]")
         UI.print("", indent=False)
 
-        # 3. Procesamiento secuencial de candidatos
+        # Procesamiento secuencial de candidatos
         total_candidates = len(candidates)
         for index, item_path in enumerate(candidates, 1):
             is_last = index == total_candidates
@@ -414,7 +414,7 @@ def run_upload_flow(
                 UI.error(f"Error procesando {item_path.name}: {e}")
                 raise typer.Exit(1)
 
-        # 4. Alertas finales para carpetas con cambios de integridad
+        # Alertas finales para carpetas con cambios de integridad
         if is_backup and scan_report.skipped_by_integrity:
             UI.separator()
             DisplayUpload.show_integrity_advice(scan_report)

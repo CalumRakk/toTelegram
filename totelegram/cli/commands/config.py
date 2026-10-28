@@ -88,23 +88,21 @@ def _command_modify_list(
     values: List[str],
     action: Literal["add", "remove"],
 ):
-    updates = service.prepare_updates([key, values])  # type: ignore
     verb = "agregar" if action == "add" else "eliminar"
 
     if is_suspected_glob_expansion(
         values
     ) and not DisplayConfig.confirm_expanded_pattern(verb, key, values):
-        UI.info("Operacion cancelada.")
+        UI.info("Operación cancelada.")
         raise typer.Exit()
 
-    for k, val in updates.items():
-        changed, final_val = service.apply_update(settings_name, k, val, action=action)
-        if changed:
-            UI.success(
-                f"Configuracion [bold]{k}[/] actualizada: {json.dumps(final_val)}"
-            )
-        else:
-            UI.info(f"Configuracion [bold]{k}[/] no sufrio cambios.")
+    changed, final_val = service.modify_list_setting(
+        settings_name, key, values, action=action
+    )
+    if changed:
+        UI.success(f"Configuración [bold]{key}[/] actualizada: {json.dumps(final_val)}")
+    else:
+        UI.info(f"Configuración [bold]{key}[/] no sufrió cambios.")
 
 
 @app.callback(invoke_without_command=True)
@@ -167,7 +165,7 @@ def set_configs(
                 f"Guardando [bold]{key}[/] sin verificación de red (--force activo)."
             )
 
-        changed, final_val = service.apply_update(settings_name, key, val, action="set")
+        changed, final_val = service.apply_set(settings_name, key, val)
         if changed:
             UI.success(
                 f"Configuración [bold]{key}[/] actualizada con [bold]{final_val}[/]."

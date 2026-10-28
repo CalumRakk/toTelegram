@@ -45,7 +45,7 @@ class JobPipeline:
     ) -> JobExecutionResult:
         logger.info(f"=== Iniciando Pipeline para: {path.name} ===")
 
-        # 1. Planificación de la intención
+        # Planificación de la intención
         job = JobPlanner.plan(
             path=path,
             ctx=self.ctx,
@@ -63,7 +63,7 @@ class JobPipeline:
         )
 
         with self.ctx.coordinator.guard_account(self.ctx.account_id):
-            # 2. Investigación física JIT en el chat destino
+            # Investigación física JIT en el chat destino
             report = self.ctx.discovery.investigate(
                 job=job,
                 force=force,
@@ -75,24 +75,24 @@ class JobPipeline:
 
             logger.info(f"Decisión de ejecución resuelta: {report.decision.value}")
 
-            # 3. Guardias tempranas (Fail-Fast o resolución inmediata)
+            # Guardias tempranas (Fail-Fast o resolución inmediata)
             early_result = self._check_early_termination(
                 job, path, report, account_max_size
             )
             if early_result is not None:
                 return early_result
 
-            # 4. Preparación del estado del chat (Efectos secundarios: Reubicación o Purga)
+            # Preparación del estado del chat (Efectos secundarios: Reubicación o Purga)
             job = self._prepare_job_state(job, path, report, force, account_max_size)
 
-            # 5. Ejecución de la transferencia (o sellado directo si ya estaba completo)
+            # Ejecución de la transferencia (o sellado directo si ya estaba completo)
             strategy_result = self._execute_transfer(job, report)
 
-            # 6. Sellado de Snapshot y registro en Ledger si el Job quedó completado
+            # Sellado de Snapshot y registro en Ledger si el Job quedó completado
             is_completed, snapshot_generated = self._seal_job_snapshot(job)
             self.ctx.observer.on_job_complete(job, snapshot_generated)
 
-        # 7. Pausa inter-job si se transmitieron bytes reales
+        # Pausa inter-job si se transmitieron bytes reales
         if not is_last_in_batch and strategy_result.did_upload_bytes:
             self._apply_inter_job_pause()
 
@@ -106,9 +106,7 @@ class JobPipeline:
             message=strategy_result.message,
         )
 
-    # -------------------------------------------------------------------------
     # SUBMÉTODOS PRIVADOS DEL PIPELINE
-    # -------------------------------------------------------------------------
 
     def _check_early_termination(
         self,
@@ -162,7 +160,7 @@ class JobPipeline:
         account_max_size: int,
     ) -> Job:
         """Aplica las acciones previas necesarias en Telegram o SQLite antes de subir."""
-        # Caso A: Reubicación al fondo (Anti-Waste TOC)
+        # Reubicación al fondo (Anti-Waste TOC)
         if report.decision == ExecutionDecision.RELOCATED_AND_RESUMED:
             logger.info(
                 f"Job {job.id}: Ejecutando reubicación atómica de {len(report.valid_remotes)} trozos..."
@@ -176,7 +174,7 @@ class JobPipeline:
             )
             return job
 
-        # Caso B: Reinicio limpio con --force
+        # Reinicio limpio con --force
         if (
             report.decision == ExecutionDecision.CLEAN_RESTART
             and force

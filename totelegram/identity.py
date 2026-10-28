@@ -1,5 +1,4 @@
 import hashlib
-import json
 import logging
 import os
 import re
@@ -22,13 +21,14 @@ from filelock import FileLock
 from pydantic import (
     BaseModel,
     BeforeValidator,
+    ConfigDict,
     Field,
     TypeAdapter,
     ValidationError,
     field_validator,
+    model_validator,
 )
 from pydantic.fields import FieldInfo
-from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from totelegram.common.helpers import get_type_annotation, parse_comma_list
 from totelegram.schemas import VALUE_NOT_SET, AccessLevel, InfoField
@@ -59,8 +59,8 @@ TG_MAX_SIZE_SINGLE_FILE = 2000 * 1024 * 1024  # 2,097,152,000 bytes
 TG_MAX_SIZE_MULTIPLE_FILES = 4000 * 1024 * 1024  # 4,194,304,000 bytes
 
 
-class Settings(BaseSettings):
-    # TODO: agrega un default que impida subir archivo muy pequeños.
+class Settings(BaseModel):
+    """Modelo canónico de configuración para un perfil de toTelegram."""
 
     max_filename_length: ClassVar[int] = 55
     chat_id: ChatID = Field(
@@ -102,7 +102,7 @@ class Settings(BaseSettings):
 
     tg_max_size_normal: int = Field(
         default=TG_MAX_SIZE_SINGLE_FILE,
-        description="Limite de tamaño en bytes para usuarios NO premium.",
+        description="Límite de tamaño en bytes para usuarios NO premium.",
         json_schema_extra={"is_sensitive": False, "access": AccessLevel.DEBUG_EDITABLE},
     )
     tg_max_size_premium: int = Field(
@@ -134,42 +134,34 @@ class Settings(BaseSettings):
         json_schema_extra={"is_sensitive": False, "access": AccessLevel.EDITABLE},
     )
 
-    model_config = SettingsConfigDict(
-        env_file=".env", env_file_encoding="utf-8", extra="ignore"
-    )
-
     log_path: Path | None = Field(
         default=None,
-        description="Ruta del archivo de log. Si está vacío, se usa la ruta por defecto en la carpeta de trabajo.",
+        description="Ruta del archivo de log. Si está vacío, se usa la ruta por defecto.",
     )
+
+    model_config = ConfigDict(extra="ignore")
 
     @property
     def profile_alias(self) -> str:
-        """Alias de conveniencia para profile_name."""
         return self.profile_name
 
     @field_validator("upload_pause_range", mode="after")
     @classmethod
     def validate_pause_range(cls, v: List[int]) -> List[int]:
         if len(v) == 1:
-            return [v[0], v[0]]  # Si pone '30', la pausa es fija de 30 min.
+            return [v[0], v[0]]
         if len(v) > 2:
-            return v[:2]  # Ignorar si pone más de dos números
+            return v[:2]
         if not v:
             return [0, 0]
         return v
 
     @classmethod
     def get_info(cls, field_name: str) -> InfoField | None:
-        """Extrae la informacion de un campo de Settings.
-
-        Si un campo no tiene access, se considerárá DEBUG_READONLY.
-        """
+        """Extrae la información de metadatos de un campo de Settings."""
         field: FieldInfo | None = cls.model_fields.get(field_name.lower())
-
-        assert field is not None, (
-            f"El campo '{field_name}' no existe en la configuración."
-        )
+        if field is None:
+            return None
 
         description = field.description or "Sin descripción"
 
@@ -185,9 +177,9 @@ class Settings(BaseSettings):
 
         level = cast(
             AccessLevel,
-            field.json_schema_extra.get("access", AccessLevel.DEBUG_READONLY),  # type: ignore
+            field.json_schema_extra.get("access", AccessLevel.DEBUG_READONLY),
         )
-        is_sensitive = cast(bool, field.json_schema_extra.get("is_sensitive", False))  # type: ignore
+        is_sensitive = cast(bool, field.json_schema_extra.get("is_sensitive", False))
         type_annotation = get_type_annotation(field)
 
         return InfoField(
@@ -201,24 +193,7 @@ class Settings(BaseSettings):
 
     @classmethod
     def validate_single_setting(cls, key: str, value: Any) -> Any:
-        """
-        Resuelve, convierte y valida el valor asociado a una clave de configuración.
-
-        Actúa como puente entre entradas en texto plano (por ejemplo, desde una CLI)
-        y el sistema de tipos de Pydantic, aplicando coerción automática al tipo
-        definido (p. ej., "500" → 500, o una cadena separada por comas → lista).
-
-        Args:
-            key (str): Nombre de la configuración (case-insensitive).
-            value (Any): Valor crudo a procesar.
-
-        Returns:
-            Any: Valor convertido al tipo definido en el modelo Settings.
-
-        Raises:
-            ValueError: Si la clave no existe o el valor no puede convertirse
-                al tipo requerido.
-        """
+        """Convierte y valida un valor contra el tipo esperado de la clave."""
         field_name = key.lower()
         if field_name not in cls.model_fields:
             raise ValueError(f"El campo '{key}' no existe en la configuracion.")
@@ -226,7 +201,6 @@ class Settings(BaseSettings):
         field = cls.model_fields[field_name]
         adapter = TypeAdapter(Annotated[field.annotation, field])
         try:
-            # validate_python intentará convertir `value` al tipo correcto (int, bool, etc.)
             return adapter.validate_python(value)
         except ValidationError as e:
             raise ValueError(
@@ -234,8 +208,8 @@ class Settings(BaseSettings):
             ) from e
 
     @staticmethod
-    def validate_key_access(is_debug: bool, field_name: str):
-        """Valida si el nivel de acceso permite la edición en el contexto actual."""
+    def validate_key_access(is_debug: bool, field_name: str) -> InfoField:
+        """Valida que el nivel de acceso permita la modificación del campo (ADR-001)."""
         field_name_lower = field_name.lower()
         info = Settings.get_info(field_name_lower)
 
@@ -262,24 +236,44 @@ class Settings(BaseSettings):
 
 class Profile(BaseModel):
     name: str
-    path_env: Path
+    path_config: Path
     path_session: Path
 
-    @property
-    def has_env(self):
-        return self.path_env.exists()
+    @model_validator(mode="before")
+    @classmethod
+    def _compat_path_env(cls, data: Any) -> Any:
+        """Permite inicializar pasando 'path_env' o 'path_config' indistintamente."""
+        if isinstance(data, dict) and "path_env" in data and "path_config" not in data:
+            data["path_config"] = data["path_env"]
+        return data
 
     @property
-    def has_session(self):
+    def path_env(self) -> Path:
+        """Alias para compatibilidad con código existente."""
+        return self.path_config
+
+    @property
+    def has_config(self) -> bool:
+        return self.path_config.exists()
+
+    @property
+    def has_env(self) -> bool:
+        """Alias para compatibilidad con código existente."""
+        return self.has_config
+
+    @property
+    def has_session(self) -> bool:
         return self.path_session.exists()
 
     @property
-    def is_trinity(self):
-        """Un perfil es trinity si tiene ambos archivos y su nombre."""
-        return self.has_env and self.has_session
+    def is_trinity(self) -> bool:
+        """Un perfil es trinity si posee archivo de configuración y sesión física."""
+        return self.has_config and self.has_session
 
 
 class SettingsManager:
+    """Administrador centralizado de perfiles y ajustes estructurados (JSON)."""
+
     def __init__(self, worktable: Path):
         self.worktable = worktable
         self.settings_active_path = self.worktable / "active_profile_name"
@@ -291,76 +285,69 @@ class SettingsManager:
 
     @property
     def node_id(self) -> str:
-        """Identificador único del proceso en ejecución."""
         return self._worker_instance_id
 
-    def get_lock_for_path(self, path: Path):
-        """Obtiene un FileLock específico para un archivo dado, basado en su ruta.
-
-        args:
-            path (Path): La ruta del archivo para el cual se desea obtener el lock.
-
-        raises:
-            IOError: Si no se puede crear el directorio de locks o el lock file.
-        """
+    def get_lock_for_path(self, path: Path) -> FileLock:
         lock_dir = self.worktable / "locks"
         lock_dir.mkdir(exist_ok=True)
-
-        path_string = str(path.absolute()).encode()
-        path_hash = hashlib.md5(path_string).hexdigest()
-        lock_path = lock_dir / f"{path_hash}.lock"
-        return FileLock(lock_path)
+        path_hash = hashlib.md5(str(path.absolute()).encode()).hexdigest()
+        return FileLock(lock_dir / f"{path_hash}.lock")
 
     def _get_all_profile_names(self) -> List[str]:
-        """Busca todos los nombres únicos que tienen un .env o un .session"""
+        """Busca todos los perfiles que tengan .json, .env (legado) o .session."""
         if not self.profiles_dir.exists():
             return []
-
-        stems = set()
-        for f in self.profiles_dir.glob("*"):
-            if f.suffix in [".env", ".session"]:
-                stems.add(f.stem)
+        stems = {
+            f.stem
+            for f in self.profiles_dir.glob("*")
+            if f.suffix in [".json", ".env", ".session"]
+        }
         return sorted(stems)
 
     def get_all_profiles(self) -> List[Profile]:
         profiles = []
         for name in self._get_all_profile_names():
-            path_env = self.get_settings_path(name)
+            path_config = self.get_settings_path(name)
+            # Si no existe .json pero sí .env, enlazamos al .env antes de la migración
+            if not path_config.exists():
+                legacy_env = self.profiles_dir / f"{name}.env"
+                if legacy_env.exists():
+                    path_config = legacy_env
+
             path_session = self.get_session_path(name)
-            profile = Profile(name=name, path_env=path_env, path_session=path_session)
-            profiles.append(profile)
+            profiles.append(
+                Profile(name=name, path_config=path_config, path_session=path_session)
+            )
         return profiles
 
     def get_profile(self, profile_name: str) -> Profile | None:
-        """Busca un perfil por su nombre (case-sensitive)"""
         return next(
             (p for p in self.get_all_profiles() if p.name == profile_name), None
         )
 
     def delete_profile(self, profile: Profile) -> List[Path]:
-        """
-        Elimina físicamente el conjunto de archivos del perfil.
-        Retorna una lista de los archivos que fueron eliminados.
-        """
-        env_path = profile.path_env
-        session_path = profile.path_session
-
+        """Elimina físicamente los archivos del perfil (.json, .env legado y .session)."""
         deleted_files = []
 
-        if env_path.exists():
-            env_path.unlink()
-            deleted_files.append(env_path)
+        if profile.path_config.exists():
+            profile.path_config.unlink()
+            deleted_files.append(profile.path_config)
 
-        if session_path.exists():
+        legacy_env = self.profiles_dir / f"{profile.name}.env"
+        if legacy_env.exists():
+            legacy_env.unlink()
+            deleted_files.append(legacy_env)
+
+        if profile.path_session.exists():
             db_files = [".session-journal", ".session-shm", ".session-wal"]
-            session_path.unlink()
-            deleted_files.append(session_path)
+            profile.path_session.unlink()
+            deleted_files.append(profile.path_session)
 
             for suffix in db_files:
-                related_db = session_path.with_suffix(suffix)
-                if related_db.exists():
-                    related_db.unlink()
-                    deleted_files.append(related_db)
+                related = profile.path_session.with_suffix(suffix)
+                if related.exists():
+                    related.unlink()
+                    deleted_files.append(related)
 
         if (
             self.has_active_profile_configured()
@@ -371,104 +358,161 @@ class SettingsManager:
         return deleted_files
 
     def settings_exists(self, profile_name: str) -> bool:
-        return self.get_settings_path(profile_name).exists()
+        json_path = self.get_settings_path(profile_name)
+        legacy_env = self.profiles_dir / f"{profile_name}.env"
+        return json_path.exists() or legacy_env.exists()
 
     def set_profile_name_as_active(self, profile_name: str) -> None:
-        """
-        Establece un perfil como activo.
-
-        Valida que el perfil exista y que sea "trinity" (completo y apto para uso global).
-        Un perfil incompleto no puede activarse porque rompería la coherencia del entorno.
-
-        Args:
-            profile_name (str): Nombre del perfil a activar
-        Raises:
-            IOError: Si el perfil no existe o no es "trinity"
-        """
         profile = self.get_profile(profile_name)
-
         if profile is None:
             raise OSError(
                 f"Se intentó activar el perfil '{profile_name}', pero no existe."
             )
         if not profile.is_trinity:
             raise OSError(
-                f"Se intentó activar el perfil '{profile_name}', pero no es trinity."
+                f"Se intentó activar el perfil '{profile_name}', pero está incompleto."
             )
 
         self.settings_active_path.parent.mkdir(parents=True, exist_ok=True)
-        self.settings_active_path.write_text(profile_name)
+        self.settings_active_path.write_text(profile_name, encoding="utf-8")
 
     def get_active_profile_name(self) -> str | None:
         if not self.settings_active_path.exists():
             return None
-        return self.settings_active_path.read_text().strip()
+        return self.settings_active_path.read_text(encoding="utf-8").strip()
 
     def has_active_profile_configured(self) -> bool:
-        """
-        Indica si hay un perfil activo configurado.
-        """
         if self.settings_active_path.exists():
-            content = self.settings_active_path.read_text().strip()
-            return len(content) > 0
+            return (
+                len(self.settings_active_path.read_text(encoding="utf-8").strip()) > 0
+            )
         return False
 
-    def get_settings(self, profile_name: str) -> Settings:
+    def get_session_path(self, profile_name: str) -> Path:
+        return self.profiles_dir / f"{profile_name}.session"
 
-        settings_path = self.get_settings_path(profile_name)
-        if not settings_path.exists():
-            raise OSError(
-                f"El archivo de configuracion '{settings_path.name}' no existe."
-            )
+    def get_settings_path(self, profile_name: str) -> Path:
+        """Ruta canónica del archivo de configuración JSON."""
+        return self.profiles_dir / f"{profile_name}.json"
+
+    def get_settings(self, profile_name: str) -> Settings:
+        """Carga y valida los ajustes desde JSON con migración automática desde .env legado."""
+        json_path = self.get_settings_path(profile_name)
+        legacy_env_path = self.profiles_dir / f"{profile_name}.env"
+
+        if json_path.is_file():
+            try:
+                return Settings.model_validate_json(
+                    json_path.read_text(encoding="utf-8")
+                )
+            except ValidationError as e:
+                logger.error(f"Error de validación en '{json_path.name}': {e}")
+                raise ValueError(f"Error de validacion en '{json_path.name}': {e}")
+
+        # Migración transparente de .env legado a .json moderno
+        if legacy_env_path.is_file():
+            return self._migrate_env_to_json(profile_name, legacy_env_path, json_path)
+
+        raise OSError(f"El archivo de configuración para '{profile_name}' no existe.")
+
+    def _migrate_env_to_json(
+        self, profile_name: str, env_path: Path, json_path: Path
+    ) -> Settings:
+        """Migra de forma transparente un archivo .env legado al nuevo formato JSON."""
+        raw_values = dotenv_values(env_path)
+        data = {}
+        for k, v in raw_values.items():
+            if v is None:
+                continue
+            k_norm = k.lower().strip()
+            if k_norm in Settings.model_fields:
+                try:
+                    data[k_norm] = Settings.validate_single_setting(k_norm, v)
+                except Exception:  # noqa: S110
+                    pass
+
+        settings = Settings(**data)
+        self.save_settings(profile_name, settings)
 
         try:
-            settings = Settings(_env_file=settings_path)  # type: ignore
-            return settings
-        except (ValueError, ValidationError) as e:
-            logger.error(
-                f"El archivo de configuracion '{settings_path.name}' contiene errores:"
+            env_path.unlink()
+            logger.info(
+                f"Perfil '{profile_name}' migrado exitosamente de .env a .json estructurado."
             )
-            raise ValueError(f"Error de validacion: {e}")
+        except OSError:
+            pass
+
+        return settings
+
+    def save_settings(self, profile_name: str, settings: Settings) -> None:
+        """Guarda atómicamente la configuración en formato JSON legible."""
+        json_path = self.get_settings_path(profile_name)
+        json_path.parent.mkdir(parents=True, exist_ok=True)
+
+        temp_path = json_path.with_name(f".{json_path.name}.tmp_{os.getpid()}")
+        temp_path.write_text(settings.model_dump_json(indent=2), encoding="utf-8")
+        temp_path.replace(json_path)
+
+    def set_setting(self, profile_name: str, field_name: str, field_value: Any) -> bool:
+        """Actualiza un ajuste individual de forma tipada."""
+        key = field_name.lower().strip()
+        settings = self.get_settings(profile_name)
+        current_value = getattr(settings, key, None)
+
+        if current_value == field_value:
+            return False
+
+        setattr(settings, key, field_value)
+        self.save_settings(profile_name, settings)
+        return True
+
+    def unset_setting(self, profile_name: str, field_name: str) -> bool:
+        """Restaura un ajuste a su valor por defecto."""
+        key = field_name.lower().strip()
+        info = Settings.get_info(key)
+        if not info:
+            return False
+
+        settings = self.get_settings(profile_name)
+        current_value = getattr(settings, key, None)
+        default_value = info.default_value
+
+        if current_value == default_value:
+            return False
+
+        setattr(settings, key, default_value)
+        self.save_settings(profile_name, settings)
+        return True
+
+    def _write_all_settings(self, profile_name: str, data: Dict[str, Any]) -> None:
+        """Método de compatibilidad para inicializar perfiles masivamente desde auth/tests."""
+        sanitized = {}
+        for k, v in data.items():
+            k_norm = k.lower().strip()
+            if k_norm in Settings.model_fields:
+                sanitized[k_norm] = Settings.validate_single_setting(k_norm, v)
+
+        settings = Settings(**sanitized)
+        self.save_settings(profile_name, settings)
 
     def resolve_profile_name(
         self, profile_name: str | None = None, strict: bool = True
     ) -> str | None:
-        """
-        Valida y resuelve el perfil de configuración a utilizar.
-        La operacion simplifica estos tres escenarios:
-
-        - Si se proporciona `profile_name`, verifica que exista el archivo `.env`.
-        - Si no se proporciona, utiliza el perfil activo guardado en `worktable/active_profile_name`.
-
-        Si la validación falla y `strict` es True, lanza ValueError;
-        de lo contrario, devuelve None.
-
-        Args:
-            profile_name (Optional[str]): Nombre del perfil a validar.
-            error (bool): Indica si se debe lanzar una excepción en caso de error.
-
-        Raises:
-            ValueError: Si no se logra resolver el perfil y `error` es True.
-        """
-
+        """Resuelve el nombre del perfil respetando la prioridad y existencia."""
         if profile_name:
-            if not self.settings_exists(profile_name):
-                logger.debug(f"El perfil {profile_name} no existe.")
-                if strict:
-                    raise ValueError(f"El perfil {profile_name} no existe.")
+            if not self.settings_exists(profile_name) and strict:
+                raise ValueError(f"El perfil {profile_name} no existe.")
             return profile_name
 
         if not self.has_active_profile_configured():
-            logger.debug("No hay un perfil activo.")
             if strict:
                 raise ValueError("No hay un perfil activo.")
+            return None
 
         active = self.get_active_profile_name()
         if active:
-            # FIX: validar que el perfil activo tenga un .env válido antes de devolverlo.
             if not self.settings_exists(active):
                 msg = f"El perfil activo '{active}' no es válido porque su archivo de configuración no existe."
-                logger.debug(msg)
                 if strict:
                     raise ValueError(msg)
                 return None
@@ -476,176 +520,54 @@ class SettingsManager:
 
         if strict:
             raise ValueError("No hay un perfil activo.")
-
-    def get_session_path(self, profile_name: str) -> Path:
-        return self.profiles_dir / f"{profile_name}.session"
-
-    # TODO: analizar si deberia cambiar los métodos settings_* por env_*
-    def get_settings_path(self, profile_name: str) -> Path:
-        """profile_name -> profiles/profile_name.env"""
-        return self.profiles_dir / f"{profile_name}.env"
-
-    def _load_and_sanitize(self, settings_name: str) -> Dict[str, Any]:
-        """
-        Carga el contenido crudo del .env y normaliza sus claves.
-
-        ¿Por qué este método y no usar Settings() para cargarlo? por:
-
-         1. Evita la contaminacion del archivo: Settings cargaría todos los valores por defecto
-            del sistema. Al guardar, el archivo (.model_dump()) pasaría de tener 3 líneas
-            a tener +20, dificultando la lectura humana.
-         2. Resiliencia: Si al archivo le faltan campos obligatorios (ej. profile_name),
-            Settings() lanzaría una validación fallida impidiendo incluso la lectura.
-            Este método permite cargar archivos "rotos" para repararlos.
-         3. Integridad: Evita que Pydantic descarte variables o metadatos presentes
-            en el archivo que no estén mapeados en el modelo actual.
-        """
-        path = self.get_settings_path(settings_name)
-        if not path.exists():
-            return {}
-
-        # dotenv_values devuelve todos los valores como strings.
-        raw_values = dotenv_values(path)
-        sanitized = {}
-
-        for k, v in raw_values.items():
-            if v is None:
-                continue
-            k_norm = k.lower()
-            # Ignorar de forma tolerante claves que ya no forman parte del modelo (ej: database_url)
-            if k_norm not in Settings.model_fields:
-                logger.debug(
-                    f"Ignorando campo obsoleto o no reconocido en '{path.name}': {k}"
-                )
-                continue
-            sanitized[k_norm] = Settings.validate_single_setting(k_norm, v)
-
-        return sanitized
-
-    def _write_all_settings(self, settings_name: str, data: Dict[str, Any]) -> None:
-        """Vuelca un diccionario completo al archivo .env
-
-        No verifica claves ni valor.
-        Se espera que el valor sea un objeto estandar de python.
-        """
-        path = self.get_settings_path(settings_name)
-        path.parent.mkdir(parents=True, exist_ok=True)
-
-        lines = [
-            f"{k.lower()}={json.dumps(v, ensure_ascii=False)}" for k, v in data.items()
-        ]
-
-        path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-
-    def set_setting(
-        self, settings_name: str, field_name: str, field_value: Any
-    ) -> bool:
-        """
-        Guarda un valor directamente en el archivo .env.
-        Asume que el valor ya fue validado y sanitizado por la capa superior.
-        Devuelve True si hubo un cambio real en el archivo.
-        """
-        key_normalized = field_name.lower().strip()
-        current_data = self._load_and_sanitize(settings_name)
-
-        # Evitar escritura innecesaria si el valor es el mismo
-        if (
-            key_normalized in current_data
-            and current_data[key_normalized] == field_value
-        ):
-            return False
-
-        current_data[key_normalized] = field_value
-        self._write_all_settings(settings_name, current_data)
-        return True
-
-    def unset_setting(self, settings_name: str, field_name: str) -> bool:
-        """
-        Elimina una clave del archivo .env para que el sistema use su valor por defecto.
-        Devuelve True si la clave existía y fue eliminada.
-        """
-        key_normalized = field_name.lower().strip()
-        current_data = self._load_and_sanitize(settings_name)
-
-        if key_normalized in current_data:
-            del current_data[key_normalized]
-            self._write_all_settings(settings_name, current_data)
-            return True
-
-        return False
+        return None
 
 
 class ConfigService:
+    """Servicio desacoplado para operaciones sobre la configuración."""
+
     def __init__(self, manager: SettingsManager, is_debug: bool = False):
         self.manager = manager
         self.is_debug = is_debug
 
     def prepare_updates(self, args: List[str]) -> Dict[str, Any]:
-        """
-        Transforma una lista plana [k, v, k, v] en un dict validado.
-        Lanza ValueError si los pares están incompletos o fallan validación.
-        """
-
-        # TODO: Hacer más explicito que el valor del par puede ser Any, aunque normalmente se espera que sea un string.
+        """Convierte argumentos CLI planos en un diccionario validado de pares clave-valor."""
         if not args or len(args) % 2 != 0:
             raise ValueError(
                 "Debes proporcionar pares de CLAVE y VALOR. Ej: 'set chat_id 12345'"
             )
 
-        def remove_quotation(value: Any):
-            if isinstance(value, str):
-                return value.strip("'").strip('"')
-            if isinstance(value, list):
-                return [remove_quotation(v) for v in value]
-            return value
-
-        raw_data = {
-            args[i].lower(): remove_quotation(args[i + 1])
-            for i in range(0, len(args), 2)
-        }
         updates = {}
+        for i in range(0, len(args), 2):
+            raw_key = args[i].lower().strip()
+            raw_val = args[i + 1]
+            if isinstance(raw_val, str):
+                raw_val = raw_val.strip("'").strip('"')
 
-        for key, raw_value in raw_data.items():
-            # Validar permisos de acceso (Editable, Debug, etc)
-            Settings.validate_key_access(self.is_debug, key)
-            # Validar y convertir tipos (str -> int, etc)
-            clean_value = Settings.validate_single_setting(key, raw_value)
-            updates[key] = clean_value
+            Settings.validate_key_access(self.is_debug, raw_key)
+            clean_val = Settings.validate_single_setting(raw_key, raw_val)
+            updates[raw_key] = clean_val
 
         return updates
 
-    def apply_update(
+    def apply_set(self, profile_name: str, key: str, value: Any) -> Tuple[bool, Any]:
+        """Aplica una actualización sobre un ajuste atómico."""
+        changed = self.manager.set_setting(profile_name, key, value)
+        return changed, value
+
+    def modify_list_setting(
         self,
-        settings_name: str,
+        profile_name: str,
         key: str,
-        value: Any,
-        action: Literal["set", "add", "remove"],
-    ) -> Tuple[bool, Any]:
-        """
-        Aplica un cambio individual, resolviendo la lógica de listas si es necesario.
-        Devuelve (si_cambio, valor_final).
-        """
+        items: List[str],
+        action: Literal["add", "remove"],
+    ) -> Tuple[bool, List[str]]:
+        """Añade o elimina elementos de una configuración de tipo lista de forma atómica."""
         key = key.lower().strip()
+        Settings.validate_key_access(self.is_debug, key)
 
-        if action == "set":
-            changed = self.manager.set_setting(settings_name, key, value)
-            return changed, value
-
-        # Modificar listas (add/remove)
-        if not isinstance(value, list):
-            value = [value]
-
-        try:
-            current_settings = self.manager.get_settings(settings_name)
-            current_list = getattr(current_settings, key)
-        except Exception:
-            # Si el archivo está roto, tomamos el default
-            info = Settings.get_info(key)
-            current_list = (
-                info.default_value.copy()
-                if info and isinstance(info.default_value, list)
-                else []
-            )
+        settings = self.manager.get_settings(profile_name)
+        current_list = getattr(settings, key, None)
 
         if not isinstance(current_list, list):
             raise TypeError(
@@ -653,65 +575,49 @@ class ConfigService:
             )
 
         original_count = len(current_list)
+        new_list = list(current_list)
 
         if action == "add":
-            for item in value:
-                if item not in current_list:
-                    current_list.append(item)
+            for item in items:
+                clean_item = item.strip("'").strip('"')
+                if clean_item not in new_list:
+                    new_list.append(clean_item)
         elif action == "remove":
-            current_list = [item for item in current_list if item not in value]
+            clean_items = {i.strip("'").strip('"') for i in items}
+            new_list = [i for i in new_list if i not in clean_items]
 
-        # Guardar solo si hubo cambios reales
-        changed = len(current_list) != original_count
+        changed = len(new_list) != original_count
         if changed:
-            self.manager.set_setting(settings_name, key, current_list)
+            self.manager.set_setting(profile_name, key, new_list)
 
-        return changed, current_list
+        return changed, new_list
 
     def restore_default(self, settings_name: str, key: str) -> Any:
         """Restaura una configuración a su valor por defecto."""
         info = Settings.validate_key_access(self.is_debug, key)
-
         self.manager.unset_setting(settings_name, key)
-
-        self.manager.set_setting(settings_name, key, info.default_value)
         return info.default_value
 
 
 def sanitize_alias(raw_name: str, max_length: int = 15) -> str:
-    """
-    Sanitiza un nombre para convertirlo en un alias de perfil válido.
-    - Normaliza caracteres Unicode (elimina acentos: 'José' -> 'jose').
-    - Pasa a minúsculas y elimina caracteres especiales (solo a-z, 0-9 y _).
-    - Trunca a max_length caracteres.
-    - Fallback a 'user' si el nombre eran solo emojis o caracteres no latinos.
-    """
+    """Sanitiza una cadena para generar un alias seguro de perfil."""
     if not raw_name:
         return "user"
 
-    # Descomponer caracteres con acentos (NFKD) y filtrar solo caracteres ASCII
     normalized = unicodedata.normalize("NFKD", str(raw_name))
     ascii_text = normalized.encode("ascii", "ignore").decode("ascii")
 
-    # Minúsculas y reemplazar espacios o guiones con guión bajo
     clean = re.sub(r"[\s\-]+", "_", ascii_text.strip().lower())
-    # Mantener estrictamente caracteres alfanuméricos y guión bajo
     clean = re.sub(r"[^a-z0-9_]", "", clean)
-    # Evitar guiones bajos repetidos o en los extremos
     clean = re.sub(r"_+", "_", clean).strip("_")
 
-    if not clean:
-        return "user"
-
-    return clean[:max_length]
+    return clean[:max_length] or "user"
 
 
 def generate_unique_alias(
     base_alias: str, existing_aliases: list[str], max_length: int = 15
 ) -> str:
-    """
-    Genera un alias único resolviendo colisiones numéricamente (ej: 'carlos' -> 'carlos_2').
-    """
+    """Genera un alias garantizando unicidad contra una lista existente."""
     clean = sanitize_alias(base_alias, max_length=max_length)
     existing_set = {a.lower() for a in existing_aliases}
 

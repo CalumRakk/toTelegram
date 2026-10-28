@@ -246,7 +246,7 @@ class ReceiptLedger:
             return False
 
         try:
-            # 1. Contenedor .ttape (siempre es v6.0)
+            # Contenedor .ttape (siempre es v6.0)
             if sidecar.suffix == ".ttape" or sidecar.name.endswith(".ttape"):
                 from totelegram.packaging.ttape import TapeContainer
 
@@ -263,7 +263,7 @@ class ReceiptLedger:
                 )
                 return True
 
-            # 2. Snapshot comprimido .json.xz
+            # Snapshot comprimido .json.xz
             with lzma.open(sidecar, "rt", encoding="utf-8") as f:
                 raw_data = json.load(f)
 
@@ -315,18 +315,18 @@ class ReceiptLedger:
         raw: dict, path: Path
     ) -> tuple[int, int, int, int, str] | None:
         """Rescata de forma segura los metadatos de snapshots anteriores a v6.0."""
-        # 1. Chat ID
+        # Chat ID
         chat_id = raw.get("chat_id") or raw.get("config", {}).get("chat_id")
         if not chat_id and raw.get("parts"):
             chat_id = raw["parts"][0].get("chat_id")
         if not chat_id:
             return None
 
-        # 2. Parts
+        # Parts
         parts = raw.get("parts", [])
         total_parts = len(parts) or 1
 
-        # 3. Chunk size
+        # Chunk size
         chunk_size = (
             raw.get("chunk_size")
             or raw.get("config", {}).get("tg_max_size")
@@ -334,14 +334,14 @@ class ReceiptLedger:
             or (path.stat().st_size if path.exists() else 2000 * 1024 * 1024)
         )
 
-        # 4. Message ID
+        # Message ID
         msg_id = (
             raw.get("snapshot_message_id")
             or raw.get("message_id")
             or (parts[0].get("message_id") if parts else 0)
         )
 
-        # 5. MD5
+        # MD5
         md5 = (
             raw.get("source", {}).get("md5sum")
             or raw.get("md5")
