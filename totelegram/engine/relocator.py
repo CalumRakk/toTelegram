@@ -1,6 +1,6 @@
 import json
 import logging
-from typing import TYPE_CHECKING, List, Union, cast
+from typing import TYPE_CHECKING, List, cast
 
 import peewee
 
@@ -11,7 +11,6 @@ from totelegram.types import PermissionDeniedCleanupError
 
 if TYPE_CHECKING:
     from pyrogram.client import Client
-    from pyrogram.types import Chat
 
 
 logger = logging.getLogger(__name__)
@@ -141,33 +140,3 @@ class ChunkRelocator:
             logger.warning(
                 f"Aviso durante rollback de mensajes en chat {chat_id} ({message_ids}): {e}"
             )
-
-    def can_delete_messages(self, chat_or_id: Union["Chat", int, str]) -> bool:
-        """
-        Determina si el usuario actual tiene permisos para eliminar mensajes en el chat.
-        - En chats privados: Siempre True.
-        - En canales y supergrupos: Solo Propietarios o Administradores
-        con el privilegio explícito 'can_delete_messages'.
-        - En grupos comunes como miembro regular: False (no puede borrar mensajes ajenos).
-        """
-        from pyrogram.enums import ChatMemberStatus, ChatType
-        from pyrogram.types import Chat
-
-        chat = chat_or_id if isinstance(chat_or_id, Chat) else self.get_chat(chat_or_id)
-        if not chat:
-            return False
-
-        if chat.type == ChatType.PRIVATE:
-            return True
-
-        member = self._get_membership(chat)
-        if member is None:
-            return False
-
-        if member.status == ChatMemberStatus.OWNER:
-            return True
-
-        if member.status == ChatMemberStatus.ADMINISTRATOR:
-            return bool(member.privileges and member.privileges.can_delete_messages)
-
-        return False

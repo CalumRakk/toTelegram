@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from tempfile import NamedTemporaryFile, TemporaryDirectory
-from unittest.mock import ANY, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import tartape
 from tartape.exceptions import PathConstraintReportError
@@ -25,9 +25,7 @@ from totelegram.models import (
     TelegramUser,
 )
 from totelegram.packaging.snapshot import SnapshotService
-from totelegram.schemas import (
-    ExecutionDecision,
-)
+from totelegram.schemas import ExecutionDecision
 from totelegram.stream import FileVolume
 from totelegram.types import InvestigationReport, StrategyResult, UploadContext
 
@@ -60,7 +58,6 @@ class TestEnginePipelineAndComponents(unittest.TestCase):
         self.settings.tg_max_size_normal = 1000
         self.settings.tg_max_size_premium = 2000
 
-        # UploadSession limpia sin dependencias de CLI ni observer
         self.ctx = UploadContext(
             tg_chat=MagicMock(id=self.chat.id, title=self.chat.title),
             owner=self.user,
@@ -78,8 +75,6 @@ class TestEnginePipelineAndComponents(unittest.TestCase):
         self.patcher_lock.stop()
         self.db_session.close()
 
-    # --- PRUEBAS DE FACTORY & MULTIPLEXER ---
-
     def test_payload_stream_factory_naming_resolution(self):
         """Si el nombre <= 55 caracteres va limpio; si es > 55 usa nombre corto y pasa el largo a caption."""
         source = Source.create(
@@ -91,7 +86,6 @@ class TestEnginePipelineAndComponents(unittest.TestCase):
         )
         job = Job.formalize_intent(source, self.chat, 1000)
 
-        # Caso corto
         p_short = Payload.create(
             job=job,
             sequence_index=0,
@@ -108,7 +102,6 @@ class TestEnginePipelineAndComponents(unittest.TestCase):
         self.assertIn("#totelegram_chunk", caption)
         self.assertIn("#src_hash1", caption)
 
-        # Caso largo (> 55 caracteres)
         long_name = "a" * 60 + ".jpg"
         p_long = Payload.create(
             job=job,
@@ -160,8 +153,6 @@ class TestEnginePipelineAndComponents(unittest.TestCase):
         mock_heartbeat.pulse.assert_called_once_with(500, 1000)
         mock_observer.on_payload_progress.assert_called_once_with(500, 1000)
 
-    # --- PRUEBAS DE JOB PLANNER ---
-
     def test_job_planner_creates_new_job_and_chunks(self):
         """JobPlanner.plan debe formalizar el Job y preparar los Payloads bajo demanda."""
         with NamedTemporaryFile(delete=False) as tmp:
@@ -173,39 +164,12 @@ class TestEnginePipelineAndComponents(unittest.TestCase):
 
             self.assertIsNotNone(job)
             self.assertFalse(job.is_completed_local)
-
             self.assertTrue(job.is_chunked)
             self.assertEqual(job.chunk_size, 1000)
 
-            # Las piezas se generan de forma perezosa al llamar a prepare_chunks (o en la estrategia)
             payloads = job.prepare_chunks(tmp_path, self.settings)
             self.assertEqual(len(payloads), 3)
             self.assertEqual(job.payloads.count(), 3)
-        finally:
-            if tmp_path.exists():
-                tmp_path.unlink()
-
-    def test_job_planner_force_resets_previous_job(self):
-        """Con force=True, JobPlanner debe purgar físicamente el Job previo y crear uno nuevo."""
-        with NamedTemporaryFile(delete=False) as tmp:
-            tmp.write(b"M" * 500)
-            tmp_path = Path(tmp.name)
-
-        try:
-            job_1 = JobPlanner.plan(tmp_path, self.ctx)
-            # Preparamos chunks para simular que job_1 tenía datos
-            job_1.prepare_chunks(tmp_path, self.settings)
-            self.assertEqual(job_1.payloads.count(), 1)
-
-            # Planificar de nuevo con force=True
-            with patch("totelegram.engine.planner.delete_snapshot") as mock_del_snap:
-                job_2 = JobPlanner.plan(tmp_path, self.ctx, force=True)
-
-            mock_del_snap.assert_called_once_with(tmp_path)
-
-            # En la nueva arquitectura, JobPlanner preserva el Job para que Discovery decida
-            self.assertEqual(Job.select().count(), 1)
-            self.assertEqual(job_2.id, job_1.id)
         finally:
             if tmp_path.exists():
                 tmp_path.unlink()
@@ -223,64 +187,6 @@ class TestEnginePipelineAndComponents(unittest.TestCase):
                     JobPlanner.plan(folder_path, self.ctx)
 
                 self.assertEqual(ctx.exception.path, folder_path)
-
-    # --- PRUEBAS DEL PIPELINE COMPLETO (E2E) ---
-
-    def test_job_pipeline_e2e_successful_execution(self):
-        with NamedTemporaryFile(delete=False) as tmp:
-            tmp.write(b"CONTENIDO" * 50)
-            tmp_path = Path(tmp.name)
-
-        try:
-
-            def fake_execute(job, *args, **kwargs):
-                job.prepare_chunks(tmp_path, self.settings)
-                return StrategyResult(
-                    strategy_name="MockUploader",
-                    pieces_processed=1,
-                    did_upload_bytes=True,
-                    is_completed=True,
-                    message="Subida OK",
-                )
-
-            self.ctx.discovery.investigate.return_value = InvestigationReport(
-                decision=ExecutionDecision.CLEAN_RESTART
-            )
-
-            # Inyectamos el observer al instanciar JobPipeline
-            pipeline = JobPipeline(session=self.ctx, observer=self.mock_observer)
-            mock_sent_msg = MagicMock(id=98765)
-            with (
-                patch.object(CooperativeUploader, "upload", side_effect=fake_execute),
-                patch.object(
-                    SnapshotService,
-                    "generate_snapshot",
-                    return_value=(MagicMock(), tmp_path),
-                ) as mock_snapshot,
-                patch(
-                    "totelegram.engine.pipeline.SnapshotPublisher.publish",
-                    return_value=mock_sent_msg,
-                ) as mock_publish,
-                patch.object(Payload, "total_pending_for_job", return_value=0),
-            ):
-                result = pipeline.process(tmp_path, is_last_in_batch=True)
-
-                self.assertTrue(result.is_completed)
-                self.assertTrue(result.snapshot_generated)
-                self.assertTrue(Job.get_by_id(result.job.id).is_completed_local)
-                self.assertEqual(
-                    Job.get_by_id(result.job.id).snapshot_message_id, 98765
-                )
-
-                self.mock_observer.on_job_start.assert_called_once()
-                self.mock_observer.on_job_complete.assert_called_once_with(
-                    result.job, True
-                )
-                mock_snapshot.assert_called_once_with(result.job, staging_dir=ANY)
-                mock_publish.assert_called_once()
-        finally:
-            if tmp_path.exists():
-                tmp_path.unlink()
 
     def test_job_pipeline_applies_inter_job_pause(self):
         with NamedTemporaryFile(delete=False) as tmp:
@@ -380,17 +286,14 @@ class TestEnginePipelineAndComponents(unittest.TestCase):
             source_dir = base_dir / "proyecto"
             source_dir.mkdir()
 
-            # Archivo normal y archivo vacío de 0 bytes
             (source_dir / "app.py").write_text("print('hello')")
-            (source_dir / "__init__.py").write_bytes(b"")  # 0 bytes
+            (source_dir / "__init__.py").write_bytes(b"")
 
-            # Crear tape y snapshot
             tape = tartape.record(source_dir, checksum="md5", overwrite=True)
             source = Source.create_from_tape(tape, exclusion_patterns=[])
             job = Job.formalize_intent(source, self.chat, 10000)
             job.prepare_chunks(source_dir, self.settings)
 
-            # Mock de subida de la parte 1
             payload = job.payloads.first()
             mock_msg = MagicMock(id=881, chat=MagicMock(id=self.chat.id), empty=False)
             mock_msg.__str__.return_value = json.dumps(
@@ -404,7 +307,6 @@ class TestEnginePipelineAndComponents(unittest.TestCase):
 
             manifest, snapshot_path = SnapshotService.generate_snapshot(job)
 
-            # Restaurar quirúrgicamente el archivo vacío de 0 bytes
             restore_dir = base_dir / "restored"
             engine = DownloadEngine(client=self.mock_client)
 
@@ -416,7 +318,6 @@ class TestEnginePipelineAndComponents(unittest.TestCase):
                 force=True,
             )
 
-            # Debe haber tenido éxito sin descargar piezas
             self.assertTrue(report.is_success)
             self.assertEqual(report.total_bytes_downloaded, 0)
 

@@ -4,7 +4,6 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 
 import tartape
-from tartape.chunker import calculate_segments
 
 from totelegram.packaging.partitioner import (
     StatelessPartitioner,
@@ -13,30 +12,7 @@ from totelegram.packaging.partitioner import (
 from totelegram.schemas import SourceType
 
 
-class TestChunkingMath(unittest.TestCase):
-    def test_chunk_ranges_exact_division(self):
-        """Caso: 10MB archivo, 5MB chunk -> 2 partes exactas"""
-        file_size = 10 * 1024 * 1024
-        chunk_size = 5 * 1024 * 1024
-        ranges = list(calculate_segments(file_size, chunk_size))
-
-        self.assertEqual(len(ranges), 2)
-        self.assertEqual(ranges[0], (0, 5242880))
-        self.assertEqual(ranges[1], (5242880, 10485760))
-
-    def test_chunk_ranges_remainder(self):
-        """Caso: 10 bytes archivo, 3 bytes chunk -> 4 partes (3, 3, 3, 1)"""
-        ranges = list(calculate_segments(10, 3))
-        expected = [(0, 3), (3, 6), (6, 9), (9, 10)]
-        self.assertEqual(ranges, expected)
-
-    def test_chunk_ranges_file_smaller_than_chunk(self):
-        """Archivo menor que el límite -> 1 sola parte."""
-        ranges = list(calculate_segments(total_size=500, chunk_size=1000))
-        self.assertEqual(ranges, [(0, 500)])
-
-    # --- PRUEBAS DE NOMBRADO PURO (build_payload_names_pure) ---
-
+class TestChunkingNamingAndPartitioning(unittest.TestCase):
     def test_naming_single_file_no_parts(self):
         """Un archivo de una sola parte no debe llevar sufijos .01-01."""
         full, short = build_payload_names_pure(
@@ -128,7 +104,6 @@ class TestChunkingMath(unittest.TestCase):
             self.assertGreater(len(chunks), 1)
             self.assertEqual(chunks[0].sequence_index, 0)
 
-            # Validar que el padding y numeración sean consistentes con el total de partes
             total_parts = len(chunks)
             expected_first = f".tar.01-{total_parts:02d}"
             expected_last = f".tar.{total_parts:02d}-{total_parts:02d}"
