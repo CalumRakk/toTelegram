@@ -5,8 +5,9 @@ import peewee
 import tartape
 from tartape.exceptions import PathConstraintReportError, TarIntegrityError
 
+from totelegram.engine.events import NullObserver, UploadObserver
 from totelegram.models import Job, Source, TelegramChat
-from totelegram.types import UploadContext
+from totelegram.types import UploadSession
 from totelegram.utils import delete_snapshot
 
 logger = logging.getLogger(__name__)
@@ -29,16 +30,18 @@ class JobPlanner:
     def plan(
         cls,
         path: Path,
-        ctx: UploadContext,
+        session: UploadSession,
+        observer: UploadObserver | None = None,
         force: bool = False,
         auto_truncate: bool = False,
     ) -> Job:
-        chat_db, _ = TelegramChat.get_or_create_from_chat(ctx.tg_chat)
+        chat_db, _ = TelegramChat.get_or_create_from_chat(session.tg_chat)
+        obs = observer or NullObserver()
 
         if path.is_dir():
-            source = cls._resolve_folder_source(path, ctx, force, auto_truncate)
+            source = cls._resolve_folder_source(path, session, force, auto_truncate)
         else:
-            source = cls._resolve_file_source(path, ctx)
+            source = cls._resolve_file_source(path, obs)
 
         # Buscamos si existe un Job previo en este chat (incompleto o completado)
         existing_job = Job.get_for_source_in_chat(source, chat_db)
@@ -46,15 +49,13 @@ class JobPlanner:
         if force:
             delete_snapshot(path)
 
-        # Si ya existe un Job, NO lo purgamos aquí. Lo devolvemos para que
-        # DiscoveryService evalúe sus piezas y la Máquina de Estados decida.
         if existing_job:
             job = existing_job
         else:
             chunk_size = (
-                ctx.settings.tg_max_size_premium
-                if ctx.owner.is_premium
-                else ctx.settings.tg_max_size_normal
+                session.settings.tg_max_size_premium
+                if session.owner.is_premium
+                else session.settings.tg_max_size_normal
             )
             job = Job.formalize_intent(
                 source=source,
@@ -65,20 +66,20 @@ class JobPlanner:
         return job
 
     @classmethod
-    def _resolve_file_source(cls, path: Path, ctx: UploadContext) -> Source:
+    def _resolve_file_source(cls, path: Path, observer: UploadObserver) -> Source:
         """Obtiene o registra el Source para un archivo individual comunicando progreso."""
         return Source.get_or_create_from_filepath(
             path,
-            on_hash_start=ctx.observer.on_hash_start,
-            on_hash_progress=ctx.observer.on_hash_progress,
-            on_hash_complete=ctx.observer.on_hash_complete,
+            on_hash_start=observer.on_hash_start,
+            on_hash_progress=observer.on_hash_progress,
+            on_hash_complete=observer.on_hash_complete,
         )
 
     @classmethod
     def _resolve_folder_source(
         cls,
         path: Path,
-        ctx: UploadContext,
+        session: UploadSession,
         force: bool,
         auto_truncate: bool,
     ) -> Source:
@@ -95,7 +96,7 @@ class JobPlanner:
                     f"Cinta en {path.name} inexistente en DB o corrupta. Re-indexando..."
                 )
 
-        exclusion_patterns = ctx.settings.exclude_files
+        exclusion_patterns = session.settings.exclude_files
         try:
             tape = tartape.create(
                 path,

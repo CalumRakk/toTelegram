@@ -29,12 +29,11 @@ class TestCliUploadFlow(unittest.TestCase):
         if self.file_path.exists():
             self.file_path.unlink()
 
-    @patch("totelegram.cli.logic.prepare_upload_context")
+    @patch("totelegram.cli.logic.prepare_upload_session")
     @patch("totelegram.cli.logic.JobPipeline")
     def test_run_upload_flow_executes_successfully(
         self, mock_pipeline_cls, mock_prep_ctx
     ):
-        """Verifica que run_upload_flow orqueste el inventario y el pipeline correctamente."""
         mock_ctx = MagicMock()
         mock_ctx.owner.first_name = "TestOwner"
         mock_ctx.owner.username = "tester"
@@ -63,7 +62,6 @@ class TestCliUploadFlow(unittest.TestCase):
         mock_state.manager = MagicMock(spec=SettingsManager)
         mock_state.manager.resolve_profile_name.return_value = "test_profile"
 
-        # Context manager para state.scope() que devuelve la tupla esperada (client, db)
         @contextmanager
         def fake_scope():
             yield MagicMock(), MagicMock()
@@ -76,11 +74,10 @@ class TestCliUploadFlow(unittest.TestCase):
         mock_settings.exclude_files = []
         mock_settings.max_filesize_bytes = 10**9
         mock_state.manager.get_settings.return_value = mock_settings
-
+        mock_state.settings = mock_settings
         mock_typer_ctx = MagicMock()
         mock_typer_ctx.obj = mock_state
 
-        # Ejecutamos el runner unificado
         with patch(
             "totelegram.cli.logic.get_patch_status", return_value={"applied": True}
         ):
@@ -93,7 +90,6 @@ class TestCliUploadFlow(unittest.TestCase):
                 is_backup=False,
             )
 
-        # Verificaciones
         mock_prep_ctx.assert_called_once()
         mock_pipeline.process.assert_called_once()
         self.assertEqual(mock_pipeline.process.call_args.kwargs["path"], self.file_path)

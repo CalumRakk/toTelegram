@@ -1,18 +1,16 @@
-from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, List
 
 import peewee
 
-from totelegram.engine.events import DuplicateCandidate, NullObserver, UploadObserver
+from totelegram.engine.events import DuplicateCandidate
 from totelegram.schemas import ExecutionDecision
 
 if TYPE_CHECKING:
     from pyrogram.client import Client
     from pyrogram.types import Chat
 
-    from totelegram.cli.state import CLIState
     from totelegram.concurrency import ConcurrencyCoordinator
     from totelegram.discovery import DiscoveryService
     from totelegram.identity import Settings
@@ -61,32 +59,36 @@ class PermissionDeniedCleanupError(PipelineExecutionError):
         )
 
 
-# --- CONTEXTO Y REPORTES ---
-
-
 class PipelineCancelledError(PipelineExecutionError):
     """Lanzada cuando el usuario cancela interactivamente una operación destructiva."""
 
 
-@dataclass
-class UploadContext:
-    """Contexto unificado de ejecución para operaciones de carga."""
+# --- SESIÓN TÉCNICA DE SUBIDA (SIN DEPENDENCIAS DE CLI) ---
 
-    tg_chat: "Chat"
-    owner: "TelegramUser"
+
+@dataclass(frozen=True)
+class UploadSession:
+    """Entorno técnico y recursos requeridos para ejecutar operaciones de carga."""
+
     client: "Client"
     db: peewee.Database
-    discovery: "DiscoveryService"
+    tg_chat: "Chat"
+    owner: "TelegramUser"
     settings: "Settings"
-    state: "CLIState"
     coordinator: "ConcurrencyCoordinator"
-    observer: UploadObserver = field(default_factory=NullObserver)
-    yes: bool = False
-    confirm_cleanup: Callable[[int, str], bool] | None = None
+    discovery: "DiscoveryService"
 
     @property
     def account_id(self) -> int | None:
+        """ID único de la cuenta de Telegram para coordinación de bloqueos."""
         return self.settings.telegram_account_id
+
+
+# Alias de retrocompatibilidad transitoria
+UploadContext = UploadSession
+
+
+# --- REPORTES Y RESULTADOS ---
 
 
 @dataclass

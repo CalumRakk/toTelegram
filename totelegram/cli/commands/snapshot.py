@@ -42,10 +42,6 @@ def import_snapshots(
     Calcula un plan de ejecución determinista y solo aplica cambios confirmados.
     """
     state: CLIState = ctx.obj
-    manager = state.manager
-    profile_name = manager.resolve_profile_name(state.profile_name, strict=True)
-    assert profile_name is not None
-    _ = manager.get_settings(profile_name)
 
     UI.separator()
     with console.status("[dim]Buscando archivos snapshot v6.0...[/]"):

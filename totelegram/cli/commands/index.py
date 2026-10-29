@@ -35,10 +35,7 @@ def index_tapes(
     Permite la búsqueda rápida de archivos internos con 'download --file'.
     """
     state: CLIState = ctx.obj
-    manager = state.manager
-    profile_name = manager.resolve_profile_name(state.profile_name, strict=True)
-    assert profile_name is not None
-    settings = manager.get_settings(profile_name)
+    settings = state.settings
 
     if settings.chat_id == VALUE_NOT_SET:
         UI.error("El chat destino no está configurado.")

@@ -44,11 +44,7 @@ def forward_snapshot(
     de forma instantánea y sin consumir ancho de banda de subida (0 bytes transferidos desde tu PC).
     """
     state: CLIState = ctx.obj
-    manager = state.manager
-
-    profile_name = manager.resolve_profile_name(state.profile_name, strict=True)
-    assert profile_name is not None
-    settings = manager.get_settings(profile_name)
+    settings = state.settings
 
     # Cargar y validar el snapshot original
     with UI.loading(f"Cargando snapshot: [bold]{snapshot_path.name}[/]..."):

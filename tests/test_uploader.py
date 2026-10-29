@@ -50,9 +50,7 @@ class TestCooperativeUploader(unittest.TestCase):
             db=self.db,
             discovery=MagicMock(),
             settings=self.settings,
-            state=MagicMock(),
             coordinator=self.coordinator,
-            observer=self.mock_observer,
         )
 
     def tearDown(self):
@@ -105,7 +103,9 @@ class TestCooperativeUploader(unittest.TestCase):
             uploader = CooperativeUploader()
 
             with patch("time.sleep", return_value=None):
-                result = uploader.upload(job, self.ctx)
+                result = uploader.upload(
+                    job, session=self.ctx, observer=self.mock_observer
+                )
 
             self.assertTrue(result.is_completed)
             self.assertTrue(result.did_upload_bytes)

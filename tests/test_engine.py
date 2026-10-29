@@ -60,6 +60,7 @@ class TestEnginePipelineAndComponents(unittest.TestCase):
         self.settings.tg_max_size_normal = 1000
         self.settings.tg_max_size_premium = 2000
 
+        # UploadSession limpia sin dependencias de CLI ni observer
         self.ctx = UploadContext(
             tg_chat=MagicMock(id=self.chat.id, title=self.chat.title),
             owner=self.user,
@@ -67,12 +68,9 @@ class TestEnginePipelineAndComponents(unittest.TestCase):
             db=self.db,
             discovery=MagicMock(),
             settings=self.settings,
-            state=MagicMock(),
             coordinator=self.coordinator,
-            observer=self.mock_observer,
         )
 
-        # Evitar llamadas de red en el lock de cuenta durante pruebas de pipeline
         self.patcher_lock = patch("totelegram.concurrency.TelegramAccountLock")
         self.mock_account_lock = self.patcher_lock.start()
 
@@ -229,14 +227,13 @@ class TestEnginePipelineAndComponents(unittest.TestCase):
     # --- PRUEBAS DEL PIPELINE COMPLETO (E2E) ---
 
     def test_job_pipeline_e2e_successful_execution(self):
-        """Ejecución completa del pipeline orquestando Planificación -> Discovery -> Estrategia -> Snapshot."""
         with NamedTemporaryFile(delete=False) as tmp:
             tmp.write(b"CONTENIDO" * 50)
             tmp_path = Path(tmp.name)
 
         try:
-            # Simulamos el comportamiento de las estrategias reales (preparar los chunks)
-            def fake_execute(job, ctx):
+
+            def fake_execute(job, *args, **kwargs):
                 job.prepare_chunks(tmp_path, self.settings)
                 return StrategyResult(
                     strategy_name="MockUploader",
@@ -250,7 +247,8 @@ class TestEnginePipelineAndComponents(unittest.TestCase):
                 decision=ExecutionDecision.CLEAN_RESTART
             )
 
-            pipeline = JobPipeline(self.ctx)
+            # Inyectamos el observer al instanciar JobPipeline
+            pipeline = JobPipeline(session=self.ctx, observer=self.mock_observer)
             mock_sent_msg = MagicMock(id=98765)
             with (
                 patch.object(CooperativeUploader, "upload", side_effect=fake_execute),
@@ -274,7 +272,6 @@ class TestEnginePipelineAndComponents(unittest.TestCase):
                     Job.get_by_id(result.job.id).snapshot_message_id, 98765
                 )
 
-                # Notificaciones recibidas por el Observer
                 self.mock_observer.on_job_start.assert_called_once()
                 self.mock_observer.on_job_complete.assert_called_once_with(
                     result.job, True
@@ -286,18 +283,17 @@ class TestEnginePipelineAndComponents(unittest.TestCase):
                 tmp_path.unlink()
 
     def test_job_pipeline_applies_inter_job_pause(self):
-        """Valida que si no es el último archivo y se subieron bytes, el pipeline ejecute la pausa entre Jobs."""
         with NamedTemporaryFile(delete=False) as tmp:
             tmp.write(b"12345")
             tmp_path = Path(tmp.name)
 
         try:
-            self.settings.upload_pause_range = [1, 1]  # Pausa forzada de 1 minuto (60s)
+            self.settings.upload_pause_range = [1, 1]
             self.ctx.discovery.investigate.return_value = InvestigationReport(
                 decision=ExecutionDecision.CLEAN_RESTART
             )
 
-            pipeline = JobPipeline(self.ctx)
+            pipeline = JobPipeline(session=self.ctx, observer=self.mock_observer)
 
             with (
                 patch.object(
@@ -332,7 +328,6 @@ class TestEnginePipelineAndComponents(unittest.TestCase):
                 tmp_path.unlink()
 
     def test_job_pipeline_notifies_observer_on_potential_duplicates(self):
-        """Valida que si Discovery detecta duplicados heurísticos, el pipeline notifique al observer."""
         with NamedTemporaryFile(delete=False) as tmp:
             tmp.write(b"CONTENIDO" * 50)
             tmp_path = Path(tmp.name)
@@ -344,7 +339,7 @@ class TestEnginePipelineAndComponents(unittest.TestCase):
                 potential_duplicates=[duplicate_candidate],
             )
 
-            pipeline = JobPipeline(self.ctx)
+            pipeline = JobPipeline(session=self.ctx, observer=self.mock_observer)
 
             with (
                 patch.object(

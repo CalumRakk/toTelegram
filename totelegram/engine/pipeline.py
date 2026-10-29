@@ -2,9 +2,11 @@ import logging
 import random
 import tempfile
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 from totelegram.database import db_transaction
+from totelegram.engine.events import NullObserver, UploadObserver
 from totelegram.engine.planner import JobPlanner
 from totelegram.engine.relocator import ChunkRelocator
 from totelegram.engine.uploader import CooperativeUploader
@@ -20,20 +22,20 @@ from totelegram.types import (
     PermissionDeniedCleanupError,
     PipelineCancelledError,
     StrategyResult,
-    UploadContext,
+    UploadSession,
 )
 
 logger = logging.getLogger(__name__)
 
 
 class JobPipeline:
-    """Orquestador de alto nivel para el procesamiento de archivos y carpetas.
-
-    Ejecuta el ciclo de vida de forma estrictamente declarativa y lineal.
-    """
-
-    def __init__(self, ctx: UploadContext):
-        self.ctx = ctx
+    def __init__(
+        self,
+        session: UploadSession,
+        observer: UploadObserver | None = None,
+    ):
+        self.session = session
+        self.observer = observer or NullObserver()
         self.uploader = CooperativeUploader()
 
     def process(
@@ -42,36 +44,39 @@ class JobPipeline:
         is_last_in_batch: bool = False,
         force: bool = False,
         auto_truncate: bool = False,
+        yes: bool = False,
+        confirm_cleanup: Callable[[int, str], bool] | None = None,
     ) -> JobExecutionResult:
         logger.info(f"=== Iniciando Pipeline para: {path.name} ===")
 
         # Planificación de la intención
         job = JobPlanner.plan(
             path=path,
-            ctx=self.ctx,
+            session=self.session,
+            observer=self.observer,
             force=force,
             auto_truncate=auto_truncate,
         )
 
         total_pieces = job.payloads.count() or job.total_expected_parts
-        self.ctx.observer.on_job_start(job, total_pieces)
+        self.observer.on_job_start(job, total_pieces)
 
         account_max_size = (
-            self.ctx.settings.tg_max_size_premium
-            if self.ctx.owner.is_premium
-            else self.ctx.settings.tg_max_size_normal
+            self.session.settings.tg_max_size_premium
+            if self.session.owner.is_premium
+            else self.session.settings.tg_max_size_normal
         )
 
-        with self.ctx.coordinator.guard_account(self.ctx.account_id):
+        with self.session.coordinator.guard_account(self.session.account_id):
             # Investigación física JIT en el chat destino
-            report = self.ctx.discovery.investigate(
+            report = self.session.discovery.investigate(
                 job=job,
                 force=force,
                 account_max_chunk_size=account_max_size,
             )
 
             if report.potential_duplicates:
-                self.ctx.observer.on_potential_duplicates(report.potential_duplicates)
+                self.observer.on_potential_duplicates(report.potential_duplicates)
 
             logger.info(f"Decisión de ejecución resuelta: {report.decision.value}")
 
@@ -83,14 +88,22 @@ class JobPipeline:
                 return early_result
 
             # Preparación del estado del chat (Efectos secundarios: Reubicación o Purga)
-            job = self._prepare_job_state(job, path, report, force, account_max_size)
+            job = self._prepare_job_state(
+                job=job,
+                path=path,
+                report=report,
+                force=force,
+                account_max_size=account_max_size,
+                yes=yes,
+                confirm_cleanup=confirm_cleanup,
+            )
 
             # Ejecución de la transferencia (o sellado directo si ya estaba completo)
             strategy_result = self._execute_transfer(job, report)
 
             # Sellado de Snapshot y registro en Ledger si el Job quedó completado
             is_completed, snapshot_generated = self._seal_job_snapshot(job)
-            self.ctx.observer.on_job_complete(job, snapshot_generated)
+            self.observer.on_job_complete(job, snapshot_generated)
 
         # Pausa inter-job si se transmitieron bytes reales
         if not is_last_in_batch and strategy_result.did_upload_bytes:
@@ -124,7 +137,7 @@ class JobPipeline:
                 is_completed=True,
                 message="El archivo ya se encuentra 100% completado en este chat.",
             )
-            self.ctx.observer.on_job_complete(job, snapshot_created=False)
+            self.observer.on_job_complete(job, snapshot_created=False)
             return JobExecutionResult(
                 job=job,
                 path=path,
@@ -137,7 +150,7 @@ class JobPipeline:
 
         if report.decision == ExecutionDecision.PERMISSION_DENIED_CLEANUP:
             raise PermissionDeniedCleanupError(
-                chat_id=self.ctx.tg_chat.id,
+                chat_id=self.session.tg_chat.id,
                 reason=report.detail
                 or "Permiso 'can_delete_messages' requerido para limpiar el canal.",
             )
@@ -146,7 +159,7 @@ class JobPipeline:
             raise IncompatibleCapacityError(
                 job_chunk_size=job.chunk_size,
                 account_max_size=account_max_size,
-                is_premium=self.ctx.owner.is_premium,
+                is_premium=self.session.owner.is_premium,
             )
 
         return None
@@ -158,6 +171,8 @@ class JobPipeline:
         report: InvestigationReport,
         force: bool,
         account_max_size: int,
+        yes: bool,
+        confirm_cleanup: Callable[[int, str], bool] | None,
     ) -> Job:
         """Aplica las acciones previas necesarias en Telegram o SQLite antes de subir."""
         # Reubicación al fondo (Anti-Waste TOC)
@@ -165,11 +180,11 @@ class JobPipeline:
             logger.info(
                 f"Job {job.id}: Ejecutando reubicación atómica de {len(report.valid_remotes)} trozos..."
             )
-            self.ctx.observer.on_relocation_start(len(report.valid_remotes))
+            self.observer.on_relocation_start(len(report.valid_remotes))
             ChunkRelocator.relocate(
-                client=self.ctx.client,
-                db=self.ctx.db,
-                chat_id=self.ctx.tg_chat.id,
+                client=self.session.client,
+                db=self.session.db,
+                chat_id=self.session.tg_chat.id,
                 remotes=report.valid_remotes,
             )
             return job
@@ -182,8 +197,8 @@ class JobPipeline:
         ):
             old_msg_ids = [r.message_id for r in report.valid_remotes]
 
-            if old_msg_ids and not self.ctx.yes and self.ctx.confirm_cleanup:
-                confirmed = self.ctx.confirm_cleanup(len(old_msg_ids), path.name)
+            if old_msg_ids and not yes and confirm_cleanup:
+                confirmed = confirm_cleanup(len(old_msg_ids), path.name)
                 if not confirmed:
                     raise PipelineCancelledError(
                         f"Operación cancelada por el usuario para {path.name}."
@@ -194,16 +209,16 @@ class JobPipeline:
             )
             if old_msg_ids:
                 try:
-                    self.ctx.client.delete_messages(
-                        chat_id=self.ctx.tg_chat.id, message_ids=old_msg_ids
+                    self.session.client.delete_messages(
+                        chat_id=self.session.tg_chat.id, message_ids=old_msg_ids
                     )
                 except Exception as e:
                     logger.warning(f"Aviso limpiando mensajes viejos en Telegram: {e}")
 
-            with db_transaction(self.ctx.db):
+            with db_transaction(self.session.db):
                 source = job.source
                 chat = job.chat
-                job.purge(self.ctx.db)
+                job.purge(self.session.db)
                 job = Job.formalize_intent(source, chat, chunk_size=account_max_size)
 
         return job
@@ -224,8 +239,7 @@ class JobPipeline:
                 message="Todas las partes ya estaban en Telegram. Snapshot sellado exitosamente.",
             )
 
-        # Único punto de subida física
-        return self.uploader.upload(job, self.ctx)
+        return self.uploader.upload(job, self.session, self.observer)
 
     def _seal_job_snapshot(self, job: Job) -> tuple[bool, bool]:
         """Genera el snapshot, lo publica en Telegram y lo registra en el Ledger local."""
@@ -242,30 +256,30 @@ class JobPipeline:
             )
 
             sent_msg = SnapshotPublisher.publish(
-                client=self.ctx.client,
-                chat_id=self.ctx.tg_chat.id,
+                client=self.session.client,
+                chat_id=self.session.tg_chat.id,
                 snapshot_path=temp_snapshot_file,
                 manifest=manifest,
             )
 
-            with db_transaction(self.ctx.db):
-                job.set_snapshot_published(sent_msg.id, self.ctx.owner)
+            with db_transaction(self.session.db):
+                job.set_snapshot_published(sent_msg.id, self.session.owner)
 
             ReceiptLedger.record_upload(
                 file_path=job.path,
-                chat_id=self.ctx.tg_chat.id,
+                chat_id=self.session.tg_chat.id,
                 snapshot_message_id=sent_msg.id,
                 chunk_size=job.chunk_size,
                 total_parts=job.payloads.count(),
                 md5=job.source.md5sum,
-                chat_title=self.ctx.tg_chat.title,
+                chat_title=self.session.tg_chat.title,
             )
 
         return True, True
 
     def _apply_inter_job_pause(self) -> None:
         """Aplica la pausa de seguridad entre archivos comunicando la cuenta regresiva al observador."""
-        pause_range = self.ctx.settings.upload_pause_range
+        pause_range = self.session.settings.upload_pause_range
         if not pause_range or pause_range == [0, 0]:
             return
 
@@ -273,10 +287,10 @@ class JobPipeline:
         seconds = minutes * 60
 
         if seconds > 0:
-            self.ctx.observer.on_pause_start(seconds, "Inter-job")
+            self.observer.on_pause_start(seconds, "Inter-job")
             remaining = seconds
             while remaining > 0:
-                self.ctx.observer.on_pause_tick(remaining, seconds)
+                self.observer.on_pause_tick(remaining, seconds)
                 time.sleep(1)
                 remaining -= 1
-            self.ctx.observer.on_pause_end()
+            self.observer.on_pause_end()

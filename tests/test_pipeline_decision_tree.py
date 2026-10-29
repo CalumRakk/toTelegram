@@ -33,7 +33,6 @@ class TestPipelineDecisionTree(unittest.TestCase):
     """Batería de pruebas de integración para la máquina de estados y el árbol de decisiones del pipeline."""
 
     def setUp(self):
-        # Base de datos SQLite aislada en memoria para cada test
         self.db_session = DatabaseSession("sqlite:///:memory:", auto_init_schema=True)
         self.db = self.db_session.start()
 
@@ -61,6 +60,7 @@ class TestPipelineDecisionTree(unittest.TestCase):
         self.settings.tg_max_size_premium = 4000
         self.settings.auto_truncate = False
 
+        # Sesión limpia
         self.ctx = UploadContext(
             tg_chat=MagicMock(id=self.chat.id, title=self.chat.title),
             owner=self.user,
@@ -68,12 +68,9 @@ class TestPipelineDecisionTree(unittest.TestCase):
             db=self.db,
             discovery=MagicMock(),
             settings=self.settings,
-            state=MagicMock(),
             coordinator=self.coordinator,
-            observer=self.mock_observer,
         )
 
-        # Evitar llamadas reales de red al lock de Telegram en tests de pipeline
         self.patcher_lock = patch("totelegram.concurrency.TelegramAccountLock")
         self.mock_account_lock = self.patcher_lock.start()
 
@@ -124,7 +121,7 @@ class TestPipelineDecisionTree(unittest.TestCase):
                 detail="El archivo ya está 100% en este chat.",
             )
 
-            pipeline = JobPipeline(self.ctx)
+            pipeline = JobPipeline(session=self.ctx, observer=self.mock_observer)
 
             with patch.object(CooperativeUploader, "upload") as mock_exec:
                 result = pipeline.process(file_path, force=False)
@@ -154,7 +151,7 @@ class TestPipelineDecisionTree(unittest.TestCase):
                 detail="Faltan permisos para eliminar mensajes antiguos.",
             )
 
-            pipeline = JobPipeline(self.ctx)
+            pipeline = JobPipeline(session=self.ctx, observer=self.mock_observer)
 
             with self.assertRaises(PermissionDeniedCleanupError) as ctx_err:
                 pipeline.process(file_path, force=True)
@@ -176,7 +173,7 @@ class TestPipelineDecisionTree(unittest.TestCase):
                 detail="El corte previo de 4 GB supera el límite de 2 GB de la cuenta estándar.",
             )
 
-            pipeline = JobPipeline(self.ctx)
+            pipeline = JobPipeline(session=self.ctx, observer=self.mock_observer)
 
             with self.assertRaises(IncompatibleCapacityError) as ctx_err:
                 pipeline.process(file_path, force=False)
@@ -209,7 +206,7 @@ class TestPipelineDecisionTree(unittest.TestCase):
                 total_parts=1,
             )
 
-            pipeline = JobPipeline(self.ctx)
+            pipeline = JobPipeline(session=self.ctx, observer=self.mock_observer)
             mock_published_msg = MagicMock(id=9999)
 
             with (
@@ -261,7 +258,7 @@ class TestPipelineDecisionTree(unittest.TestCase):
                 total_parts=2,
             )
 
-            pipeline = JobPipeline(self.ctx)
+            pipeline = JobPipeline(session=self.ctx, observer=self.mock_observer)
 
             with (
                 patch(
@@ -270,8 +267,8 @@ class TestPipelineDecisionTree(unittest.TestCase):
                 patch.object(
                     CooperativeUploader,
                     "upload",
-                    side_effect=lambda j, c: self._simulate_strategy_success(
-                        j, file_path
+                    side_effect=lambda j, *args, **kwargs: (
+                        self._simulate_strategy_success(j, file_path)
                     ),
                 ) as mock_exec,
                 patch.object(
@@ -328,14 +325,14 @@ class TestPipelineDecisionTree(unittest.TestCase):
                 total_parts=1,
             )
 
-            pipeline = JobPipeline(self.ctx)
+            pipeline = JobPipeline(session=self.ctx, observer=self.mock_observer)
 
             with (
                 patch.object(
                     CooperativeUploader,
                     "upload",
-                    side_effect=lambda j, c: self._simulate_strategy_success(
-                        j, file_path
+                    side_effect=lambda j, *args, **kwargs: (
+                        self._simulate_strategy_success(j, file_path)
                     ),
                 ),
                 patch.object(
@@ -375,7 +372,7 @@ class TestPipelineDecisionTree(unittest.TestCase):
                 total_parts=3,
             )
 
-            pipeline = JobPipeline(self.ctx)
+            pipeline = JobPipeline(session=self.ctx, observer=self.mock_observer)
 
             with (
                 patch(
@@ -384,8 +381,8 @@ class TestPipelineDecisionTree(unittest.TestCase):
                 patch.object(
                     CooperativeUploader,
                     "upload",
-                    side_effect=lambda j, c: self._simulate_strategy_success(
-                        j, file_path
+                    side_effect=lambda j, *args, **kwargs: (
+                        self._simulate_strategy_success(j, file_path)
                     ),
                 ) as mock_exec,
                 patch.object(

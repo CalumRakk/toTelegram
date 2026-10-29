@@ -1,13 +1,13 @@
 import json
 import time
 from functools import wraps
-from typing import List, Literal, Tuple, cast
+from typing import List, Literal, Tuple
 
 import typer
 
 from totelegram.cli.state import CLIState
 from totelegram.cli.ui import UI
-from totelegram.cli.views.settings import DisplayConfig, DisplayProfile
+from totelegram.cli.views.settings import DisplayConfig
 from totelegram.cli.views.upload import DisplayIndexer
 from totelegram.database import DatabaseSession
 from totelegram.identity import ConfigService
@@ -74,10 +74,9 @@ def _validate_live_chat_id(
 def _get_config_tools(ctx: typer.Context) -> Tuple[str, ConfigService]:
     """Extrae las herramientas necesarias para cualquier comando de configuracion que requieran un perfil."""
     state: CLIState = ctx.obj
-    settings_name = cast(str, state.manager.resolve_profile_name(state.profile_name))
-    DisplayProfile.announce_profile_used(settings_name)
+    state.announce_profile()
     service = ConfigService(state.manager, state.is_debug)
-    return settings_name, service
+    return state.profile_name, service
 
 
 @handle_config_errors
@@ -220,7 +219,7 @@ def check_config(ctx: typer.Context):
     state: CLIState = ctx.obj
     manager = state.manager
 
-    profile_name = manager.resolve_profile_name(state.profile_name, strict=False)
+    profile_name = state.get_profile_name(strict=False)
     if not profile_name:
         UI.error("No hay un perfil activo o el perfil especificado no existe.")
         raise typer.Exit(1)
@@ -246,7 +245,7 @@ def check_config(ctx: typer.Context):
 
             raise typer.Exit(1)
 
-    settings = manager.get_settings(profile_name)
+    settings = state.settings
 
     # Verificación de la Base de Datos SQLite local
     with UI.loading("Verificando conexión y esquema de base de datos..."):

@@ -39,7 +39,7 @@ def manage_target(
     state: CLIState = ctx.obj
     manager = state.manager
 
-    profile_name = manager.resolve_profile_name(state.profile_name, strict=False)
+    profile_name = state.get_profile_name(strict=False)
     if not profile_name:
         UI.error("No hay un perfil activo configurado.")
         UI.tip(

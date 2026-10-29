@@ -10,7 +10,6 @@ import typer
 from totelegram.cli.observer import RichUploadObserver
 from totelegram.cli.state import CLIState
 from totelegram.cli.ui import UI, console
-from totelegram.cli.views.settings import DisplayProfile
 from totelegram.cli.views.upload import DisplayIndexer, DisplayUpload
 from totelegram.concurrency import AccountBusyError, ConcurrencyCoordinator
 from totelegram.discovery import DiscoveryService
@@ -28,7 +27,7 @@ from totelegram.types import (
     IncompatibleCapacityError,
     PermissionDeniedCleanupError,
     PipelineCancelledError,
-    UploadContext,
+    UploadSession,
 )
 from totelegram.utils import is_excluded
 
@@ -39,15 +38,14 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def prepare_upload_context(
+def prepare_upload_session(
     state: CLIState,
     client: "Client",
     db: peewee.Database,
     settings: Settings,
     target_override: str | None = None,
-    yes: bool = False,
-) -> UploadContext:
-    """Prepara el contexto unificado de subida aplicando la jerarquía de resolución de destino."""
+) -> UploadSession:
+    """Prepara el entorno técnico de subida aplicando la jerarquía de resolución de destino."""
     resolver = TargetResolver(client, db)
     resolved_chat_id: int | str | None = None
 
@@ -109,18 +107,17 @@ def prepare_upload_context(
         )
         raise typer.Exit(1)
 
-    # Obtención del objeto Chat de Pyrogram y usuario activo
+    # Sincronización con Telegram
     with UI.loading("Sincronizando con Telegram..."):
         try:
             tg_chat = cast("Chat", client.get_chat(resolved_chat_id))
+            time.sleep(0.5)
             me = cast("User", client.get_me())
             owner = TelegramUser.get_or_create_from_tg(me)
 
             # Auto-healing de telegram_account_id para locks distribuidos
             if settings.telegram_account_id is None:
-                profile_name = cast(
-                    str, state.manager.resolve_profile_name(state.profile_name)
-                )
+                profile_name = state.profile_name
                 state.manager.set_setting(profile_name, "telegram_account_id", owner.id)
                 settings.telegram_account_id = owner.id
                 logger.info(
@@ -137,28 +134,15 @@ def prepare_upload_context(
         node_id=state.manager.node_id,
         client=client,
     )
-    observer = RichUploadObserver()
 
-    def confirm_cleanup_handler(count: int, filename: str) -> bool:
-        console.print()
-        UI.warn(
-            f"Existen [bold]{count}[/] partes previas en Telegram del archivo '[bold]{filename}[/]'.\n"
-            f"Al continuar con [bold]--force[/], se eliminarán de Telegram para reiniciar la subida desde cero."
-        )
-        return typer.confirm("¿Deseas eliminarlas y continuar?", default=False)
-
-    return UploadContext(
+    return UploadSession(
         client=client,
         db=db,
-        discovery=discovery,
         tg_chat=tg_chat,
         owner=owner,
         settings=settings,
-        state=state,
         coordinator=coordinator,
-        observer=observer,
-        yes=yes,
-        confirm_cleanup=confirm_cleanup_handler,
+        discovery=discovery,
     )
 
 
@@ -272,9 +256,8 @@ def run_upload_flow(
     o carpetas empaquetadas en cintas TAR (backup).
     """
     state: CLIState = ctx.obj
-    profile_name = cast(str, state.manager.resolve_profile_name(state.profile_name))
-    DisplayProfile.announce_profile_used(profile_name)
-    settings = state.manager.get_settings(profile_name)
+    state.announce_profile()
+    settings = state.settings
 
     final_auto_truncate = (
         auto_truncate if auto_truncate is not None else settings.auto_truncate
@@ -285,19 +268,19 @@ def run_upload_flow(
         UI.warn(f"Forzando la subida de {item_word} sin comprobar el estado previo.")
 
     with state.scope() as (client, db):
-        u_ctx = prepare_upload_context(
+        # Sesión técnica pura de infraestructura
+        session = prepare_upload_session(
             state=state,
             client=client,
             db=db,
             settings=settings,
             target_override=target,
-            yes=yes,
         )
-        pipeline = JobPipeline(u_ctx)
+
         inventory = InventoryEngine(
             settings=settings,
             force=force,
-            target_chat_id=u_ctx.tg_chat.id,
+            target_chat_id=session.tg_chat.id,
         )
 
         # Escaneo de inventario
@@ -312,7 +295,7 @@ def run_upload_flow(
 
             # Verificación del catálogo de cintas en Telegram
             indexer = TapeIndexService(client, db)
-            tape_report = indexer.auto_heal_or_report(u_ctx.tg_chat.id)
+            tape_report = indexer.auto_heal_or_report(session.tg_chat.id)
             if tape_report.auto_healed:
                 UI.info(
                     f"Auto-sanadas [bold]{tape_report.healed_count}[/] cintas no indexadas en segundo plano."
@@ -330,20 +313,27 @@ def run_upload_flow(
 
         # Diagnóstico de runtime patches y banner de sesión
         status = get_patch_status()
-        if status["applied"]:
-            UI.success("Core Engine: Pyrogram Runtime Patches [ACTIVE]")
-        else:
+        if not status["applied"]:
             UI.error("Core Engine: Pyrogram Runtime Patches [FAILED]")
 
-        user = u_ctx.owner.first_name or u_ctx.owner.username
-        chat_n = u_ctx.tg_chat.title or u_ctx.tg_chat.username
+        user = session.owner.first_name or session.owner.username
+        chat_n = session.tg_chat.title or session.tg_chat.username
         UI.success(f"Conectado como [bold]{user}[/]")
 
         if not settings.has_custom_app:
             UI.warn("Cuenta en modo público compartido (my.telegram.org recomendado).")
 
-        UI.info(f"Destino: [bold cyan]{chat_n}[/] [dim](ID: {u_ctx.tg_chat.id})[/]")
+        UI.info(f"Destino: [bold cyan]{chat_n}[/] [dim](ID: {session.tg_chat.id})[/]")
         UI.print("", indent=False)
+
+        # Callback interactivo de confirmación para cuando aplique limpieza con --force
+        def confirm_cleanup_handler(count: int, filename: str) -> bool:
+            console.print()
+            UI.warn(
+                f"Existen [bold]{count}[/] partes previas en Telegram del archivo '[bold]{filename}[/]'.\n"
+                f"Al continuar con [bold]--force[/], se eliminarán de Telegram para reiniciar la subida desde cero."
+            )
+            return typer.confirm("¿Deseas eliminarlas y continuar?", default=False)
 
         # Procesamiento secuencial de candidatos
         total_candidates = len(candidates)
@@ -362,11 +352,16 @@ def run_upload_flow(
                 UI.separator()
 
             try:
+                # Opciones de ejecución pasadas explícitamente a process
+                observer = RichUploadObserver()
+                pipeline = JobPipeline(session=session, observer=observer)
                 result = pipeline.process(
                     path=item_path,
                     is_last_in_batch=is_last,
                     force=force,
                     auto_truncate=final_auto_truncate if is_backup else False,
+                    yes=yes,
+                    confirm_cleanup=confirm_cleanup_handler,
                 )
                 item_label = "Carpeta" if is_backup else "Archivo"
                 if result.is_completed:
