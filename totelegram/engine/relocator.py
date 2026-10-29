@@ -6,8 +6,8 @@ import peewee
 
 from totelegram.common.helpers import get_utc_now
 from totelegram.database import db_transaction
+from totelegram.exceptions import PermissionDeniedCleanupError
 from totelegram.models import RemotePayload
-from totelegram.types import PermissionDeniedCleanupError
 
 if TYPE_CHECKING:
     from pyrogram.client import Client

@@ -6,23 +6,12 @@ import tartape
 from tartape.exceptions import PathConstraintReportError, TarIntegrityError
 
 from totelegram.engine.events import NullObserver, UploadObserver
+from totelegram.exceptions import PathLengthExceededError
 from totelegram.models import Job, Source, TelegramChat
 from totelegram.types import UploadSession
 from totelegram.utils import delete_snapshot
 
 logger = logging.getLogger(__name__)
-
-
-class JobPlanningError(Exception):
-    """Excepción base para errores de planificación de Jobs."""
-
-
-class PathLengthExceededError(JobPlanningError):
-    """Lanzada cuando una carpeta contiene rutas que exceden el estándar TAR."""
-
-    def __init__(self, path: Path):
-        self.path = path
-        super().__init__(f"Rutas demasiado largas encontradas en '{path.name}'.")
 
 
 class JobPlanner:

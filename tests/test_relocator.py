@@ -8,6 +8,7 @@ from pyrogram.types import Chat, ChatMember, ChatPrivileges
 
 from totelegram.database import DatabaseSession
 from totelegram.engine.relocator import ChunkRelocationError, ChunkRelocator
+from totelegram.exceptions import PermissionDeniedCleanupError
 from totelegram.models import (
     Job,
     Payload,
@@ -18,7 +19,6 @@ from totelegram.models import (
 )
 from totelegram.schemas import SourceType
 from totelegram.telegram.access import ChatAccessService
-from totelegram.types import PermissionDeniedCleanupError
 
 
 class TestPermissionsAndRelocator(unittest.TestCase):

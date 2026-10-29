@@ -8,6 +8,8 @@ from typing import Any, Dict, Literal
 
 from pydantic import BaseModel, Field
 
+from totelegram.exceptions import NoPendingCandidatesError
+
 APP_NAME = "toTelegram"
 CLI_BIN = "totelegram"
 VALUE_NOT_SET = "NOT-SET"
@@ -208,6 +210,19 @@ class ScanReport(BaseModel):
             "integrity": self.skipped_by_integrity,
         }
         mapping[reason].append(path)
+
+    def ensure_has_candidates(
+        self,
+        item_type: str = "archivo",
+        destination_title: str | None = None,
+    ) -> list[Path]:
+        """Verifica declarativamente que existan candidatos o aborta con una salida limpia."""
+        if not self.found:
+            raise NoPendingCandidatesError(
+                item_type=item_type,
+                destination_title=destination_title,
+            )
+        return self.found
 
 
 @dataclass

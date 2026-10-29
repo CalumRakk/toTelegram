@@ -11,10 +11,15 @@ from totelegram.cli.observer import RichUploadObserver
 from totelegram.cli.state import CLIState
 from totelegram.cli.ui import UI, console
 from totelegram.cli.views.upload import DisplayIndexer, DisplayUpload
-from totelegram.concurrency import AccountBusyError, ConcurrencyCoordinator
+from totelegram.concurrency import ConcurrencyCoordinator
 from totelegram.discovery import DiscoveryService
 from totelegram.engine.pipeline import JobPipeline
-from totelegram.engine.planner import PathLengthExceededError
+from totelegram.exceptions import (
+    ConfigurationError,
+    InfrastructureError,
+    TargetAmbiguousError,
+    TargetNotSetError,
+)
 from totelegram.identity import Settings
 from totelegram.models import TelegramUser
 from totelegram.packaging.indexer import TapeIndexService
@@ -24,9 +29,6 @@ from totelegram.telegram.patches import get_patch_status
 from totelegram.telegram.resolver import TargetResolver
 from totelegram.telegram.types import TargetResolutionStatus
 from totelegram.types import (
-    IncompatibleCapacityError,
-    PermissionDeniedCleanupError,
-    PipelineCancelledError,
     UploadSession,
 )
 from totelegram.utils import is_excluded
@@ -62,25 +64,15 @@ def prepare_upload_session(
             )
 
         elif resolution.status == TargetResolutionStatus.AMBIGUOUS:
-            UI.error(
-                f"El destino '[bold]{target_override}[/]' es ambiguo. "
-                f"Se encontraron {len(resolution.candidates)} coincidencias:"
-            )
-            for c in resolution.candidates:
-                identifier = f"@{c.username}" if c.username else str(c.id)
-                UI.print(
-                    f"  • [bold]{c.title}[/] [dim]({identifier})[/] -> Usa: [yellow]--target {c.id}[/]"
-                )
-            raise typer.Exit(1)
+            raise TargetAmbiguousError(target_override, resolution.candidates)
 
         else:
-            UI.error(
-                resolution.error_message
-                or f"No se pudo resolver el destino '{target_override}'."
+            raise ConfigurationError(
+                message=resolution.error_message
+                or f"No se pudo resolver el destino '{target_override}'.",
+                hint=resolution.hint,
+                exit_code=1,
             )
-            if resolution.hint:
-                UI.tip(resolution.hint)
-            raise typer.Exit(1)
 
     # Fallback al chat por defecto configurado en el perfil
     elif settings.chat_id != VALUE_NOT_SET:
@@ -88,24 +80,7 @@ def prepare_upload_session(
 
     # Ningún destino disponible (bloqueo instructivo)
     else:
-        UI.error("No se ha especificado un chat de destino.")
-        UI.educational_tip(
-            title="Destino requerido",
-            message=(
-                "El perfil activo no tiene un chat por defecto y no indicaste '--target'.\n\n"
-                "Tienes dos formas de continuar:\n"
-                "1. Definir el destino solo para esta subida usando [bold]--target <chat>[/].\n"
-                "2. Guardar un destino por defecto permanente usando [bold]totelegram target <chat>[/]."
-            ),
-            commands=[
-                'totelegram send ... --target "Mi Canal"',
-                "totelegram send ... --target me",
-                'totelegram target "Mi Canal"',
-            ],
-            spacing="block",
-            border_style="yellow",
-        )
-        raise typer.Exit(1)
+        raise TargetNotSetError()
 
     # Sincronización con Telegram
     with UI.loading("Sincronizando con Telegram..."):
@@ -125,8 +100,11 @@ def prepare_upload_session(
                 )
 
         except Exception as e:
-            UI.error(f"Error de conexión con el chat destino ({resolved_chat_id}): {e}")
-            raise typer.Exit(1)
+            raise InfrastructureError(
+                f"Error de conexión con el chat destino ({resolved_chat_id}): {e}",
+                title="Error de Conexión",
+                exit_code=1,
+            ) from e
 
     discovery = DiscoveryService(client, db)
     coordinator = ConcurrencyCoordinator(
@@ -251,10 +229,6 @@ def run_upload_flow(
     is_backup: bool = False,
     auto_truncate: bool | None = None,
 ) -> None:
-    """
-    Ejecutor unificado para el flujo de subida de archivos individuales (send)
-    o carpetas empaquetadas en cintas TAR (backup).
-    """
     state: CLIState = ctx.obj
     state.announce_profile()
     settings = state.settings
@@ -268,7 +242,6 @@ def run_upload_flow(
         UI.warn(f"Forzando la subida de {item_word} sin comprobar el estado previo.")
 
     with state.scope() as (client, db):
-        # Sesión técnica pura de infraestructura
         session = prepare_upload_session(
             state=state,
             client=client,
@@ -283,15 +256,15 @@ def run_upload_flow(
             target_chat_id=session.tg_chat.id,
         )
 
-        # Escaneo de inventario
+        # Escaneo de inventario declarativo
         if is_backup:
             with console.status("[dim]Escaneando directorios...[/]"):
                 scan_report = inventory.scan_backup_inventory(paths)
+
             DisplayUpload.show_skip_report(scan_report, "carpeta", force_verbose=False)
-            candidates = scan_report.found
-            if not candidates:
-                UI.warn("No se encontraron carpetas pendientes para este destino.")
-                raise typer.Exit(0)
+            candidates = scan_report.ensure_has_candidates(
+                "carpeta", session.tg_chat.title
+            )
 
             # Verificación del catálogo de cintas en Telegram
             indexer = TapeIndexService(client, db)
@@ -306,10 +279,9 @@ def run_upload_flow(
             with console.status(f"[dim]Escaneando {len(paths)} rutas...[/dim]"):
                 scan_report = inventory.scan_granular(paths)
             DisplayUpload.show_skip_report(scan_report, "archivo")
-            candidates = scan_report.found
-            if not candidates:
-                UI.warn("No se encontraron archivos pendientes para este destino.")
-                raise typer.Exit(0)
+            candidates = scan_report.ensure_has_candidates(
+                "archivo", session.tg_chat.title
+            )
 
         # Diagnóstico de runtime patches y banner de sesión
         status = get_patch_status()
@@ -326,7 +298,6 @@ def run_upload_flow(
         UI.info(f"Destino: [bold cyan]{chat_n}[/] [dim](ID: {session.tg_chat.id})[/]")
         UI.print("", indent=False)
 
-        # Callback interactivo de confirmación para cuando aplique limpieza con --force
         def confirm_cleanup_handler(count: int, filename: str) -> bool:
             console.print()
             UI.warn(
@@ -335,26 +306,28 @@ def run_upload_flow(
             )
             return typer.confirm("¿Deseas eliminarlas y continuar?", default=False)
 
-        # Procesamiento secuencial de candidatos
+        # Procesamiento secuencial de candidatos (Sin try/except gigantescos)
         total_candidates = len(candidates)
-        for index, item_path in enumerate(candidates, 1):
-            is_last = index == total_candidates
 
-            if is_backup:
-                DisplayUpload.show_backup_header(
-                    item_path.name, index, total_candidates
-                )
-                with UI.loading("Analizando contenido..."):
-                    report_internal = inventory.scan_backup_internal(item_path)
-                    time.sleep(0.3)
-                DisplayUpload.show_internal_scan_result(report_internal)
-            else:
-                UI.separator()
+        with session.exclusive_lock():
+            for index, item_path in enumerate(candidates, 1):
+                is_last = index == total_candidates
 
-            try:
-                # Opciones de ejecución pasadas explícitamente a process
+                if is_backup:
+                    DisplayUpload.show_backup_header(
+                        item_path.name, index, total_candidates
+                    )
+                    with UI.loading("Analizando contenido..."):
+                        report_internal = inventory.scan_backup_internal(item_path)
+                        time.sleep(0.3)
+                    DisplayUpload.show_internal_scan_result(report_internal)
+                else:
+                    UI.separator()
+
                 observer = RichUploadObserver()
                 pipeline = JobPipeline(session=session, observer=observer)
+
+                # Delegar la ejecución al pipeline unificado
                 result = pipeline.process(
                     path=item_path,
                     is_last_in_batch=is_last,
@@ -363,6 +336,7 @@ def run_upload_flow(
                     yes=yes,
                     confirm_cleanup=confirm_cleanup_handler,
                 )
+
                 item_label = "Carpeta" if is_backup else "Archivo"
                 if result.is_completed:
                     UI.success(
@@ -372,42 +346,6 @@ def run_upload_flow(
                     UI.info(
                         f"Procesamiento parcial de [bold]{item_path.name}[/]: {result.message}"
                     )
-
-            except IncompatibleCapacityError as e:
-                DisplayUpload.show_incompatible_capacity_panel(e)
-                raise typer.Exit(1)
-            except PermissionDeniedCleanupError as e:
-                DisplayUpload.show_permission_denied_panel(e)
-                raise typer.Exit(1)
-            except PipelineCancelledError as e:
-                UI.info(str(e))
-                raise typer.Exit(0)
-            except PathLengthExceededError:
-                UI.error(f"Error al empaquetar la carpeta: [bold]{item_path.name}[/]")
-                UI.print(
-                    "[dim]El formato TAR tiene un límite estricto para la longitud de los nombres y rutas de archivos.[/dim]"
-                )
-                UI.educational_tip(
-                    title="Nombres de archivo demasiado largos",
-                    message=(
-                        "Tienes dos opciones para resolver esto:\n"
-                        "1. Renombrar manualmente los archivos con rutas largas.\n"
-                        "2. Dejar que toTelegram trunque los nombres automáticamente al subirlos."
-                    ),
-                    commands=[
-                        f'totelegram backup "{item_path}" --auto-truncate',
-                        "totelegram config set auto_truncate true",
-                    ],
-                    spacing="block",
-                    border_style="yellow",
-                )
-                raise typer.Exit(1)
-            except AccountBusyError as e:
-                UI.error(str(e))
-                raise typer.Exit(1)
-            except Exception as e:
-                UI.error(f"Error procesando {item_path.name}: {e}")
-                raise typer.Exit(1)
 
         # Alertas finales para carpetas con cambios de integridad
         if is_backup and scan_report.skipped_by_integrity:

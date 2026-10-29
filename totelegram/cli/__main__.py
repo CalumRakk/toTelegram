@@ -118,10 +118,20 @@ def run_script():
 
         app()
     except SystemExit:
-        pass  # Salidas limpias (ej. sys.exit(0))
+        pass  # Salidas limpias (ej. sys.exit(0) o sys.exit(1) invocados explícitamente)
     except Exception as e:
         import typer
 
+        # Si es una excepción de dominio de toTelegram, delegar al despachador visual
+        from totelegram.exceptions import ToTelegramError
+
+        if isinstance(e, ToTelegramError):
+            from totelegram.cli.views.errors import CLIExceptionHandler
+
+            CLIExceptionHandler.render(e)
+            sys.exit(e.exit_code)
+
+        # Ignorar si es un typer.Exit estándar
         if not isinstance(e, typer.Exit):
             import logging
 

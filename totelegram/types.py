@@ -1,6 +1,7 @@
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, List
+from typing import TYPE_CHECKING, Generator, List
 
 import peewee
 
@@ -19,49 +20,6 @@ if TYPE_CHECKING:
         RemotePayload,
         TelegramUser,
     )
-
-
-# --- EXCEPCIONES DE DOMINIO DE LA MÁQUINA DE ESTADOS ---
-
-
-class PipelineExecutionError(Exception):
-    """Excepción base para fallos en la resolución o ejecución del pipeline."""
-
-
-class IncompatibleCapacityError(PipelineExecutionError):
-    """Lanzada cuando un Job previo exige capacidades superiores a la sesión actual (ej. 4GB vs 2GB)."""
-
-    def __init__(self, job_chunk_size: int, account_max_size: int, is_premium: bool):
-        self.job_chunk_size = job_chunk_size
-        self.account_max_size = account_max_size
-        self.is_premium = is_premium
-        super().__init__(
-            f"El Job previo requiere partes de {job_chunk_size // (1024 * 1024)} MB, "
-            f"pero la cuenta activa solo soporta {account_max_size // (1024 * 1024)} MB "
-            f"({'Premium' if is_premium else 'Estándar'}). "
-            f"Usa '--force' para descartar el Job y re-particionar, o cambia de cuenta."
-        )
-
-
-class PermissionDeniedCleanupError(PipelineExecutionError):
-    """Lanzada cuando se requiere eliminar o reubicar mensajes pero faltan permisos de administrador."""
-
-    def __init__(
-        self,
-        chat_id: int | str,
-        reason: str = "Permiso 'can_delete_messages' requerido",
-    ):
-        self.chat_id = chat_id
-        self.reason = reason
-        super().__init__(
-            f"No se pueden limpiar o reordenar los mensajes en el chat {chat_id}: {reason}. "
-            f"Otorga permisos de eliminación a esta cuenta en Telegram para continuar."
-        )
-
-
-class PipelineCancelledError(PipelineExecutionError):
-    """Lanzada cuando el usuario cancela interactivamente una operación destructiva."""
-
 
 # --- SESIÓN TÉCNICA DE SUBIDA (SIN DEPENDENCIAS DE CLI) ---
 
@@ -82,6 +40,17 @@ class UploadSession:
     def account_id(self) -> int | None:
         """ID único de la cuenta de Telegram para coordinación de bloqueos."""
         return self.settings.telegram_account_id
+
+    @contextmanager
+    def exclusive_lock(self, ttl_seconds: int = 300) -> Generator[str, None, None]:
+        """
+        Bloquea la cuenta de Telegram para uso exclusivo de este nodo durante la subida.
+        Garantiza que ninguna otra terminal o VPS procese transferencias con la misma cuenta.
+        """
+        with self.coordinator.guard_account(
+            self.account_id, ttl_seconds=ttl_seconds
+        ) as resource_id:
+            yield resource_id
 
 
 # Alias de retrocompatibilidad transitoria

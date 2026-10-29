@@ -47,7 +47,7 @@ class TestDatabaseMigrationAndInspection(unittest.TestCase):
 
     def test_02_outdated_database_auto_archives_and_creates_fresh_v8(self):
         """
-        Fase 1: Si la base de datos física es OUTDATED (ej: v1), NO debe lanzar error.
+        Si la base de datos física es OUTDATED (ej: v1), NO debe lanzar error.
         Debe respaldarse físicamente como .legacy_v1.sqlite y crear una nueva limpia en v8.
         """
         with TemporaryDirectory() as tmp_dir:

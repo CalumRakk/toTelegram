@@ -5,8 +5,11 @@ from typing import Literal
 from rich.markup import escape
 
 from totelegram.cli.ui import UI, console
+from totelegram.exceptions import (
+    IncompatibleCapacityError,
+    PermissionDeniedCleanupError,
+)
 from totelegram.schemas import Commands, ScanReport
-from totelegram.types import IncompatibleCapacityError, PermissionDeniedCleanupError
 
 ui_logger = logging.getLogger("totelegram.ui")
 

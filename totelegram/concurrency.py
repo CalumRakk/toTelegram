@@ -14,6 +14,11 @@ import peewee
 from pyrogram.errors import RPCError
 
 from totelegram.common.helpers import get_utc_now, is_expired
+from totelegram.exceptions import (
+    AccountBusyError,
+    ConcurrencyError,
+    SystemSuspendedError,
+)
 from totelegram.models import Claim, Job, Payload, RemotePayload
 from totelegram.schemas import ResourceType
 from totelegram.telegram.search import find_messages_with_history_fallback
@@ -28,32 +33,6 @@ logger = logging.getLogger(__name__)
 # Constantes del protocolo de bloqueo distribuido
 LOCK_ROOT_TAG = "#totelegram_lock"
 DEFAULT_LOCK_TTL_SECONDS = 300  # 5 minutos
-
-# EXCEPCIONES DE DOMINIO
-
-
-class ConcurrencyError(Exception):
-    """Excepción base para conflictos de concurrencia."""
-
-
-class AccountBusyError(ConcurrencyError):
-    """Lanzada cuando una cuenta de Telegram está en uso por otro nodo/terminal."""
-
-    def __init__(self, account_id: int, holder_node_id: str | None = None):
-        self.account_id = account_id
-        self.holder_node_id = holder_node_id
-        super().__init__(
-            f"La cuenta de Telegram '{account_id}' está en uso activo por el nodo: {holder_node_id or 'desconocido'}."
-        )
-
-
-class PayloadClaimError(ConcurrencyError):
-    """Lanzada cuando ocurre un error al reclamar una pieza."""
-
-
-class SystemSuspendedError(ConcurrencyError):
-    """Lanzada cuando se detecta que el sistema entró en suspensión/hibernación."""
-
 
 # DTOs Y CONTROLADOR DE LATIDOS (HEARTBEAT)
 
@@ -238,6 +217,14 @@ class ConcurrencyCoordinator:
             raise RuntimeError(
                 "Se requiere un cliente de Telegram activo para bloquear la cuenta."
             )
+
+        # Si ya fue adquirido por este mismo coordinador, reutilizamos de forma reentrante
+        if (
+            self._active_account_lock is not None
+            and self._active_account_lock.is_acquired
+        ):
+            yield resource_id
+            return
 
         tg_lock = TelegramAccountLock(
             client=self.client,

@@ -2,7 +2,8 @@ import logging
 import random
 import tempfile
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Generator
+from contextlib import contextmanager
 from pathlib import Path
 
 from totelegram.database import db_transaction
@@ -10,22 +11,160 @@ from totelegram.engine.events import NullObserver, UploadObserver
 from totelegram.engine.planner import JobPlanner
 from totelegram.engine.relocator import ChunkRelocator
 from totelegram.engine.uploader import CooperativeUploader
+from totelegram.exceptions import (
+    IncompatibleCapacityError,
+    PermissionDeniedCleanupError,
+    PipelineCancelledError,
+)
 from totelegram.models import Job
 from totelegram.packaging.ledger import ReceiptLedger
 from totelegram.packaging.publisher import SnapshotPublisher
 from totelegram.packaging.snapshot import SnapshotService
 from totelegram.schemas import ExecutionDecision
 from totelegram.types import (
-    IncompatibleCapacityError,
     InvestigationReport,
     JobExecutionResult,
-    PermissionDeniedCleanupError,
-    PipelineCancelledError,
     StrategyResult,
     UploadSession,
 )
 
 logger = logging.getLogger(__name__)
+
+
+class JobContext:
+    """Representa el contexto y ciclo de vida de ejecución de un Job individual."""
+
+    def __init__(
+        self,
+        pipeline: "JobPipeline",
+        job: Job,
+        path: Path,
+        force: bool = False,
+        yes: bool = False,
+        confirm_cleanup: Callable[[int, str], bool] | None = None,
+    ):
+        self.pipeline = pipeline
+        self.session = pipeline.session
+        self.observer = pipeline.observer
+        self.job = job
+        self.path = path
+        self.force = force
+        self.yes = yes
+        self.confirm_cleanup = confirm_cleanup
+
+        self.account_max_size = (
+            self.session.settings.tg_max_size_premium
+            if self.session.owner.is_premium
+            else self.session.settings.tg_max_size_normal
+        )
+
+        self.report: InvestigationReport | None = None
+        self.strategy_result: StrategyResult | None = None
+        self.is_completed: bool = False
+        self.snapshot_generated: bool = False
+
+    @property
+    def is_fulfilled(self) -> bool:
+        return self.report is not None and self.report.is_fulfilled
+
+    def investigate(self) -> InvestigationReport:
+        """Analiza el estado físico JIT en Telegram y evalúa guardias tempranas."""
+        report = self.session.discovery.investigate(
+            job=self.job,
+            force=self.force,
+            account_max_chunk_size=self.account_max_size,
+        )
+
+        if report.potential_duplicates:
+            self.observer.on_potential_duplicates(report.potential_duplicates)
+
+        logger.info(f"Decisión de ejecución resuelta: {report.decision.value}")
+        self.report = report
+
+        # Guardias tempranas
+        if report.decision == ExecutionDecision.ALREADY_FULFILLED:
+            self.strategy_result = StrategyResult(
+                strategy_name="None",
+                pieces_processed=0,
+                did_upload_bytes=False,
+                is_completed=True,
+                message="El archivo ya se encuentra 100% completado en este chat.",
+            )
+            self.is_completed = True
+            return self.report
+
+        if report.decision == ExecutionDecision.PERMISSION_DENIED_CLEANUP:
+            raise PermissionDeniedCleanupError(
+                chat_id=self.session.tg_chat.id,
+                reason=report.detail
+                or "Permiso 'can_delete_messages' requerido para limpiar el canal.",
+            )
+
+        if report.decision == ExecutionDecision.INCOMPATIBLE_CAPACITY:
+            raise IncompatibleCapacityError(
+                job_chunk_size=self.job.chunk_size,
+                account_max_size=self.account_max_size,
+                is_premium=self.session.owner.is_premium,
+            )
+
+        return self.report
+
+    def transfer(self) -> StrategyResult:
+        """Prepara el estado del chat (reubicación/purga) y ejecuta la subida física."""
+        if self.is_fulfilled:
+            assert self.strategy_result is not None
+            return self.strategy_result
+
+        assert self.report is not None, (
+            "Debe ejecutarse investigate() antes de transfer()."
+        )
+
+        # Preparación del estado del chat
+        self.job = self.pipeline._prepare_job_state(
+            job=self.job,
+            path=self.path,
+            report=self.report,
+            force=self.force,
+            account_max_size=self.account_max_size,
+            yes=self.yes,
+            confirm_cleanup=self.confirm_cleanup,
+        )
+
+        # Ejecución física o sellado directo
+        self.strategy_result = self.pipeline._execute_transfer(self.job, self.report)
+        return self.strategy_result
+
+    def seal(self) -> tuple[bool, bool]:
+        """Genera el snapshot, lo publica en Telegram y actualiza el Ledger."""
+        # Si ya estaba 100% completado en Telegram, no re-generamos snapshot
+        if self.is_fulfilled:
+            self.is_completed = True
+            self.snapshot_generated = False
+            self.observer.on_job_complete(self.job, snapshot_created=False)
+            return self.is_completed, self.snapshot_generated
+
+        self.is_completed, self.snapshot_generated = self.pipeline._seal_job_snapshot(
+            self.job
+        )
+        self.observer.on_job_complete(self.job, self.snapshot_generated)
+        return self.is_completed, self.snapshot_generated
+
+    @property
+    def result(self) -> JobExecutionResult:
+        """Consolida el resultado final del Job."""
+        decision = (
+            self.report.decision if self.report else ExecutionDecision.CLEAN_RESTART
+        )
+        msg = self.strategy_result.message if self.strategy_result else ""
+        return JobExecutionResult(
+            job=self.job,
+            path=self.path,
+            decision=decision,
+            strategy_result=self.strategy_result,
+            is_completed=self.is_completed,
+            snapshot_generated=self.snapshot_generated,
+            message=msg,
+        )
 
 
 class JobPipeline:
@@ -38,7 +177,8 @@ class JobPipeline:
         self.observer = observer or NullObserver()
         self.uploader = CooperativeUploader()
 
-    def process(
+    @contextmanager
+    def track_job(
         self,
         path: Path,
         is_last_in_batch: bool = False,
@@ -46,7 +186,11 @@ class JobPipeline:
         auto_truncate: bool = False,
         yes: bool = False,
         confirm_cleanup: Callable[[int, str], bool] | None = None,
-    ) -> JobExecutionResult:
+    ) -> Generator[JobContext, None, None]:
+        """
+        Administrador de contexto declarativo para el ciclo de vida de un Job.
+        Planifica la intención, asegura el lock y gestiona la pausa inter-job al finalizar.
+        """
         logger.info(f"=== Iniciando Pipeline para: {path.name} ===")
 
         # Planificación de la intención
@@ -61,108 +205,52 @@ class JobPipeline:
         total_pieces = job.payloads.count() or job.total_expected_parts
         self.observer.on_job_start(job, total_pieces)
 
-        account_max_size = (
-            self.session.settings.tg_max_size_premium
-            if self.session.owner.is_premium
-            else self.session.settings.tg_max_size_normal
-        )
-
-        with self.session.coordinator.guard_account(self.session.account_id):
-            # Investigación física JIT en el chat destino
-            report = self.session.discovery.investigate(
-                job=job,
-                force=force,
-                account_max_chunk_size=account_max_size,
-            )
-
-            if report.potential_duplicates:
-                self.observer.on_potential_duplicates(report.potential_duplicates)
-
-            logger.info(f"Decisión de ejecución resuelta: {report.decision.value}")
-
-            # Guardias tempranas (Fail-Fast o resolución inmediata)
-            early_result = self._check_early_termination(
-                job, path, report, account_max_size
-            )
-            if early_result is not None:
-                return early_result
-
-            # Preparación del estado del chat (Efectos secundarios: Reubicación o Purga)
-            job = self._prepare_job_state(
-                job=job,
-                path=path,
-                report=report,
-                force=force,
-                account_max_size=account_max_size,
-                yes=yes,
-                confirm_cleanup=confirm_cleanup,
-            )
-
-            # Ejecución de la transferencia (o sellado directo si ya estaba completo)
-            strategy_result = self._execute_transfer(job, report)
-
-            # Sellado de Snapshot y registro en Ledger si el Job quedó completado
-            is_completed, snapshot_generated = self._seal_job_snapshot(job)
-            self.observer.on_job_complete(job, snapshot_generated)
-
-        # Pausa inter-job si se transmitieron bytes reales
-        if not is_last_in_batch and strategy_result.did_upload_bytes:
-            self._apply_inter_job_pause()
-
-        return JobExecutionResult(
+        context = JobContext(
+            pipeline=self,
             job=job,
             path=path,
-            decision=report.decision,
-            strategy_result=strategy_result,
-            is_completed=is_completed,
-            snapshot_generated=snapshot_generated,
-            message=strategy_result.message,
+            force=force,
+            yes=yes,
+            confirm_cleanup=confirm_cleanup,
         )
 
-    # SUBMÉTODOS PRIVADOS DEL PIPELINE
+        with self.session.exclusive_lock():
+            try:
+                yield context
+            finally:
+                # Pausa inter-job si se transmitieron bytes reales y no es el último
+                if (
+                    not is_last_in_batch
+                    and context.strategy_result
+                    and context.strategy_result.did_upload_bytes
+                ):
+                    self._apply_inter_job_pause()
 
-    def _check_early_termination(
+    def process(
         self,
-        job: Job,
         path: Path,
-        report: InvestigationReport,
-        account_max_size: int,
-    ) -> JobExecutionResult | None:
-        """Evalúa condiciones terminales inmediatas (éxito previo o bloqueos fatales)."""
-        if report.decision == ExecutionDecision.ALREADY_FULFILLED:
-            strategy_result = StrategyResult(
-                strategy_name="None",
-                pieces_processed=0,
-                did_upload_bytes=False,
-                is_completed=True,
-                message="El archivo ya se encuentra 100% completado en este chat.",
-            )
-            self.observer.on_job_complete(job, snapshot_created=False)
-            return JobExecutionResult(
-                job=job,
-                path=path,
-                decision=report.decision,
-                strategy_result=strategy_result,
-                is_completed=True,
-                snapshot_generated=False,
-                message=strategy_result.message,
-            )
+        is_last_in_batch: bool = False,
+        force: bool = False,
+        auto_truncate: bool = False,
+        yes: bool = False,
+        confirm_cleanup: Callable[[int, str], bool] | None = None,
+    ) -> JobExecutionResult:
+        """Método de fachada retrocompatible: orquesta las 3 fases secuencialmente."""
+        with self.track_job(
+            path=path,
+            is_last_in_batch=is_last_in_batch,
+            force=force,
+            auto_truncate=auto_truncate,
+            yes=yes,
+            confirm_cleanup=confirm_cleanup,
+        ) as job_ctx:
+            report = job_ctx.investigate()
+            if not report.is_fulfilled:
+                job_ctx.transfer()
+            job_ctx.seal()
+            return job_ctx.result
 
-        if report.decision == ExecutionDecision.PERMISSION_DENIED_CLEANUP:
-            raise PermissionDeniedCleanupError(
-                chat_id=self.session.tg_chat.id,
-                reason=report.detail
-                or "Permiso 'can_delete_messages' requerido para limpiar el canal.",
-            )
-
-        if report.decision == ExecutionDecision.INCOMPATIBLE_CAPACITY:
-            raise IncompatibleCapacityError(
-                job_chunk_size=job.chunk_size,
-                account_max_size=account_max_size,
-                is_premium=self.session.owner.is_premium,
-            )
-
-        return None
+    # SUBMÉTODOS PRIVADOS DEL MOTOR (Reubicación, Transferencia, Sellado)
 
     def _prepare_job_state(
         self,
@@ -174,8 +262,6 @@ class JobPipeline:
         yes: bool,
         confirm_cleanup: Callable[[int, str], bool] | None,
     ) -> Job:
-        """Aplica las acciones previas necesarias en Telegram o SQLite antes de subir."""
-        # Reubicación al fondo (Anti-Waste TOC)
         if report.decision == ExecutionDecision.RELOCATED_AND_RESUMED:
             logger.info(
                 f"Job {job.id}: Ejecutando reubicación atómica de {len(report.valid_remotes)} trozos..."
@@ -189,7 +275,6 @@ class JobPipeline:
             )
             return job
 
-        # Reinicio limpio con --force
         if (
             report.decision == ExecutionDecision.CLEAN_RESTART
             and force
@@ -228,7 +313,6 @@ class JobPipeline:
         job: Job,
         report: InvestigationReport,
     ) -> StrategyResult:
-        """Realiza la transferencia física o resuelve el sellado directo sin transferir bytes."""
         if report.decision == ExecutionDecision.SEAL_HEALED:
             logger.info(f"Job {job.id}: Sellando snapshot faltante (SEAL_HEALED)...")
             return StrategyResult(
@@ -242,7 +326,6 @@ class JobPipeline:
         return self.uploader.upload(job, self.session, self.observer)
 
     def _seal_job_snapshot(self, job: Job) -> tuple[bool, bool]:
-        """Genera el snapshot, lo publica en Telegram y lo registra en el Ledger local."""
         if not job.is_completed_local:
             return False, False
 
@@ -278,7 +361,6 @@ class JobPipeline:
         return True, True
 
     def _apply_inter_job_pause(self) -> None:
-        """Aplica la pausa de seguridad entre archivos comunicando la cuenta regresiva al observador."""
         pause_range = self.session.settings.upload_pause_range
         if not pause_range or pause_range == [0, 0]:
             return
