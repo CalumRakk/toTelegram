@@ -109,9 +109,8 @@ class TestPipelineDecisionTree(unittest.TestCase):
             is_completed=True,
         )
 
-    # =========================================================================
-    # ESTADO 1: ALREADY_FULFILLED
-    # =========================================================================
+    # ALREADY_FULFILLED
+
     def test_01_already_fulfilled_stops_immediately_with_zero_byte_transfer(self):
         """Si el archivo ya existe al 100% en el canal (Snapshot verificado), se detiene sin subir nada."""
         file_path = self._create_temp_file()
@@ -139,9 +138,8 @@ class TestPipelineDecisionTree(unittest.TestCase):
         finally:
             file_path.unlink(missing_ok=True)
 
-    # =========================================================================
-    # ESTADO 2: PERMISSION_DENIED_CLEANUP
-    # =========================================================================
+    # PERMISSION_DENIED_CLEANUP
+
     def test_02_permission_denied_cleanup_raises_fail_fast_error(self):
         """Si se requiere limpiar o reubicar trozos pero no hay permisos de eliminación, lanza PermissionDeniedCleanupError."""
         file_path = self._create_temp_file()
@@ -161,9 +159,8 @@ class TestPipelineDecisionTree(unittest.TestCase):
         finally:
             file_path.unlink(missing_ok=True)
 
-    # =========================================================================
-    # ESTADO 3: INCOMPATIBLE_CAPACITY
-    # =========================================================================
+    # INCOMPATIBLE_CAPACITY
+
     def test_03_incompatible_capacity_raises_error_without_force(self):
         """Si el corte previo supera la capacidad de la cuenta activa sin --force, bloquea con IncompatibleCapacityError."""
         file_path = self._create_temp_file()
@@ -183,9 +180,8 @@ class TestPipelineDecisionTree(unittest.TestCase):
         finally:
             file_path.unlink(missing_ok=True)
 
-    # =========================================================================
-    # ESTADO 4: SEAL_HEALED
-    # =========================================================================
+    # SEAL_HEALED
+
     def test_04_seal_healed_publishes_snapshot_without_uploading_file_bytes(
         self,
     ):
@@ -237,9 +233,8 @@ class TestPipelineDecisionTree(unittest.TestCase):
         finally:
             file_path.unlink(missing_ok=True)
 
-    # =========================================================================
-    # ESTADO 5: RELOCATED_AND_RESUMED
-    # =========================================================================
+    # RELOCATED_AND_RESUMED
+
     def test_05_relocated_and_resumed_copies_to_bottom_and_continues(self):
         """Con --force y corte compatible, reubica partes existentes al fondo y sube las pendientes."""
         file_path = self._create_temp_file()
@@ -295,9 +290,8 @@ class TestPipelineDecisionTree(unittest.TestCase):
         finally:
             file_path.unlink(missing_ok=True)
 
-    # =========================================================================
-    # ESTADO 6: CLEAN_RESTART
-    # =========================================================================
+    # CLEAN_RESTART
+
     def test_06_clean_restart_purges_previous_incompatible_job_and_restarts(
         self,
     ):
@@ -358,9 +352,8 @@ class TestPipelineDecisionTree(unittest.TestCase):
         finally:
             file_path.unlink(missing_ok=True)
 
-    # =========================================================================
-    # ESTADO 7: RESUMED_IN_PLACE
-    # =========================================================================
+    # RESUMED_IN_PLACE
+
     def test_07_resumed_in_place_continues_without_force_and_without_moving_chunks(
         self,
     ):

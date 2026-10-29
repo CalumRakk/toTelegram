@@ -287,12 +287,6 @@ class SettingsManager:
     def node_id(self) -> str:
         return self._worker_instance_id
 
-    def get_lock_for_path(self, path: Path) -> FileLock:
-        lock_dir = self.worktable / "locks"
-        lock_dir.mkdir(exist_ok=True)
-        path_hash = hashlib.md5(str(path.absolute()).encode()).hexdigest()
-        return FileLock(lock_dir / f"{path_hash}.lock")
-
     def _get_all_profile_names(self) -> List[str]:
         """Busca todos los perfiles que tengan .json, .env (legado) o .session."""
         if not self.profiles_dir.exists():

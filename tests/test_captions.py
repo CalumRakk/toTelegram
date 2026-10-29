@@ -31,7 +31,6 @@ class TestCaptions(unittest.TestCase):
         self.assertIn("#totelegram_chunk", caption)
         self.assertIn("#part_03_10", caption)
         self.assertIn(f"#src_{master_md5}", caption)
-        self.assertIn("Part [3/10]", caption)
         self.assertIn("#v6", caption)
 
     def test_manifest_caption_distinction(self):

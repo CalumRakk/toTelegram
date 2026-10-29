@@ -126,7 +126,7 @@ class RichUploadObserver:
 
             # Mensaje sutil y elegante de confirmación
             short_hash = md5sum[:12]
-            UI.info(f"Huella digital verificada: [bold dim]{short_hash}...[/bold dim]")
+            UI.info(f"Huella digital verificada: [bold dim]{short_hash}[/bold dim]")
 
     def on_job_start(self, job: "Job", total_payloads: int) -> None:
         pass

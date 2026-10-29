@@ -17,7 +17,7 @@ TAG_TYPE_FILE = "#type_file"
 # Expresiones regulares para parsing bidireccional
 _CHUNK_PATTERN = re.compile(
     r"^(?P<filename>[^\n]+)\n\n"
-    r"Part\s+\[(?P<cur>\d+)/(?P<tot>\d+)\]\s+•\s+(?P<size>[^\n]+)\n\n"
+    r"(?:Part\s+\[(?P<cur>\d+)/(?P<tot>\d+)\]\s+•\s+[^\n]+\n\n)?"
     r".*?#totelegram_chunk\s+#part_(?P<p_cur>\d+)_(?P<p_tot>\d+)\s+#v(?P<version>\d+)\n"
     r"#src_(?P<hash>[a-fA-F0-9]{32})",
     re.DOTALL,
@@ -51,8 +51,8 @@ class ChunkCaption:
     filename: str
     part_number: int  # 1-based
     total_parts: int
-    part_size: int
-    source_short_hash: str
+    part_size: int = 0
+    source_short_hash: str = ""
     version: int = PROTOCOL_VERSION
 
     @property
@@ -60,15 +60,13 @@ class ChunkCaption:
         return PartCoordinate(index=self.part_number, total=self.total_parts)
 
     def render(self) -> str:
-        """Genera el texto estandarizado en 3 bloques en inglés técnico."""
+        """Genera el texto estandarizado en 2 bloques (nombre y metadatos técnicos)."""
         coord = self.coordinate
-        size_str = format_size(self.part_size)
         v_tag = format_version_tag(self.version)
         clean_hash = self.source_short_hash[:32].lower()
 
         return (
             f"{self.filename}\n\n"
-            f"Part {coord.display} • {size_str}\n\n"
             f"{TAG_ROOT_CHUNK} {coord.tag} {v_tag}\n"
             f"#src_{clean_hash}"
         )
@@ -84,10 +82,13 @@ class ChunkCaption:
             return None
 
         data = match.groupdict()
+        cur = data.get("p_cur") or data.get("cur")
+        tot = data.get("p_tot") or data.get("tot")
+
         return cls(
             filename=data["filename"].strip(),
-            part_number=int(data["cur"]),
-            total_parts=int(data["tot"]),
+            part_number=int(cur),
+            total_parts=int(tot),
             part_size=0,  # El tamaño exacto reside en document.file_size
             source_short_hash=data["hash"][:32].lower(),
             version=int(data["version"]),
