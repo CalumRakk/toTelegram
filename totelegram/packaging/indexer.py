@@ -1,7 +1,7 @@
 import logging
 import re
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, List
+from typing import TYPE_CHECKING
 
 import peewee
 from pyrogram import enums
@@ -45,7 +45,7 @@ class TapeIndexService:
         cuántos no tienen sus archivos indexados en la tabla TapeMember.
         """
         try:
-            messages: List["Message"] = list(
+            messages: list["Message"] = list(
                 self.client.search_messages(
                     chat_id=int(chat_id),
                     query="#type_tape",
@@ -107,7 +107,7 @@ class TapeIndexService:
 
         return report
 
-    def _silent_heal(self, messages: List["Message"]) -> int:
+    def _silent_heal(self, messages: list["Message"]) -> int:
         """Descarga e indexa silenciosamente un grupo pequeño de mensajes .ttape."""
         from totelegram.packaging.importer import SnapshotImporter
 

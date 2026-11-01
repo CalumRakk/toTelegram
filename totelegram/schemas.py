@@ -4,7 +4,7 @@ import time
 from dataclasses import dataclass, field
 from enum import Enum, IntEnum
 from pathlib import Path
-from typing import Any, Dict, Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -111,7 +111,7 @@ class ProfileRegistry(BaseModel):
     """Modelo que representa el archivo config.json global de perfiles"""
 
     active: str | None = None
-    profiles: Dict[str, str] = Field(default_factory=dict)
+    profiles: dict[str, str] = Field(default_factory=dict)
 
 
 class TapeCatalog(BaseModel):

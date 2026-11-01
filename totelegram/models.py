@@ -267,7 +267,7 @@ class Source(BaseModel):
 
     @classmethod
     def create_from_tape(
-        cls, tape: tartape.Tape, exclusion_patterns: List[str] | str
+        cls, tape: tartape.Tape, exclusion_patterns: list[str] | str
     ) -> "Source":
         exclude_patterns = (
             json.dumps(exclusion_patterns)

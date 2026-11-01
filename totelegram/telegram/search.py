@@ -1,6 +1,6 @@
 # pyright: reportGeneralTypeIssues=false
 import logging
-from typing import TYPE_CHECKING, Generator, List
+from typing import TYPE_CHECKING, Generator
 
 from totelegram.telegram.types import ChatMatch, ChatResolution
 
@@ -86,8 +86,8 @@ class ChatSearchService:
             query=query, search_depth=depth, is_exact_requested=is_exact
         )
 
-        candidates: List[ChatMatch] = []
-        suggestions: List[ChatMatch] = []
+        candidates: list[ChatMatch] = []
+        suggestions: list[ChatMatch] = []
 
         dialogs: Generator[Dialog] = self.client.get_dialogs(limit=depth)  # type: ignore
 

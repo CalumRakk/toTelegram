@@ -8,7 +8,7 @@ import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import timedelta, timezone
-from typing import TYPE_CHECKING, Generator, List, Optional, cast
+from typing import TYPE_CHECKING, Generator, Optional, cast
 
 import peewee
 from pyrogram.errors import RPCError
@@ -45,7 +45,7 @@ class LeaseHeartbeat:
     """
 
     coordinator: "ConcurrencyCoordinator"
-    tracked_resources: List[str]
+    tracked_resources: list[str]
     renew_interval_seconds: int = 60
     last_pulse: float = field(default_factory=time.monotonic)
 
@@ -157,7 +157,7 @@ class ConcurrencyCoordinator:
 
             return False
 
-    def renew_resources(self, resource_ids: List[str], ttl_seconds: int = 300) -> bool:
+    def renew_resources(self, resource_ids: list[str], ttl_seconds: int = 300) -> bool:
         """
         Renueva tanto el lock global de la cuenta en Telegram
         como los leases de piezas en la base de datos local.

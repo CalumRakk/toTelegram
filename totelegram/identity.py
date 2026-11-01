@@ -1,4 +1,3 @@
-import hashlib
 import logging
 import os
 import re
@@ -17,7 +16,6 @@ from typing import (
 )
 
 from dotenv import dotenv_values
-from filelock import FileLock
 from pydantic import (
     BaseModel,
     BeforeValidator,
@@ -43,7 +41,7 @@ IntList = Annotated[
 ]
 
 CommaSeparatedList = Annotated[
-    List[str],
+    list[str],
     BeforeValidator(parse_comma_list),
 ]
 
@@ -287,7 +285,7 @@ class SettingsManager:
     def node_id(self) -> str:
         return self._worker_instance_id
 
-    def _get_all_profile_names(self) -> List[str]:
+    def _get_all_profile_names(self) -> list[str]:
         """Busca todos los perfiles que tengan .json, .env (legado) o .session."""
         if not self.profiles_dir.exists():
             return []
@@ -524,7 +522,7 @@ class ConfigService:
         self.manager = manager
         self.is_debug = is_debug
 
-    def prepare_updates(self, args: List[str]) -> Dict[str, Any]:
+    def prepare_updates(self, args: list[str]) -> Dict[str, Any]:
         """Convierte argumentos CLI planos en un diccionario validado de pares clave-valor."""
         if not args or len(args) % 2 != 0:
             raise ValueError(
@@ -553,9 +551,9 @@ class ConfigService:
         self,
         profile_name: str,
         key: str,
-        items: List[str],
+        items: list[str],
         action: Literal["add", "remove"],
-    ) -> Tuple[bool, List[str]]:
+    ) -> Tuple[bool, list[str]]:
         """Añade o elimina elementos de una configuración de tipo lista de forma atómica."""
         key = key.lower().strip()
         Settings.validate_key_access(self.is_debug, key)

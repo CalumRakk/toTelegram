@@ -2,7 +2,7 @@ import logging
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable, List, cast
+from typing import TYPE_CHECKING, Callable, cast
 
 from pyrogram.types import Message
 
@@ -83,7 +83,7 @@ class SnapshotForwarder:
         source_msg_ids = [p.message_id for p in sorted_parts]
         try:
             source_messages = cast(
-                List[Message],
+                list[Message],
                 self.client.get_messages(source_chat_id, source_msg_ids),
             )
             for sm, part in zip(source_messages, sorted_parts):
@@ -99,7 +99,7 @@ class SnapshotForwarder:
             ) from e
 
         # Replicación secuencial de partes en el destino
-        copied_parts: List[tuple[RemotePart, Message]] = []
+        copied_parts: list[tuple[RemotePart, Message]] = []
         try:
             for idx, part in enumerate(sorted_parts, 1):
                 if on_progress:

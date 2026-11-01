@@ -1,6 +1,5 @@
 import logging
 from pathlib import Path
-from typing import List
 
 import typer
 
@@ -20,7 +19,7 @@ app = typer.Typer(help="Herramientas para inspeccionar e importar snapshots v6.0
 @app.command("import")
 def import_snapshots(
     ctx: typer.Context,
-    paths: List[Path] = typer.Argument(
+    paths: list[Path] = typer.Argument(
         ...,
         exists=True,
         help="Rutas a archivos (.json.xz o .ttape) o carpetas que contengan snapshots v6.0.",

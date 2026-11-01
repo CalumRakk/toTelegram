@@ -131,7 +131,7 @@ def apply_pyrogram_patches():
             part_size = 512 * 1024
 
             if isinstance(path, (str, PurePath)):
-                fp = open(path, "rb")
+                fp = open(path, "rb")  # noqa: ASYNC230, SIM115
             elif isinstance(path, io.IOBase):
                 fp = path
             else:

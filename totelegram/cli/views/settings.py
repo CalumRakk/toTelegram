@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import TYPE_CHECKING, List, Literal
+from typing import TYPE_CHECKING, Literal
 
 import typer
 from rich.markup import escape
@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 class DisplayConfig:
     @staticmethod
     def confirm_expanded_pattern(
-        action: Literal["agregar", "eliminar"], key: str, values: List[str]
+        action: Literal["agregar", "eliminar"], key: str, values: list[str]
     ) -> bool:
         if not values:
             return False
@@ -129,7 +129,7 @@ class DisplayProfile:
         cls,
         manager: SettingsManager,
         active: str | None,
-        profiles: List[Profile],
+        profiles: list[Profile],
         quiet: bool = False,
     ):
         console.print()

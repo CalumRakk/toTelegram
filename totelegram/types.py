@@ -1,7 +1,7 @@
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Generator, List
+from typing import TYPE_CHECKING, Generator
 
 import peewee
 
@@ -21,7 +21,7 @@ if TYPE_CHECKING:
         TelegramUser,
     )
 
-# --- SESIÓN TÉCNICA DE SUBIDA (SIN DEPENDENCIAS DE CLI) ---
+# SESIÓN TÉCNICA DE SUBIDA (SIN DEPENDENCIAS DE CLI)
 
 
 @dataclass(frozen=True)
@@ -57,7 +57,7 @@ class UploadSession:
 UploadContext = UploadSession
 
 
-# --- REPORTES Y RESULTADOS ---
+# REPORTES Y RESULTADOS
 
 
 @dataclass
@@ -65,11 +65,11 @@ class InvestigationReport:
     """Reporte exhaustivo generado por DiscoveryService sobre el estado físico del Job en el chat."""
 
     decision: ExecutionDecision
-    valid_remotes: List["RemotePayload"] = field(default_factory=list)
-    orphaned_remotes: List["RemotePayload"] = field(default_factory=list)
-    missing_part_indices: List[int] = field(default_factory=list)
+    valid_remotes: list["RemotePayload"] = field(default_factory=list)
+    orphaned_remotes: list["RemotePayload"] = field(default_factory=list)
+    missing_part_indices: list[int] = field(default_factory=list)
     total_parts: int = 0
-    potential_duplicates: List[DuplicateCandidate] = field(default_factory=list)
+    potential_duplicates: list[DuplicateCandidate] = field(default_factory=list)
     detail: str = ""
 
     @property

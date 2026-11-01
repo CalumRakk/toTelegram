@@ -1,5 +1,4 @@
 from pathlib import Path
-from typing import List, Tuple
 
 import tartape
 from tartape.chunker import calculate_segments
@@ -15,7 +14,7 @@ def build_payload_names_pure(
     md5sum: str,
     idx: int,
     total: int,
-) -> Tuple[str, str]:
+) -> tuple[str, str]:
     """Genera nombres técnicos y legibles delegando en PartCoordinate."""
     coord = PartCoordinate(index=idx + 1, total=total)
     part_suffix = coord.filename_suffix
@@ -41,7 +40,7 @@ class StatelessPartitioner:
     @staticmethod
     def partition_file(
         path: Path, max_chunk_size: int, md5sum: str
-    ) -> List[VirtualChunk]:
+    ) -> list[VirtualChunk]:
         """Calcula la partición lógica para un archivo individual."""
         file_size = path.stat().st_size
 
@@ -52,7 +51,7 @@ class StatelessPartitioner:
         )
         total_parts = len(segments)
 
-        chunks: List[VirtualChunk] = []
+        chunks: list[VirtualChunk] = []
         for idx, (start, end) in enumerate(segments):
             filename, filename_short = build_payload_names_pure(
                 path=path,
@@ -75,7 +74,7 @@ class StatelessPartitioner:
         return chunks
 
     @staticmethod
-    def partition_folder(path: Path, max_chunk_size: int) -> List[VirtualChunk]:
+    def partition_folder(path: Path, max_chunk_size: int) -> list[VirtualChunk]:
         """Calcula las particiones lógicas para los volúmenes TAR de una carpeta."""
         catalog_path = tartape.discover(path)
         tape = (
@@ -87,7 +86,7 @@ class StatelessPartitioner:
         segments = list(calculate_segments(tape.total_size, max_chunk_size))
         total_parts = len(segments)
 
-        chunks: List[VirtualChunk] = []
+        chunks: list[VirtualChunk] = []
         for idx, (start, end) in enumerate(segments):
             filename, filename_short = build_payload_names_pure(
                 path=path,

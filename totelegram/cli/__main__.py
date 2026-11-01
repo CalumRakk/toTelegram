@@ -47,7 +47,7 @@ app.command(name="forward")(forward.forward_snapshot)
 app.command(name="prune")(prune.prune_files)
 app.command(name="clean")(prune.prune_files)
 
-# --- ATAJOS ---
+# ATAJOS
 app.command(name="login")(auth.login_command)
 app.command(name="logout")(auth.logout_command)
 app.command(name="status")(auth.status_command)
@@ -103,7 +103,7 @@ def main(
     ctx.obj = CLIState(
         manager=config_manager, profile_name=profile_name, is_debug=debug
     )
-    logger.debug(f"--- Nueva Ejecución: {sys.argv} ---")
+    logger.debug(f"--- Nueva Ejecución: {sys.argv}")
 
 
 def run_script():

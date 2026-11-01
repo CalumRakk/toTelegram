@@ -76,7 +76,7 @@ class TestPermissionsAndRelocator(unittest.TestCase):
         )
         return msg
 
-    # --- PRUEBAS DE PERMISOS (can_delete_messages) ---
+    # PRUEBAS DE PERMISOS (can_delete_messages)
 
     def test_can_delete_in_private_chat(self):
         """En chats privados siempre se permite borrar."""
@@ -125,7 +125,7 @@ class TestPermissionsAndRelocator(unittest.TestCase):
 
         self.assertFalse(self.access_service.can_delete_messages(chat_channel))
 
-    # --- PRUEBAS DE CHUNK RELOCATOR (ANTI-WASTE TOC) ---
+    # PRUEBAS DE CHUNK RELOCATOR (ANTI-WASTE TOC)
 
     def test_relocate_success(self):
         """Copia mensajes al fondo, elimina los viejos y actualiza la DB."""

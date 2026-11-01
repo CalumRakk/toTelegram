@@ -1,7 +1,7 @@
 import json
 import time
 from functools import wraps
-from typing import List, Literal, Tuple
+from typing import Literal
 
 import typer
 
@@ -71,7 +71,7 @@ def _validate_live_chat_id(
         return report.chat.id, title
 
 
-def _get_config_tools(ctx: typer.Context) -> Tuple[str, ConfigService]:
+def _get_config_tools(ctx: typer.Context) -> tuple[str, ConfigService]:
     """Extrae las herramientas necesarias para cualquier comando de configuracion que requieran un perfil."""
     state: CLIState = ctx.obj
     state.announce_profile()
@@ -84,7 +84,7 @@ def _command_modify_list(
     settings_name: str,
     service: ConfigService,
     key: str,
-    values: List[str],
+    values: list[str],
     action: Literal["add", "remove"],
 ):
     verb = "agregar" if action == "add" else "eliminar"
@@ -134,7 +134,7 @@ def main(ctx: typer.Context):
 @handle_config_errors
 def set_configs(
     ctx: typer.Context,
-    args: List[str] = typer.Argument(
+    args: list[str] = typer.Argument(
         ..., help="Pares de CLAVE VALOR (ej: chat_id 12345 upload_limit_rate_kbps 500)"
     ),
     force: bool = typer.Option(
@@ -190,7 +190,7 @@ def unset_config(
 def add_config(
     ctx: typer.Context,
     key: str,
-    values: List[str] = typer.Argument(
+    values: list[str] = typer.Argument(
         ..., min=1, callback=lambda x: [validate_item(i) for i in x]
     ),
 ):
@@ -203,7 +203,7 @@ def add_config(
 def remove_config(
     ctx: typer.Context,
     key: str,
-    values: List[str] = typer.Argument(
+    values: list[str] = typer.Argument(
         ..., min=1, callback=lambda x: [validate_item(i) for i in x]
     ),
 ):

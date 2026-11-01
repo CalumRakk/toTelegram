@@ -1,6 +1,6 @@
 import json
 import logging
-from typing import TYPE_CHECKING, List, cast
+from typing import TYPE_CHECKING, cast
 
 import peewee
 
@@ -33,8 +33,8 @@ class ChunkRelocator:
         client: "Client",
         db: peewee.Database,
         chat_id: int | str,
-        remotes: List[RemotePayload],
-    ) -> List[RemotePayload]:
+        remotes: list[RemotePayload],
+    ) -> list[RemotePayload]:
         """
         Reubica una lista de RemotePayload al fondo del chat de destino.
 
@@ -129,7 +129,7 @@ class ChunkRelocator:
 
     @staticmethod
     def _rollback_messages(
-        client: "Client", chat_id: int | str, message_ids: List[int]
+        client: "Client", chat_id: int | str, message_ids: list[int]
     ) -> None:
         """Intenta eliminar mensajes provisionales en caso de fallo."""
         if not message_ids:

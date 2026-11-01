@@ -4,7 +4,7 @@ Permite encapsular metadatos de presentación (título, hint, comandos sugeridos
 """
 
 from pathlib import Path
-from typing import List, Literal
+from typing import Literal
 
 SeverityLevel = Literal["info", "warning", "error"]
 
@@ -24,7 +24,7 @@ class ToTelegramError(Exception):
         exit_code: int = 1,
         title: str | None = None,
         hint: str | None = None,
-        suggested_commands: List[str] | None = None,
+        suggested_commands: list[str] | None = None,
         severity: SeverityLevel = "error",
     ):
         super().__init__(message)
@@ -64,7 +64,7 @@ class OperationAbortNotice(ToTelegramError):
         exit_code: int = 0,
         title: str | None = None,
         hint: str | None = None,
-        suggested_commands: List[str] | None = None,
+        suggested_commands: list[str] | None = None,
         severity: SeverityLevel = "info",
     ):
         super().__init__(

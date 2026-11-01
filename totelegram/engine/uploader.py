@@ -1,6 +1,6 @@
 import logging
 import random
-from typing import BinaryIO, List, cast
+from typing import BinaryIO, cast
 
 from pyrogram.types import Message
 
@@ -124,7 +124,7 @@ class CooperativeUploader:
             message=f"Subida cooperativa finalizada ({pieces_uploaded} piezas subidas).",
         )
 
-    def _calculate_pause_seconds(self, pause_range: List[int]) -> int:
+    def _calculate_pause_seconds(self, pause_range: list[int]) -> int:
         if not pause_range or pause_range == [0, 0]:
             return 0
         min_p = min(pause_range)

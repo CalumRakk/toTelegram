@@ -3,7 +3,7 @@ import re
 import time
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, List, Literal
+from typing import Any, Literal
 
 from rich.columns import Columns
 from rich.console import Console
@@ -185,7 +185,7 @@ class UI:
     @staticmethod
     def tip(
         message: str,
-        commands: List[str] | str | None = None,
+        commands: list[str] | str | None = None,
         spacing: Spacing = None,
         **kwargs,
     ):
@@ -201,7 +201,7 @@ class UI:
     def educational_tip(
         message: str,
         title: str | None = None,
-        commands: List[str] | str | None = None,
+        commands: list[str] | str | None = None,
         spacing: Spacing = None,
         border_style: str = "cyan",
     ):

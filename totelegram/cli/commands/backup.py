@@ -1,5 +1,4 @@
 from pathlib import Path
-from typing import List
 
 import typer
 
@@ -10,7 +9,7 @@ from totelegram.cli.logic import run_upload_flow
 @handle_config_errors
 def backup_folders(
     ctx: typer.Context,
-    paths: List[Path] = typer.Argument(
+    paths: list[Path] = typer.Argument(
         ...,
         exists=True,
         help="Lista de carpetas a archivar",

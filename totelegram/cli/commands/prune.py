@@ -1,6 +1,5 @@
 import logging
 from pathlib import Path
-from typing import List
 
 import typer
 
@@ -68,7 +67,7 @@ def prune_files(
                 raise typer.Exit(1)
 
     target_dir = path.resolve()
-    dirs_to_scan: List[Path] = [target_dir]
+    dirs_to_scan: list[Path] = [target_dir]
 
     if recursive:
         dirs_to_scan.extend(
@@ -77,7 +76,7 @@ def prune_files(
             if d.is_dir() and not d.name.startswith(".")
         )
 
-    candidates: List[FileAuditResult] = []
+    candidates: list[FileAuditResult] = []
 
     with console.status(
         "[bold cyan]Auditando recibos locales (.totelegram.json)...[/]"

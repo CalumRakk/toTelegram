@@ -1,12 +1,11 @@
 import keyword
 import logging
 from pathlib import Path
-from typing import List
 
 logger = logging.getLogger(__name__)
 
 
-def is_excluded(path: Path, patterns: List[str]) -> bool:
+def is_excluded(path: Path, patterns: list[str]) -> bool:
     """Devuelve True si el path debe ser excluido según las reglas."""
     if not path.exists():
         logger.info(f"No existe: {path}, se omite")
@@ -56,7 +55,7 @@ def is_valid_profile_name(profile_name: str) -> bool:
     return profile_name.isidentifier() and not keyword.iskeyword(profile_name)
 
 
-def is_suspected_glob_expansion(values: List[str]) -> bool:
+def is_suspected_glob_expansion(values: list[str]) -> bool:
     """Devuelve True si la terminal expandió un comodín localmente."""
     if not values:
         return False

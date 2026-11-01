@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import TYPE_CHECKING, List
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, Field
 
@@ -54,11 +54,11 @@ class ChatResolution(BaseModel):
         default=None,
         description="El chat que cumple estrictamente los criterios y no tiene rivales.",
     )
-    conflicts: List[ChatMatch] = Field(
+    conflicts: list[ChatMatch] = Field(
         default_factory=list,
         description="Chats que cumplen los criterios pero generan ambigüedad (ej. nombres duplicados).",
     )
-    suggestions: List[ChatMatch] = Field(
+    suggestions: list[ChatMatch] = Field(
         default_factory=list,
         description="Chats que no cumplen el criterio estricto pero son similares o parciales.",
     )
@@ -78,9 +78,9 @@ class ChatResolution(BaseModel):
         """Indica si no hubo un ganador, pero existen sugerencias disponibles."""
         return self.winner is None and len(self.suggestions) > 0
 
-    def all_unique_matches(self) -> List[ChatMatch]:
+    def all_unique_matches(self) -> list[ChatMatch]:
         """Devuelve una lista combinada de ganador, conflictos y sugerencias sin duplicados."""
-        all_matches: List[ChatMatch] = []
+        all_matches: list[ChatMatch] = []
         if self.winner:
             all_matches.append(self.winner)
         all_matches.extend(self.conflicts)
@@ -113,7 +113,7 @@ class TargetResolution(BaseModel):
     chat_id: int | str | None = None
     title: str | None = None
     match: ChatMatch | None = None
-    candidates: List[ChatMatch] = Field(default_factory=list)
+    candidates: list[ChatMatch] = Field(default_factory=list)
     error_message: str | None = None
     hint: str | None = None
 

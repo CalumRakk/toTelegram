@@ -1,13 +1,13 @@
 import json
 import sys
 from datetime import datetime, timezone
-from typing import Any, Iterable, List
+from typing import Any, Iterable
 
 if sys.version_info >= (3, 12):
     from itertools import batched
 else:
 
-    def batched(iterable: List[Any], n: int) -> Iterable[Any]:
+    def batched(iterable: list[Any], n: int) -> Iterable[Any]:
         """Fallback para Python < 3.12."""
         import itertools
 
@@ -43,7 +43,7 @@ def get_type_annotation(field: Any) -> str:
     return type_name
 
 
-def parse_comma_list(value: Any) -> List[str]:
+def parse_comma_list(value: Any) -> list[str]:
     """Convierte un string separado por comas o representación JSON en una lista."""
     if isinstance(value, list):
         return value

@@ -6,7 +6,6 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict
 
 import peewee
 from pydantic import BaseModel, Field
@@ -27,7 +26,7 @@ class FileAuditResult:
     is_on_disk: bool
     is_backed_up: bool
     is_modified: bool
-    destinations: Dict[str, "BackupDestinationRecord"]
+    destinations: dict[str, "BackupDestinationRecord"]
 
     @property
     def is_safe_to_prune(self) -> bool:
@@ -66,7 +65,7 @@ class FileReceiptEntry(BaseModel):
     md5: str
     size: int
     mtime: float
-    destinations: Dict[str, BackupDestinationRecord] = Field(default_factory=dict)
+    destinations: dict[str, BackupDestinationRecord] = Field(default_factory=dict)
 
     def is_fresh(self, current_size: int, current_mtime: float) -> bool:
         """Determina si el archivo en disco no ha cambiado desde que se registró."""
@@ -79,7 +78,7 @@ class DirectoryReceipt(BaseModel):
     """Manifiesto unificado de recibos para todos los archivos dentro de un directorio."""
 
     version: int = LEDGER_SCHEMA_VERSION
-    entries: Dict[str, FileReceiptEntry] = Field(default_factory=dict)
+    entries: dict[str, FileReceiptEntry] = Field(default_factory=dict)
 
 
 class ReceiptLedger:

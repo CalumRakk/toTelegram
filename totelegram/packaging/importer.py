@@ -7,7 +7,7 @@ import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable, List, Tuple, cast
+from typing import TYPE_CHECKING, Callable, cast
 
 from totelegram.packaging.publisher import SnapshotPublicationError, SnapshotPublisher
 from totelegram.telegram.captions import ManifestCaption
@@ -79,7 +79,7 @@ class RehydrationResult:
 
     succeeded_count: int
     total_processed: int
-    errors: List[Tuple[str, str]] = field(default_factory=list)
+    errors: list[tuple[str, str]] = field(default_factory=list)
 
     @property
     def is_success(self) -> bool:
@@ -162,7 +162,7 @@ class PlanItem:
     target_chat_id: int
     total_parts: int
     mutations: DbMutations
-    parts_diff: List[PartDiff] = field(default_factory=list)
+    parts_diff: list[PartDiff] = field(default_factory=list)
     existing_source: Source | None = None
     existing_job: Job | None = None
     reason: str = ""
@@ -189,15 +189,15 @@ class ImportPlan:
     synced_count: int = 0
 
     # Accionables: los que tienen mutaciones reales y van a la tabla
-    items: List[PlanItem] = field(default_factory=list)
+    items: list[PlanItem] = field(default_factory=list)
 
     # Conflictos: discrepancias estructurales que bloquean la importación
-    conflicts: List[PlanItem] = field(default_factory=list)
+    conflicts: list[PlanItem] = field(default_factory=list)
 
     # Atención requerida externa
-    needs_upgrade_items: List[SnapshotInspection] = field(default_factory=list)
-    ahead_items: List[SnapshotInspection] = field(default_factory=list)
-    corrupted_items: List[SnapshotInspection] = field(default_factory=list)
+    needs_upgrade_items: list[SnapshotInspection] = field(default_factory=list)
+    ahead_items: list[SnapshotInspection] = field(default_factory=list)
+    corrupted_items: list[SnapshotInspection] = field(default_factory=list)
 
     @property
     def total_scanned(self) -> int:
@@ -211,12 +211,12 @@ class ImportPlan:
         )
 
     @property
-    def actionable_items(self) -> List[PlanItem]:
+    def actionable_items(self) -> list[PlanItem]:
         """Solo aquellos que realmente escribirán en la base de datos."""
         return [i for i in self.items if i.mutations.has_changes]
 
     @property
-    def partial_items(self) -> List[PlanItem]:
+    def partial_items(self) -> list[PlanItem]:
         """Aquellos que tienen piezas mixtas (alimentarán el árbol de detalles)."""
         return [i for i in self.items if i.is_partial]
 
@@ -326,7 +326,7 @@ class SnapshotInspector:
         )
 
     @classmethod
-    def find_all_candidates(cls, paths: List[Path]) -> List[Path]:
+    def find_all_candidates(cls, paths: list[Path]) -> list[Path]:
         valid_exts = (".json.xz", ".ttape")
         candidates = []
         for p in paths:
@@ -345,11 +345,11 @@ class SnapshotImportPlanner:
     """Calcula un plan determinista de importación cruzando los snapshots con el estado actual de la BD."""
 
     @classmethod
-    def plan(cls, inspections: List[SnapshotInspection]) -> ImportPlan:
+    def plan(cls, inspections: list[SnapshotInspection]) -> ImportPlan:
         plan = ImportPlan()
 
         planned_sources_md5: set[str] = set()
-        planned_jobs: set[Tuple[str, int]] = set()
+        planned_jobs: set[tuple[str, int]] = set()
 
         for insp in inspections:
             if insp.status == InspectionStatus.NEEDS_UPGRADE:
@@ -472,7 +472,7 @@ class SnapshotImportPlanner:
                 )
             }
 
-            parts_diff: List[PartDiff] = []
+            parts_diff: list[PartDiff] = []
             has_conflict = False
             conflict_reason = ""
 
@@ -610,10 +610,10 @@ class SnapshotImporter:
         on_progress: Callable[[int, int, str], None] | None = None,
         snapshot_message_id: int | None = None,
         client: "Client | None" = None,
-    ) -> Tuple[int, List[Tuple[str, str]]]:
+    ) -> tuple[int, list[tuple[str, str]]]:
         actionable = plan.actionable_items
         succeeded = 0
-        errors: List[Tuple[str, str]] = []
+        errors: list[tuple[str, str]] = []
 
         for idx, item in enumerate(actionable, 1):
             try:
@@ -730,7 +730,7 @@ class SnapshotImporter:
         # Comprobar si ya existe publicado en Telegram
         try:
             found_msgs = cast(
-                List[Message],
+                list[Message],
                 list(
                     client.search_messages(
                         chat_id=job.chat.id,
@@ -976,7 +976,7 @@ class SnapshotImporter:
     def rehydrate_from_messages(
         cls,
         client: "Client",
-        messages: List["Message"],
+        messages: list["Message"],
         db: peewee.Database,
         owner: TelegramUser | None = None,
         on_progress: Callable[[int, int, str], None] | None = None,
@@ -1003,8 +1003,8 @@ class SnapshotImporter:
                 )
 
         total_processed = len(messages)
-        inspections: List[SnapshotInspection] = []
-        errors: List[Tuple[str, str]] = []
+        inspections: list[SnapshotInspection] = []
+        errors: list[tuple[str, str]] = []
 
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_dir_path = Path(temp_dir)

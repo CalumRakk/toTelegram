@@ -1,6 +1,6 @@
 import logging
 from pathlib import Path
-from typing import Tuple, cast
+from typing import cast
 
 from totelegram.identity import DEFAULT_TG_API_HASH, DEFAULT_TG_API_ID
 from totelegram.telegram.client import TelegramSession
@@ -21,7 +21,7 @@ class AuthLogic:
         self.api_hash = api_hash or DEFAULT_TG_API_HASH
         self.workdir = Path(workdir) if workdir else Path(".")
 
-    def run_auth_flow(self) -> Tuple[Path, int, str]:
+    def run_auth_flow(self) -> tuple[Path, int, str]:
         """
         Inicia el flujo interactivo de autenticación de Pyrogram.
         Retorna:

@@ -5,7 +5,6 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import List
 
 import peewee
 
@@ -217,7 +216,7 @@ def _initialize_fresh_database(db: peewee.Database, target_version: int):
     if db_proxy.obj != db:
         db_proxy.initialize(db)
 
-    models: List[type[peewee.Model]] = [
+    models: list[type[peewee.Model]] = [
         SchemaVersion,
         Source,
         Job,

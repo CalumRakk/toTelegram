@@ -1,5 +1,5 @@
 import logging
-from typing import List, cast
+from typing import cast
 
 import typer
 from pyrogram import enums
@@ -60,7 +60,7 @@ def index_tapes(
         if force:
             try:
                 messages_to_process = cast(
-                    List[Message],
+                    list[Message],
                     list(
                         client.search_messages(
                             chat_id=settings.chat_id,
