@@ -10,6 +10,7 @@
 - Ordenar la subida en el canal/grupo cuando no es secuencial.
 - Al importar snapshots se deberia actualizar el caption de cada chunk
 - verificar si se puede especificar otra ruta para la DB
+- Bug con la purga de archivos locales.
 
 ## Legacy
 - migrar implica llevar los snapthos  a una version adecuada, y luego esos se migran. Además, hay snapshots tar que no tienen la db .tartape ¿que se hace aqui?

@@ -55,7 +55,6 @@ def apply_pyrogram_patches():
             if path is None:
                 return None
 
-            # Definimos la queue antes del worker, por las dudas.
             queue = asyncio.Queue(1)
 
             async def worker(session):
@@ -66,14 +65,13 @@ def apply_pyrogram_patches():
                 while True:
                     data = await queue.get()
                     if data is None:
+                        queue.task_done()
                         return
 
-                    # Bucle de reintento interno para este trozo
                     while True:
                         try:
                             await session.invoke(data)
 
-                            # Reemplazamos el status de la barra de progreso
                             if (
                                 progress_args and hasattr(progress_args[0], "status")
                             ) and "Limitado" in progress_args[0].status:
@@ -85,14 +83,12 @@ def apply_pyrogram_patches():
                                 f"FloodWait detectado en worker: esperando {total_wait} segundos..."
                             )
 
-                            # Bucle de espera segmentada (Late cada 10 segundos)
                             PULSE_INTERVAL = 10
                             remaining_wait = total_wait
 
                             while remaining_wait > 0:
                                 sleep_chunk = min(remaining_wait, PULSE_INTERVAL)
 
-                                # Actualizar el estado visual con la cuenta regresiva
                                 if progress_args and hasattr(
                                     progress_args[0], "status"
                                 ):
@@ -102,7 +98,6 @@ def apply_pyrogram_patches():
                                         f"[bold magenta]Limitado ({remaining_wait}s)[/]"
                                     )
 
-                                # Notificar al callback de progreso
                                 if progress:
                                     current_progress = file_part * part_size
                                     if inspect.iscoroutinefunction(progress):
@@ -118,13 +113,16 @@ def apply_pyrogram_patches():
                                             *progress_args,
                                         )
 
-                                # Dormir solo un pequeño intervalo
                                 await asyncio.sleep(sleep_chunk)
                                 remaining_wait -= sleep_chunk
 
-                            # Al terminar la espera, restauramos el estado
                             if progress_args and hasattr(progress_args[0], "status"):
                                 progress_args[0].status = "[blue]Subiendo...[/]"
+                        except Exception as e:
+                            # Captura fallos de red / timeout (ej: tras 10 reintentos)
+                            queue.task_done()
+                            logger.error(f"Fallo en worker de subida de Pyrogram: {e}")
+                            raise
 
                     queue.task_done()
 
@@ -174,9 +172,35 @@ def apply_pyrogram_patches():
             workers = [
                 self.loop.create_task(worker(session)) for _ in range(workers_count)
             ]
+
+            async def safe_put(item):
+                """Introduce un elemento en la cola vigilando activamente que los workers sigan vivos."""
+                # Si algún worker ya murió antes de intentar encolar, fallar inmediatamente
+                for w in workers:
+                    if w.done():
+                        exc = w.exception()
+                        raise exc or RuntimeError(
+                            "Worker de subida terminó inesperadamente."
+                        )
+
+                put_task = asyncio.create_task(queue.put(item))
+                # Esperar a que entre en la cola O a que algún worker falle
+                await asyncio.wait(
+                    [put_task, *workers],
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+
+                # Si un worker murió mientras esperábamos hueco en la cola, despertar y lanzar su error
+                for w in workers:
+                    if w.done():
+                        put_task.cancel()
+                        exc = w.exception()
+                        raise exc or RuntimeError(
+                            "Worker de subida terminó inesperadamente."
+                        )
+
             try:
                 await session.start()
-
                 fp.seek(part_size * file_part)
 
                 while True:
@@ -201,7 +225,8 @@ def apply_pyrogram_patches():
                             file_id=file_id, file_part=file_part, bytes=chunk
                         )
 
-                    await queue.put(rpc)
+                    # Encolado seguro anti-deadlock
+                    await safe_put(rpc)
 
                     if is_missing_part:
                         return
@@ -223,13 +248,17 @@ def apply_pyrogram_patches():
                             await func()
                         else:
                             await self.loop.run_in_executor(self.executor, func)
+
+                # Notificar fin a los workers y esperar a que terminen de transmitir el último bloque
+                for _ in workers:
+                    await safe_put(None)
+                await asyncio.gather(*workers)
+
             except StopTransmission:
                 raise
             except Exception as e:
                 logger.error(f"Error en save_file (parcheado): {e}")
-                # Elevo la excepción para evitar ser silenciada, y con la esperanza que llegue a buen puerto.
                 raise
-
             else:
                 if is_big:
                     return raw.types.InputFileBig(  # type: ignore
@@ -245,10 +274,11 @@ def apply_pyrogram_patches():
                         md5_checksum=md5_sum,  # type: ignore
                     )
             finally:
-                for _ in workers:
-                    await queue.put(None)
-
-                await asyncio.gather(*workers)
+                # Cancelar workers residuales en caso de salida por excepción
+                for w in workers:
+                    if not w.done():
+                        w.cancel()
+                await asyncio.gather(*workers, return_exceptions=True)
 
                 await session.stop()
 
