@@ -4,7 +4,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from tartape import calculate_file_slices
 from tartape.exceptions import (
     PathConstraintError,
     TarIntegrityError,
@@ -142,16 +141,15 @@ class DownloadEngine:
         )
 
         file_size: int = 0
-        start_offset: int = 0
         expected_checksum: str | None = None
         tartape_slices: list[FileSlice] = []
 
         if is_ttape and snapshot_path:
-            # Consulta O(1) en catalog.tartape dentro de .ttape
-            with TapeContainer.open_catalog(snapshot_path) as cat, cat.db_session:
+            # Consulta quirúrgica O(1) vía API de TarTape
+            with TapeContainer.open_catalog(snapshot_path) as cat:
                 try:
-                    track = Track.get(Track.arc_path == relative_path)
-                except Track.DoesNotExist:  # type: ignore
+                    track = cat.get_track(relative_path)
+                except KeyError:
                     raise FileNotFoundError(
                         f"El archivo '{relative_path}' no fue encontrado en el catálogo de la cinta."
                     )
@@ -161,12 +159,9 @@ class DownloadEngine:
                         f"'{relative_path}' es un directorio, no un archivo regular."
                     )
 
-                file_size = track.size
-                start_offset = track.start_offset or 0
-                expected_checksum = track.checksum
-
-                # CASO LÍMITE: Si el archivo mide 0 bytes (ej: __init__.py, .gitkeep), no cruza ningún volumen TAR
-                if file_size == 0:
+                # CASO LÍMITE: Archivo vacío (0 bytes)
+                # Se restaura inmediatamente sin necesidad de proyectar cortes ni consultar volúmenes
+                if track.size == 0:
                     target_file.touch()
                     logger.info(
                         f"Archivo vacío '{relative_path}' restaurado directamente (0 bytes)."
@@ -180,11 +175,11 @@ class DownloadEngine:
                         message=f"Archivo vacío '{relative_path}' restaurado directamente.",
                     )
 
-            tartape_slices = calculate_file_slices(
-                start_offset=start_offset,
-                file_size=file_size,
-                volume_size=manifest.chunk_size,
-            )
+                gps = cat.locate(relative_path, tag_or_size=manifest.chunk_size)
+                file_size = gps.file_size
+                expected_checksum = gps.checksum
+                tartape_slices = gps.fragments
+
         else:
             raise FileNotFoundError(
                 f"No se pudo resolver el catálogo de la cinta para '{relative_path}'. Se requiere un archivo .ttape válido."

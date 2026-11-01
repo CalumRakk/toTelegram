@@ -1,8 +1,6 @@
 
 # CARPETAS
 
-tests/manual
-tests/manual_real.py
 .env/
 env/
 .venv/

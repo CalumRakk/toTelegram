@@ -24,9 +24,14 @@ class JobPlanner:
         force: bool = False,
         auto_truncate: bool = False,
     ) -> Job:
+        # Si forzamos, limpiamos snapshots o catálogos residuales ANTES de generar los nuevos
+        if force:
+            delete_snapshot(path)
+
         chat_db, _ = TelegramChat.get_or_create_from_chat(session.tg_chat)
         obs = observer or NullObserver()
 
+        # Ahora sí, se genera el Source y su catálogo .tartape limpio
         if path.is_dir():
             source = cls._resolve_folder_source(path, session, force, auto_truncate)
         else:
@@ -34,9 +39,6 @@ class JobPlanner:
 
         # Buscamos si existe un Job previo en este chat (incompleto o completado)
         existing_job = Job.get_for_source_in_chat(source, chat_db)
-
-        if force:
-            delete_snapshot(path)
 
         if existing_job:
             job = existing_job

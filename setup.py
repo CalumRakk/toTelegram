@@ -24,7 +24,7 @@ setup(
         "TgCrypto>=1.2.5",
         "typer>=0.21.1",
         "filelock>=3.20.3",
-        "tartape>=3.0.4",
+        "tartape>=3.0.6",
     ],
     packages=find_packages(),
     entry_points={

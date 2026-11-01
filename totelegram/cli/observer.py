@@ -70,7 +70,7 @@ class RichUploadObserver:
 
         panel = Panel(
             "\n".join(lines),
-            title="[bold yellow]⚠️ Posible duplicado en Telegram[/bold yellow]",
+            title="[bold yellow]Posible duplicado en Telegram[/bold yellow]",
             border_style="yellow",
             padding=(1, 2),
         )
