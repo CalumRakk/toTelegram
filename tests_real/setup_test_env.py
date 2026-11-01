@@ -281,7 +281,7 @@ def setup_test_env():
 
     console.print("Ya puedes ejecutar los tests de integración ejecutando:")
     console.print(
-        '  [bold yellow]python3 -m unittest discover -s tests/manual -p "test_real_*.py" -v[/]\n'
+        '  [bold yellow]python3 -m unittest discover -s tests_real -p "test_real_*.py" -v[/]\n'
     )
 
 

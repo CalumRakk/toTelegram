@@ -71,7 +71,7 @@ class RealTelegramTestCase(unittest.TestCase):
             cls._skip_with_panel(
                 reason=f"Entorno de pruebas no configurado en: {TEST_WORKSPACE}",
                 details="Estos tests realizan transferencias reales y requieren una sesión y canal dedicados.",
-                command="python3 tests/manual/setup_test_env.py",
+                command="python3 tests_real/setup_test_env.py",
             )
 
         cls.manager = SettingsManager(TEST_WORKSPACE)
@@ -82,7 +82,7 @@ class RealTelegramTestCase(unittest.TestCase):
             cls._skip_with_panel(
                 reason=f"El perfil '{TEST_PROFILE_NAME}' no existe o está incompleto en {TEST_WORKSPACE}.",
                 details="Falta el archivo de sesión .session o la configuración .json.",
-                command="python3 tests/manual/setup_test_env.py",
+                command="python3 tests_real/setup_test_env.py",
             )
 
         cls.settings = cls.manager.get_settings(TEST_PROFILE_NAME)
@@ -92,7 +92,7 @@ class RealTelegramTestCase(unittest.TestCase):
             cls._skip_with_panel(
                 reason="No hay un chat_id de pruebas configurado.",
                 details="Se necesita un canal o grupo privado dedicado para verificar subidas.",
-                command="python3 tests/manual/setup_test_env.py",
+                command="python3 tests_real/setup_test_env.py",
             )
 
         # Iniciar cliente Pyrogram
@@ -108,7 +108,7 @@ class RealTelegramTestCase(unittest.TestCase):
             cls._skip_with_panel(
                 reason=f"No se pudo conectar a Telegram: {e}",
                 details="Verifica tu conexión a Internet o que la sesión no haya sido revocada.",
-                command="python3 tests/manual/setup_test_env.py",
+                command="python3 tests_real/setup_test_env.py",
             )
 
         # Iniciar sesión de base de datos aislada
@@ -131,7 +131,7 @@ class RealTelegramTestCase(unittest.TestCase):
             cls._skip_with_panel(
                 reason=f"Error validando el chat o cuenta de pruebas en Telegram: {e}",
                 details="Asegúrate de que la cuenta tenga acceso al chat configurado.",
-                command="python3 tests/manual/setup_test_env.py",
+                command="python3 tests_real/setup_test_env.py",
             )
 
     @classmethod

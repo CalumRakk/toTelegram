@@ -31,11 +31,11 @@ Para proteger las credenciales personales y la base de datos de producción:
 Ejecuta el script interactivo desde la raíz del proyecto:
 
 ```bash
-python tests/manual/setup_test_env.py
+python tests_real/setup_test_env.py
 
 # O
 
-python3 tests/manual/setup_test_env.py
+python3 tests_real/setup_test_env.py
 ```
 
 El script te guiará para:
@@ -50,13 +50,13 @@ El script te guiará para:
 Para ejecutar todos los tests reales disponibles:
 
 ```bash
-python3 -m unittest discover -s tests/manual -p "test_real_*.py" -v
+python3 -m unittest discover -s tests_real -p "test_real_*.py" -v
 ```
 
 Para ejecutar un test específico:
 
 ```bash
-python3 -m unittest tests/manual/test_real_file_pipeline.py -v
+python3 -m unittest tests_real/test_real_file_pipeline.py -v
 ```
 
 > **Nota:** Si ejecutas los tests sin haber configurado el entorno previamente, `unittest` los saltará automáticamente (`Skipped`) con un aviso explicativo.
@@ -68,5 +68,5 @@ python3 -m unittest tests/manual/test_real_file_pipeline.py -v
 Para cerrar la sesión en Telegram y eliminar los archivos locales:
 
 ```bash
-python tests/manual/setup_test_env.py --clean
+python tests_real/setup_test_env.py --clean
 ```
