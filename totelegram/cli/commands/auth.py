@@ -198,6 +198,12 @@ def status_command(
         "-t",
         help="Filtrar auditoría por un destino de Telegram específico.",
     ),
+    recursive: bool = typer.Option(
+        False,
+        "--recursive",
+        "-r",
+        help="Auditar subdirectorios recursivamente mostrando rutas relativas.",
+    ),
 ):
     """
     Muestra el estado de la cuenta activa o audita los archivos respaldados de una carpeta local.
@@ -229,7 +235,7 @@ def status_command(
 
         with state.scope() as (_client, _db):
             audit_list = LocalAuditService.audit_path(
-                target_path, target_chat_id=resolved_chat_id
+                target_path, target_chat_id=resolved_chat_id, recursive=recursive
             )
 
         display_dir = target_path if target_path.is_dir() else target_path.parent

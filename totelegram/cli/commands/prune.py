@@ -6,7 +6,7 @@ import typer
 from totelegram.cli.state import CLIState
 from totelegram.cli.ui import UI, console
 from totelegram.cli.views.ledger import DisplayLedger
-from totelegram.packaging.auditor import AuditItem, LocalAuditService
+from totelegram.packaging.auditor import LocalAuditService
 from totelegram.telegram.resolver import TargetResolver
 from totelegram.telegram.types import TargetResolutionStatus
 
@@ -67,16 +67,6 @@ def prune_files(
                 raise typer.Exit(1)
 
     target_dir = path.resolve()
-    dirs_to_scan: list[Path] = [target_dir]
-
-    if recursive:
-        dirs_to_scan.extend(
-            d
-            for d in target_dir.rglob("*")
-            if d.is_dir() and not d.name.startswith(".")
-        )
-
-    candidates: list[AuditItem] = []
 
     with (
         state.scope() as (_client, _db),
@@ -84,13 +74,10 @@ def prune_files(
             "[bold cyan]Auditando estado contra la base de datos local...[/]"
         ),
     ):
-        for d in dirs_to_scan:
-            audit_list = LocalAuditService.audit_path(
-                d, target_chat_id=resolved_target_id
-            )
-            for item in audit_list:
-                if item.is_safe_to_prune:
-                    candidates.append(item)
+        audit_list = LocalAuditService.audit_path(
+            target_dir, target_chat_id=resolved_target_id, recursive=recursive
+        )
+        candidates = [item for item in audit_list if item.is_safe_to_prune]
 
     if not candidates:
         target_info = f" para el destino '{target}'" if target else ""

@@ -3,7 +3,10 @@ import time
 import unittest
 from pathlib import Path
 
-from totelegram.database import DatabaseSession
+import peewee
+
+from totelegram.database import DatabaseSession, db_proxy
+from totelegram.migration import setup_database_schema
 from totelegram.models import (
     Job,
     Payload,
@@ -15,6 +18,218 @@ from totelegram.models import (
 )
 from totelegram.packaging.auditor import AuditStatus, LocalAuditService
 from totelegram.schemas import SourceType
+
+
+class TestLocalAuditorSubdirectoryIsolation(unittest.TestCase):
+    def setUp(self):
+        self.test_db = peewee.SqliteDatabase(":memory:")
+        db_proxy.initialize(self.test_db)
+        setup_database_schema(self.test_db)
+
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.base_path = Path(self.temp_dir.name).resolve()
+
+        # Crear estructura:
+        # base_path/
+        #   ├── root_file.mkv
+        #   └── Tell-Tale-Heart/
+        #         └── Tell-Tale-Heart-pt1.mp4
+        self.root_file = self.base_path / "root_file.mkv"
+        self.root_file.write_bytes(b"A" * 1024)
+
+        self.sub_dir = self.base_path / "Tell-Tale-Heart"
+        self.sub_dir.mkdir()
+        self.sub_file = self.sub_dir / "Tell-Tale-Heart-pt1.mp4"
+        self.sub_file.write_bytes(b"B" * 2048)
+
+        # Crear registros en base de datos
+        self.chat = TelegramChat.create(id=1001, title="Media 2", type="channel")
+        self.user = TelegramUser.create(id=2001, first_name="Tester")
+
+        # 1. Registrar y respaldar root_file
+        self.source_root = Source.get_or_create_from_filepath(self.root_file)
+        self.job_root = Job.create(
+            source=self.source_root, chat=self.chat, chunk_size=2000 * 1024 * 1024
+        )
+        self.payload_root = Payload.create(
+            job=self.job_root,
+            sequence_index=0,
+            filename=self.root_file.name,
+            filename_short=self.root_file.name,
+            start_offset=0,
+            end_offset=1024,
+            size=1024,
+        )
+        RemotePayload.create(
+            payload=self.payload_root,
+            message_id=50,
+            chat=self.chat,
+            owner=self.user,
+            json_metadata={},
+        )
+        RemoteSnapshot.register(self.job_root, 51, self.chat, self.user)
+
+        # 2. Registrar y respaldar sub_file (dentro de Tell-Tale-Heart)
+        self.source_sub = Source.get_or_create_from_filepath(self.sub_file)
+        self.job_sub = Job.create(
+            source=self.source_sub, chat=self.chat, chunk_size=2000 * 1024 * 1024
+        )
+        self.payload_sub = Payload.create(
+            job=self.job_sub,
+            sequence_index=0,
+            filename=self.sub_file.name,
+            filename_short=self.sub_file.name,
+            start_offset=0,
+            end_offset=2048,
+            size=2048,
+        )
+        RemotePayload.create(
+            payload=self.payload_sub,
+            message_id=60,
+            chat=self.chat,
+            owner=self.user,
+            json_metadata={},
+        )
+        RemoteSnapshot.register(self.job_sub, 61, self.chat, self.user)
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+        if not self.test_db.is_closed():
+            self.test_db.close()
+
+    def test_shallow_audit_does_not_leak_subfolder_files(self):
+        """Verifica que el escaneo de primer nivel no muestre archivos de subcarpetas."""
+        items = LocalAuditService.audit_path(self.base_path)
+        items_by_name = {item.filename: item for item in items}
+
+        # En la raíz SOLO deben existir 'root_file.mkv' y la carpeta 'Tell-Tale-Heart'
+        self.assertIn("root_file.mkv", items_by_name)
+        self.assertIn("Tell-Tale-Heart", items_by_name)
+
+        # El archivo de la subcarpeta NO debe figurar aquí ni como BACKED_UP ni como REMOTE_ONLY
+        self.assertNotIn("Tell-Tale-Heart-pt1.mp4", items_by_name)
+
+        # Verificar estados
+        self.assertEqual(items_by_name["root_file.mkv"].status, AuditStatus.BACKED_UP)
+        self.assertEqual(items_by_name["Tell-Tale-Heart"].status, AuditStatus.DIRECTORY)
+
+    def test_shallow_audit_inside_subdirectory(self):
+        """Verifica que al auditar directamente la subcarpeta, sus archivos sí aparezcan respaldados."""
+        items = LocalAuditService.audit_path(self.sub_dir)
+        items_by_name = {item.filename: item for item in items}
+
+        self.assertIn("Tell-Tale-Heart-pt1.mp4", items_by_name)
+        self.assertEqual(
+            items_by_name["Tell-Tale-Heart-pt1.mp4"].status, AuditStatus.BACKED_UP
+        )
+        self.assertNotIn("root_file.mkv", items_by_name)
+
+    def test_remote_only_applies_strictly_to_direct_children(self):
+        """Verifica que borrar un archivo en raíz solo marque ese como REMOTE_ONLY sin filtrar los de subcarpetas."""
+        # Eliminamos el archivo raíz del disco
+        self.root_file.unlink()
+
+        items = LocalAuditService.audit_path(self.base_path)
+        items_by_name = {item.filename: item for item in items}
+
+        # root_file.mkv ahora es REMOTE_ONLY
+        self.assertIn("root_file.mkv", items_by_name)
+        self.assertEqual(items_by_name["root_file.mkv"].status, AuditStatus.REMOTE_ONLY)
+
+        # Tell-Tale-Heart sigue siendo un Directorio neutral
+        self.assertEqual(items_by_name["Tell-Tale-Heart"].status, AuditStatus.DIRECTORY)
+
+        # Tell-Tale-Heart-pt1.mp4 SIGUE sin aparecer en el nivel raíz
+        self.assertNotIn("Tell-Tale-Heart-pt1.mp4", items_by_name)
+
+    def test_recursive_audit_shows_subfolder_files_with_relative_paths(self):
+        """Verifica que con recursive=True se auditen archivos de subcarpetas con ruta relativa."""
+        items = LocalAuditService.audit_path(self.base_path, recursive=True)
+        items_by_name = {item.filename: item for item in items}
+
+        # En modo recursivo deben figurar ambos archivos
+        self.assertIn("root_file.mkv", items_by_name)
+        expected_sub_rel = str(Path("Tell-Tale-Heart") / "Tell-Tale-Heart-pt1.mp4")
+        self.assertIn(expected_sub_rel, items_by_name)
+
+        self.assertEqual(items_by_name["root_file.mkv"].status, AuditStatus.BACKED_UP)
+        self.assertEqual(items_by_name[expected_sub_rel].status, AuditStatus.BACKED_UP)
+
+    def test_recursive_audit_remote_only_shows_relative_path(self):
+        """Verifica que si se elimina un archivo en subcarpeta, en modo recursivo se reporte con ruta relativa."""
+        self.sub_file.unlink()
+
+        items = LocalAuditService.audit_path(self.base_path, recursive=True)
+        items_by_name = {item.filename: item for item in items}
+
+        expected_sub_rel = str(Path("Tell-Tale-Heart") / "Tell-Tale-Heart-pt1.mp4")
+        self.assertIn(expected_sub_rel, items_by_name)
+        self.assertEqual(
+            items_by_name[expected_sub_rel].status, AuditStatus.REMOTE_ONLY
+        )
+
+    def test_shallow_prune_does_not_touch_subfolder_backed_up_files(self):
+        """Verifica que una poda superficial (sin recursión) NO marque como podables
+        los archivos de subcarpetas, protegiéndolos de borrado accidental."""
+        items = LocalAuditService.audit_path(self.base_path, recursive=False)
+        prune_candidates = [item for item in items if item.is_safe_to_prune]
+
+        # Solo root_file.mkv debe ser podable en la raíz
+        candidate_names = [c.filename for c in prune_candidates]
+        self.assertEqual(candidate_names, ["root_file.mkv"])
+
+        # Simulamos la poda de candidatos
+        for c in prune_candidates:
+            assert c.path is not None
+            c.path.unlink()
+
+        # El archivo raíz se borró, pero el archivo de la subcarpeta sigue intacto
+        self.assertFalse(self.root_file.exists())
+        self.assertTrue(self.sub_file.exists())
+
+    def test_recursive_prune_deletes_subfolder_backed_up_files(self):
+        """Verifica que la poda recursiva (recursive=True) identifique y permita podar
+        archivos respaldados en subcarpetas con sus rutas físicas correctas."""
+        items = LocalAuditService.audit_path(self.base_path, recursive=True)
+        prune_candidates = [item for item in items if item.is_safe_to_prune]
+
+        candidate_names = {c.filename for c in prune_candidates}
+        expected_sub_rel = str(Path("Tell-Tale-Heart") / "Tell-Tale-Heart-pt1.mp4")
+
+        self.assertIn("root_file.mkv", candidate_names)
+        self.assertIn(expected_sub_rel, candidate_names)
+
+        # Simulamos la poda de todos los candidatos seguros
+        for c in prune_candidates:
+            assert c.path is not None
+            c.path.unlink()
+
+        # Ambos archivos respaldados fueron eliminados físicamente
+        self.assertFalse(self.root_file.exists())
+        self.assertFalse(self.sub_file.exists())
+
+        # La subcarpeta vacía se mantiene sin romper el árbol
+        self.assertTrue(self.sub_dir.exists())
+
+    def test_recursive_prune_protects_unbacked_files_in_subfolders(self):
+        """Verifica que en poda recursiva, un archivo dentro de una subcarpeta
+        que NO esté respaldado NUNCA sea marcado como candidato para podar."""
+        # Creamos un archivo nuevo no respaldado en la subcarpeta
+        unbacked_sub_file = self.sub_dir / "unbacked_draft.txt"
+        unbacked_sub_file.write_text("borrador importante")
+
+        items = LocalAuditService.audit_path(self.base_path, recursive=True)
+        prune_candidates = [item for item in items if item.is_safe_to_prune]
+
+        candidate_paths = {c.path.resolve() for c in prune_candidates}  # type: ignore
+        self.assertNotIn(unbacked_sub_file.resolve(), candidate_paths)
+
+        # Al podar, el no respaldado sobrevive
+        for c in prune_candidates:
+            assert c.path is not None
+            c.path.unlink()
+
+        self.assertTrue(unbacked_sub_file.exists())
 
 
 class TestLocalAuditService(unittest.TestCase):

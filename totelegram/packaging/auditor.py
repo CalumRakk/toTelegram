@@ -61,13 +61,15 @@ class LocalAuditService:
         cls,
         target_path: Path | str,
         target_chat_id: int | str | None = None,
+        recursive: bool = False,
     ) -> list[AuditItem]:
         """
-        Audita una ruta específica (archivo o directorio a primer nivel).
+        Audita una ruta específica (archivo o directorio).
 
         Args:
             target_path: Archivo o directorio a inspeccionar.
             target_chat_id: Filtrar por un chat de Telegram específico (opcional).
+            recursive: Si es True y es directorio, audita recursivamente todas las subcarpetas.
 
         Returns:
             list[AuditItem]: Lista de elementos auditados con su estado y destinos.
@@ -78,8 +80,120 @@ class LocalAuditService:
 
         if path.is_file():
             return cls._audit_single_file(path, target_chat_id=target_chat_id)
+        elif recursive:
+            return cls._audit_directory_recursive(path, target_chat_id=target_chat_id)
         else:
             return cls._audit_directory_shallow(path, target_chat_id=target_chat_id)
+
+    @classmethod
+    def _audit_directory_recursive(
+        cls,
+        base_dir: Path,
+        target_chat_id: int | str | None = None,
+    ) -> list[AuditItem]:
+        """
+        Audita un directorio y todos sus subdirectorios recursivamente.
+        Realiza una única precarga en base de datos para todo el árbol.
+        """
+        canonical_base_str = str(base_dir.resolve())
+        prefix = (
+            canonical_base_str
+            if canonical_base_str.endswith(os.sep)
+            else f"{canonical_base_str}{os.sep}"
+        )
+
+        # 1. Precarga global para todo el árbol en un solo query
+        sources_query = Source.select().where(Source.path_str.startswith(prefix))
+        jobs_query = Job.select()
+        chats_query = TelegramChat.select()
+        snapshots_query = RemoteSnapshot.select().where(
+            RemoteSnapshot.is_orphaned == False
+        )
+
+        prefetched = list(
+            prefetch(sources_query, jobs_query, chats_query, snapshots_query)
+        )
+        sources_by_path: dict[str, Source] = {s.path_str: s for s in prefetched}
+
+        # Agrupar Sources por su directorio padre directo
+        sources_by_parent: dict[str, list[Source]] = {}
+        for s in prefetched:
+            parent = os.path.dirname(s.path_str.rstrip(os.sep))
+            sources_by_parent.setdefault(parent, []).append(s)
+
+        results: list[AuditItem] = []
+        seen_paths: set[str] = set()
+
+        def _traverse(current_dir: Path):
+            canonical_current = str(current_dir.resolve())
+            direct_sources = sources_by_parent.get(canonical_current, [])
+            sources_map = {s.path_str: s for s in direct_sources}
+
+            for child in sorted(current_dir.iterdir()):
+                if cls._is_internal_ignored(child):
+                    continue
+
+                child_canonical = str(child.resolve())
+                seen_paths.add(child_canonical)
+                rel_path = os.path.relpath(child_canonical, canonical_base_str)
+
+                if child.is_dir():
+                    # Verificar si la subcarpeta es una Cinta TAR
+                    source_folder = sources_by_path.get(child_canonical)
+                    ttape_candidate = child.with_name(f"{child.name}.ttape")
+
+                    if (
+                        source_folder and source_folder.type == SourceType.FOLDER
+                    ) or ttape_candidate.is_file():
+                        # Es una cinta TAR: reportarla como unidad y NO descender
+                        item = cls._resolve_directory_status(
+                            dir_path=child,
+                            canonical_path=child_canonical,
+                            sources_by_path=sources_by_path,
+                            target_chat_id=target_chat_id,
+                        )
+                        item.filename = rel_path
+                        results.append(item)
+                    else:
+                        # Directorio normal: descender recursivamente
+                        _traverse(child)
+
+                elif child.is_file():
+                    stat = child.stat()
+                    source_match = sources_map.get(child_canonical)
+                    if source_match is None:
+                        source_match = cls._find_moved_file_in_db(child, stat)
+
+                    item = cls._resolve_file_status(
+                        file_path=child,
+                        stat=stat,
+                        source_match=source_match,
+                        target_chat_id=target_chat_id,
+                    )
+                    item.filename = rel_path
+                    results.append(item)
+
+            # Detectar REMOTE_ONLY de este directorio
+            for s in direct_sources:
+                if s.path_str not in seen_paths and s.type == SourceType.FILE:
+                    verified_dests = cls._extract_verified_destinations(
+                        s, target_chat_id
+                    )
+                    if verified_dests:
+                        rel_path = os.path.relpath(s.path_str, canonical_base_str)
+                        results.append(
+                            AuditItem(
+                                filename=rel_path,
+                                path=None,
+                                size=s.size,
+                                is_dir=False,
+                                status=AuditStatus.REMOTE_ONLY,
+                                destinations=verified_dests,
+                            )
+                        )
+
+        _traverse(base_dir)
+        return results
 
     @classmethod
     def _audit_single_file(
@@ -106,7 +220,7 @@ class LocalAuditService:
     ) -> list[AuditItem]:
         """
         Audita el primer nivel de un directorio (no recursivo).
-        Precarga todos los Source bajo este directorio en un solo query.
+        Precarga los Source relevantes cuyo padre directo sea este directorio (ADR-012).
         """
         canonical_dir_str = str(dir_path.resolve())
         prefix = (
@@ -126,7 +240,14 @@ class LocalAuditService:
         prefetched_sources = list(
             prefetch(sources_query, jobs_query, chats_query, snapshots_query)
         )
-        sources_by_path: dict[str, Source] = {s.path_str: s for s in prefetched_sources}
+
+        # Filtrar solo fuentes cuyo padre DIRECTO sea este directorio (Principio de No Asunción)
+        direct_sources: list[Source] = [
+            s
+            for s in prefetched_sources
+            if os.path.dirname(s.path_str.rstrip(os.sep)) == canonical_dir_str
+        ]
+        sources_by_path: dict[str, Source] = {s.path_str: s for s in direct_sources}
 
         results: list[AuditItem] = []
         seen_paths: set[str] = set()
@@ -165,7 +286,8 @@ class LocalAuditService:
                 )
 
         # 3. Detectar elementos registrados en DB que ya fueron eliminados del disco (REMOTE_ONLY)
-        for s in prefetched_sources:
+        # Solo se evalúan fuentes cuyo padre directo sea este directorio
+        for s in direct_sources:
             if s.path_str not in seen_paths and s.type == SourceType.FILE:
                 verified_dests = cls._extract_verified_destinations(s, target_chat_id)
                 if verified_dests:
