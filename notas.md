@@ -7,7 +7,7 @@
 - Estandarizar que solo se utilice CANAL o grupo privado?
 - Una cuenta no premiun no debe denunciar por chunk_size, si el siguiente payload es interior a tg_max puede subirlo sin problema, sino que pase al siguiente archivo.
 - Un detector de velocidad de disco, una heuristica simple quizas nos salve de disco duro lentos.
-- Ordenar la subida en el canal/grupo cuando no es secuencial.
+- ~~Ordenar la subida en el canal/grupo cuando no es secuencial.~~
 - Al importar snapshots se deberia actualizar el caption de cada chunk
 - verificar si se puede especificar otra ruta para la DB
 - Bug con la purga de archivos locales.

@@ -101,19 +101,7 @@ class TargetNotSetError(ConfigurationError):
 
     def __init__(self):
         super().__init__(
-            message="No se ha especificado un chat de destino.",
-            title="Destino requerido",
-            hint=(
-                "Las operaciones de subida, réplica e indexación requieren un destino explícito.\n\n"
-                "Tienes dos formas de indicarlo:\n"
-                "1. Mediante la opción [bold]-t / --target <chat>[/] en el comando.\n"
-                "2. O definiendo la variable de entorno [bold]TOTELEGRAM_TARGET[/]."
-            ),
-            suggested_commands=[
-                'totelegram send ... -t "Mi Canal"',
-                "totelegram send ... -t me",
-                'export TOTELEGRAM_TARGET="Mi Canal"',
-            ],
+            message="No indicaste el destino. Usa [bold cyan]-t <chat>[/] o [bold cyan]-t me[/] para el chat de Mensajes Guardados.\n",
             exit_code=1,
             severity="error",
         )
