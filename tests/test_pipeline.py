@@ -1,19 +1,26 @@
 import json
 import unittest
+from datetime import timedelta
 from pathlib import Path
-from tempfile import NamedTemporaryFile
+from tempfile import NamedTemporaryFile, TemporaryDirectory
 from unittest.mock import MagicMock, patch
 
+from tartape.exceptions import PathConstraintReportError
+
+from totelegram.common.helpers import get_utc_now
 from totelegram.concurrency import ConcurrencyCoordinator
 from totelegram.database import DatabaseSession
 from totelegram.engine.events import UploadObserver
 from totelegram.engine.pipeline import JobPipeline
+from totelegram.engine.planner import JobPlanner, PathLengthExceededError
 from totelegram.engine.uploader import CooperativeUploader
 from totelegram.exceptions import (
+    ConcurrencyError,
     IncompatibleCapacityError,
     PermissionDeniedCleanupError,
 )
 from totelegram.models import (
+    Claim,
     Job,
     Payload,
     RemotePayload,
@@ -23,12 +30,85 @@ from totelegram.models import (
 )
 from totelegram.packaging.publisher import SnapshotPublisher
 from totelegram.packaging.snapshot import SnapshotService
-from totelegram.schemas import ExecutionDecision
+from totelegram.schemas import ExecutionDecision, ResourceType
 from totelegram.types import (
     InvestigationReport,
     StrategyResult,
     UploadContext,
 )
+
+
+class TestJobPlanner(unittest.TestCase):
+    """Pruebas unitarias para la planificación de intenciones de Jobs."""
+
+    def setUp(self):
+        self.db_session = DatabaseSession("sqlite:///:memory:", auto_init_schema=True)
+        self.db = self.db_session.start()
+
+        self.chat = TelegramChat.create(
+            id=-100123456, title="Canal Planner", type="channel"
+        )
+        self.user = TelegramUser.create(
+            id=12345, first_name="PlannerUser", is_premium=False
+        )
+
+        self.settings = MagicMock()
+        self.settings.chat_id = self.chat.id
+        self.settings.telegram_account_id = self.user.id
+        self.settings.upload_limit_rate_kbps = 0
+        self.settings.max_filename_length = 55
+        self.settings.upload_pause_range = [0, 0]
+        self.settings.exclude_files = []
+        self.settings.tg_max_size_normal = 1000
+        self.settings.tg_max_size_premium = 2000
+
+        self.ctx = UploadContext(
+            tg_chat=MagicMock(id=self.chat.id, title=self.chat.title),
+            owner=self.user,
+            client=MagicMock(),
+            db=self.db,
+            discovery=MagicMock(),
+            settings=self.settings,
+            coordinator=MagicMock(),
+        )
+
+    def tearDown(self):
+        self.db_session.close()
+
+    def test_job_planner_creates_new_job_and_chunks(self):
+        """JobPlanner.plan debe formalizar el Job y preparar los Payloads bajo demanda."""
+        with NamedTemporaryFile(delete=False) as tmp:
+            tmp.write(b"X" * 2500)
+            tmp_path = Path(tmp.name)
+
+        try:
+            job = JobPlanner.plan(tmp_path, self.ctx)
+
+            self.assertIsNotNone(job)
+            self.assertFalse(job.is_completed_local)
+            self.assertTrue(job.is_chunked)
+            self.assertEqual(job.chunk_size, 1000)
+
+            payloads = job.prepare_chunks(tmp_path, self.settings)
+            self.assertEqual(len(payloads), 3)
+            self.assertEqual(job.payloads.count(), 3)
+        finally:
+            if tmp_path.exists():
+                tmp_path.unlink()
+
+    def test_job_planner_catches_tartape_path_length_exceeded(self):
+        """Si tartape lanza PathConstraintReportError, JobPlanner debe elevar PathLengthExceededError."""
+        with TemporaryDirectory() as tmp_dir:
+            folder_path = Path(tmp_dir) / "carpeta_problematica"
+            folder_path.mkdir()
+
+            with patch(
+                "tartape.create", side_effect=PathConstraintReportError("Ruta larga")
+            ):
+                with self.assertRaises(PathLengthExceededError) as ctx:
+                    JobPlanner.plan(folder_path, self.ctx)
+
+                self.assertEqual(ctx.exception.path, folder_path)
 
 
 class TestPipelineDecisionTree(unittest.TestCase):
@@ -132,7 +212,6 @@ class TestPipelineDecisionTree(unittest.TestCase):
             self.assertFalse(result.strategy_result.did_upload_bytes)
             self.assertEqual(result.strategy_result.pieces_processed, 0)
 
-            # La estrategia de subida física no debe invocarse
             mock_exec.assert_not_called()
             self.mock_observer.on_job_complete.assert_called_once_with(
                 result.job, snapshot_created=False
@@ -301,7 +380,6 @@ class TestPipelineDecisionTree(unittest.TestCase):
         file_path = self._create_temp_file()
         try:
             source = Source.get_or_create_from_filepath(file_path)
-            # Job viejo con bloques de 4000
             job_old = Job.formalize_intent(source, self.chat, chunk_size=4000)
             p_old = Payload.create(
                 job=job_old,
@@ -345,11 +423,9 @@ class TestPipelineDecisionTree(unittest.TestCase):
                 result = pipeline.process(file_path, force=True)
 
             self.assertTrue(result.is_completed)
-            # Verificamos que se ordenó borrar el mensaje incompatible de Telegram
             self.mock_client.delete_messages.assert_called_with(
                 chat_id=self.chat.id, message_ids=[201]
             )
-            # Verificamos que el Job resultante se ajustó al tamaño de corte de la cuenta activa (2000)
             self.assertEqual(result.job.chunk_size, 2000)
         finally:
             file_path.unlink(missing_ok=True)
@@ -394,11 +470,137 @@ class TestPipelineDecisionTree(unittest.TestCase):
                 result = pipeline.process(file_path, force=False)
 
             self.assertTrue(result.is_completed)
-            # No se debe llamar al reubicador
             mock_relocate.assert_not_called()
             mock_exec.assert_called_once()
         finally:
             file_path.unlink(missing_ok=True)
+
+    # SALVAGUARDA DE CONCURRENCIA ANTE --force
+
+    def test_08_force_cannot_purge_job_if_another_node_holds_active_claim(self):
+        """Incluso con --force, un nodo no puede purgar el Job si otro nodo está subiendo activamente una pieza."""
+        file_path = self._create_temp_file()
+        try:
+            source = Source.get_or_create_from_filepath(file_path)
+            job = Job.formalize_intent(source, self.chat, chunk_size=2000)
+            payload = Payload.create(
+                job=job,
+                sequence_index=0,
+                start_offset=0,
+                end_offset=2000,
+                size=2000,
+                filename="f.01",
+                filename_short="f.01",
+            )
+
+            Claim.create(
+                resource_id=f"payload:{payload.id}",
+                resource_type=ResourceType.PAYLOAD,
+                node_id="node_rival",
+                expires_at=get_utc_now() + timedelta(seconds=120),
+            )
+
+            pipeline = JobPipeline(session=self.ctx, observer=self.mock_observer)
+
+            with self.assertRaises(ConcurrencyError) as ctx:
+                pipeline._ensure_no_active_claims_on_job(job)
+
+            self.assertIn("node_rival", str(ctx.exception))
+        finally:
+            file_path.unlink(missing_ok=True)
+
+    # PAUSAS INTER-JOB Y DUPLICADOS
+
+    def test_09_job_pipeline_applies_inter_job_pause(self):
+        """Verifica que el pipeline respete el rango de pausa entre archivos si no es el último."""
+        with NamedTemporaryFile(delete=False) as tmp:
+            tmp.write(b"12345")
+            tmp_path = Path(tmp.name)
+
+        try:
+            self.settings.upload_pause_range = [1, 1]
+            self.ctx.discovery.investigate.return_value = InvestigationReport(
+                decision=ExecutionDecision.CLEAN_RESTART
+            )
+
+            pipeline = JobPipeline(session=self.ctx, observer=self.mock_observer)
+
+            with (
+                patch.object(
+                    CooperativeUploader,
+                    "upload",
+                    return_value=StrategyResult(
+                        strategy_name="MockUploader",
+                        pieces_processed=1,
+                        did_upload_bytes=True,
+                        is_completed=True,
+                    ),
+                ),
+                patch.object(
+                    SnapshotService,
+                    "generate_snapshot",
+                    return_value=(MagicMock(), tmp_path),
+                ),
+                patch(
+                    "totelegram.packaging.publisher.SnapshotPublisher.publish",
+                    return_value=MagicMock(id=111),
+                ),
+                patch.object(Payload, "total_pending_for_job", return_value=0),
+                patch("time.sleep", return_value=None),
+            ):
+                pipeline.process(tmp_path, is_last_in_batch=False)
+
+            self.mock_observer.on_pause_start.assert_called_once_with(60, "Inter-job")
+            self.assertEqual(self.mock_observer.on_pause_tick.call_count, 60)
+            self.mock_observer.on_pause_end.assert_called_once()
+        finally:
+            if tmp_path.exists():
+                tmp_path.unlink()
+
+    def test_10_job_pipeline_notifies_observer_on_potential_duplicates(self):
+        """Verifica que si discovery detecta duplicados potenciales, el pipeline notifique al observer."""
+        with NamedTemporaryFile(delete=False) as tmp:
+            tmp.write(b"CONTENIDO" * 50)
+            tmp_path = Path(tmp.name)
+
+        try:
+            duplicate_candidate = MagicMock()
+            self.ctx.discovery.investigate.return_value = InvestigationReport(
+                decision=ExecutionDecision.CLEAN_RESTART,
+                potential_duplicates=[duplicate_candidate],
+            )
+
+            pipeline = JobPipeline(session=self.ctx, observer=self.mock_observer)
+
+            with (
+                patch.object(
+                    CooperativeUploader,
+                    "upload",
+                    return_value=StrategyResult(
+                        strategy_name="MockUploader",
+                        pieces_processed=1,
+                        did_upload_bytes=True,
+                        is_completed=True,
+                    ),
+                ),
+                patch(
+                    "totelegram.packaging.snapshot.SnapshotService.generate_snapshot",
+                    return_value=(MagicMock(), tmp_path),
+                ),
+                patch(
+                    "totelegram.packaging.publisher.SnapshotPublisher.publish",
+                    return_value=MagicMock(id=1),
+                ),
+                patch.object(Payload, "total_pending_for_job", return_value=0),
+            ):
+                pipeline.process(tmp_path, is_last_in_batch=True)
+
+            self.mock_observer.on_potential_duplicates.assert_called_once_with(
+                [duplicate_candidate]
+            )
+        finally:
+            if tmp_path.exists():
+                tmp_path.unlink()
 
 
 if __name__ == "__main__":

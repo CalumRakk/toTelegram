@@ -14,6 +14,7 @@ from totelegram.models import (
     RemotePayload,
     RemoteSnapshot,
     Source,
+    TapeMember,
     TelegramChat,
     TelegramUser,
 )
@@ -308,6 +309,43 @@ class TestModelsArchitecture(unittest.TestCase):
         self.assertIsNone(job.remote_snapshot)
         self.assertIsNone(job.snapshot_message_id)
         self.assertFalse(job.has_remote_snapshot)
+
+    def test_tape_member_get_slices_atomic_math(self):
+        """ADR-009: Verifica que TapeMember.get_slices calcule fragmentos exactos en O(1)."""
+        source = Source.create(
+            path_str="/tmp/test_tape",
+            md5sum="hash_tape_slices_test",
+            size=5000,
+            mtime=1.0,
+            mimetype="application/x-tar",
+            type=SourceType.FOLDER,
+        )
+
+        # Archivo que empieza en offset 1500 (cabecera TAR) y mide 1200 bytes
+        # Con volúmenes de 1000 bytes:
+        # Cruza Volumen 2 (2000-3000) y Volumen 3 (3000-4000)
+        member = TapeMember.create(
+            source=source,
+            relative_path="docs/manual.pdf",
+            size=1200,
+            md5sum="md5_manual",
+            start_offset=1500,
+        )
+
+        slices = member.get_slices(volume_size=1000)
+        self.assertEqual(len(slices), 2)
+
+        # Parte 1 (en volumen 2): offset 12, longitud 988
+        self.assertEqual(slices[0].volume_index, 2)
+        self.assertEqual(slices[0].volume_offset, 12)
+        self.assertEqual(slices[0].volume_length, 988)
+        self.assertEqual(slices[0].source_offset, 0)
+
+        # Parte 2 (en volumen 3): offset 0, longitud 212
+        self.assertEqual(slices[1].volume_index, 3)
+        self.assertEqual(slices[1].volume_offset, 0)
+        self.assertEqual(slices[1].volume_length, 212)
+        self.assertEqual(slices[1].source_offset, 988)
 
 
 if __name__ == "__main__":

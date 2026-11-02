@@ -95,7 +95,6 @@ class TestLocalAuditService(unittest.TestCase):
         """Si el archivo en disco cambia de tamaño o mtime, pasa a MODIFIED."""
         self._register_file_in_db(self.file_a, self.chat)
 
-        # Modificamos el archivo localmente
         time.sleep(0.05)
         self.file_a.write_bytes(b"CONTENIDO_TOTALMENTE_NUEVO_Y_MAS_LARGO")
 
@@ -109,7 +108,6 @@ class TestLocalAuditService(unittest.TestCase):
         """Camino 2: Si el archivo se movió de carpeta, se detecta por (filename, size, mtime) y se actualiza path_str."""
         job = self._register_file_in_db(self.file_a, self.chat)
 
-        # Movemos físicamente el archivo a otro subdirectorio
         nuevo_dir = self.workdir / "subcarpeta"
         nuevo_dir.mkdir()
         nuevo_path = nuevo_dir / "video1.mp4"
@@ -120,17 +118,14 @@ class TestLocalAuditService(unittest.TestCase):
         item = items[0]
         self.assertEqual(item.status, AuditStatus.BACKED_UP)
 
-        # Verificar que SQLite actualizó el path_str automáticamente
         source_refreshed = Source.get_by_id(job.source.id)
         self.assertEqual(source_refreshed.path_str, str(nuevo_path.resolve()))
 
     def test_audit_detects_legacy_snapshot_without_parsing(self):
         """Comprueba que un snapshot .json.xz corrupto o no registrado se detecte sin abrirlo ni fallar."""
-        # Creamos un sidecar con contenido basura no-LZMA
         sidecar = self.workdir / f"{self.file_a.name}.json.xz"
         sidecar.write_bytes(b"ESTO NO ES UN ARCHIVO LZMA VALIDO")
 
-        # LocalAuditService NO debe intentar descomprimirlo ni crashear
         items = LocalAuditService.audit_path(self.workdir)
         self.assertEqual(len(items), 1)
         item = items[0]
@@ -191,7 +186,6 @@ class TestLocalAuditService(unittest.TestCase):
     def test_audit_remote_only_file(self):
         """Un archivo registrado en DB que ya fue borrado de disco (prune) aparece como REMOTE_ONLY."""
         self._register_file_in_db(self.file_a, self.chat)
-        # Borramos el archivo del disco
         self.file_a.unlink()
 
         items = LocalAuditService.audit_path(self.workdir)
@@ -200,6 +194,44 @@ class TestLocalAuditService(unittest.TestCase):
         self.assertEqual(item.status, AuditStatus.REMOTE_ONLY)
         self.assertIsNone(item.path)
         self.assertFalse(item.is_safe_to_prune)
+
+    def test_prune_deletes_file_and_preserves_db_records(self):
+        """Verifica que al podar se borre el archivo físico pero se conserve el registro en SQLite."""
+        self._register_file_in_db(self.file_a, self.chat)
+
+        # Archivo secundario no respaldado para confirmar que prune no lo toca
+        file_unbacked = self.workdir / "no_respaldado.mp4"
+        file_unbacked.write_bytes(b"DATA_NO_RESPALDADA")
+
+        # Localizar candidatos seguros para liberar espacio
+        candidates = [
+            item
+            for item in LocalAuditService.audit_path(self.workdir)
+            if item.is_safe_to_prune
+        ]
+        self.assertEqual(len(candidates), 1)
+        self.assertEqual(candidates[0].filename, "video1.mp4")
+
+        # Borrado físico simulado
+        for c in candidates:
+            assert c.path is not None
+            c.path.unlink()
+
+        # El archivo respaldado se borró físicamente
+        self.assertFalse(self.file_a.exists())
+        # El archivo no respaldado sigue en su lugar intacto
+        self.assertTrue(file_unbacked.exists())
+
+        # En SQLite el Source y Job siguen existiendo intactos
+        source = Source.get_or_none(Source.path_str == str(self.file_a.resolve()))
+        self.assertIsNotNone(source)
+        assert source is not None
+        self.assertEqual(source.jobs.count(), 1)
+
+        # La siguiente auditoría lo detecta como REMOTE_ONLY
+        refreshed_audit = LocalAuditService.audit_path(self.workdir)
+        res_map = {r.filename: r for r in refreshed_audit}
+        self.assertEqual(res_map["video1.mp4"].status, AuditStatus.REMOTE_ONLY)
 
 
 if __name__ == "__main__":

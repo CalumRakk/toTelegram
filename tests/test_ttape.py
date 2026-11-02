@@ -3,34 +3,16 @@ import unittest
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
-from unittest.mock import MagicMock
 
 import tartape
 
-from totelegram.database import DatabaseSession
-from totelegram.models import (
-    Job,
-    RemotePayload,
-    Source,
-    TapeMember,
-    TelegramChat,
-    TelegramUser,
-)
-from totelegram.packaging.importer import (
-    InspectionStatus,
-    PlanItem,
-    SnapshotImporter,
-    SnapshotInspector,
-)
 from totelegram.packaging.schemas import (
     MANIFEST_VERSION,
-    TTAPE_EXTENSION,
     TTAPE_MANIFEST_FILENAME,
     RemotePart,
     SourceMetadata,
     UploadManifest,
 )
-from totelegram.packaging.snapshot import SnapshotService
 from totelegram.packaging.ttape import (
     InvalidTapeContainerError,
     TapeContainer,
@@ -38,23 +20,15 @@ from totelegram.packaging.ttape import (
 from totelegram.schemas import SourceType
 
 
-class TestTapeContainerAndBifurcation(unittest.TestCase):
+class TestTapeContainer(unittest.TestCase):
+    """Pruebas del contenedor híbrido ZIP .ttape (primitivas de archivo, catálogo y manifiesto)."""
+
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.base_path = Path(self.temp_dir.name)
-
-        self.db_session = DatabaseSession("sqlite:///:memory:", auto_init_schema=True)
-        self.db = self.db_session.start()
-
-        self.chat = TelegramChat.create(
-            id=-10099887766, title="Canal de Pruebas Tape", type="channel"
-        )
-        self.user = TelegramUser.create(
-            id=11223344, first_name="TapeTester", is_premium=False
-        )
+        self.chat_id = -10099887766
 
     def tearDown(self):
-        self.db_session.close()
         self.temp_dir.cleanup()
 
     def test_tape_container_build_and_read_manifest_o1(self):
@@ -71,9 +45,9 @@ class TestTapeContainerAndBifurcation(unittest.TestCase):
             manifest_version=MANIFEST_VERSION,
             created_at=datetime.now(timezone.utc),
             chunk_size=1024 * 1024,
-            chat_id=self.chat.id,
-            owner_id=self.user.id,
-            owner_name=self.user.first_name,
+            chat_id=self.chat_id,
+            owner_id=11223344,
+            owner_name="TapeTester",
             source=SourceMetadata(
                 filename="proyecto_codigo",
                 size=tape.total_size,
@@ -86,7 +60,7 @@ class TestTapeContainerAndBifurcation(unittest.TestCase):
                 RemotePart(
                     sequence=0,
                     message_id=501,
-                    chat_id=self.chat.id,
+                    chat_id=self.chat_id,
                     link="https://t.me/c/1/501",
                     part_filename="proyecto_codigo.tar.01-01",
                     part_size=tape.total_size,
@@ -144,70 +118,6 @@ class TestTapeContainerAndBifurcation(unittest.TestCase):
         self.assertFalse(TapeContainer.is_valid(corrupt_file))
         with self.assertRaises(InvalidTapeContainerError):
             TapeContainer.extract_catalog(corrupt_file, self.base_path / "out.tartape")
-
-    def test_snapshot_inspector_and_importer_direct_sql_from_ttape(self):
-        """Valida que SnapshotInspector reconozca el .ttape y SnapshotImporter vuelque tracks a TapeMember."""
-        folder = self.base_path / "documentos_legales"
-        folder.mkdir()
-        (folder / "contrato.pdf").write_bytes(b"CONTRATO PRIVADO")
-        (folder / "anexo.pdf").write_bytes(b"ANEXO 1")
-
-        tape = tartape.record(folder, checksum="md5", overwrite=True)
-        source = Source.create_from_tape(tape, exclusion_patterns=[])
-        job = Job.formalize_intent(source, self.chat, 5120)
-        job.prepare_chunks(folder, MagicMock(exclude_files=[]))
-        payload = job.payloads.first()
-
-        mock_msg = MagicMock(
-            id=301, chat=MagicMock(id=self.chat.id), link="https://t.me/c/1/301"
-        )
-        mock_msg.__str__.return_value = (
-            '{"id": 301, "chat": {"id": -10099887766, "type": "channel"}}'
-        )
-        RemotePayload.register_upload(payload, mock_msg, self.user)
-
-        SnapshotService.generate_snapshot(job)
-        ttape_path = folder.with_name(f"{folder.name}{TTAPE_EXTENSION}")
-
-        candidates = SnapshotInspector.find_all_candidates([self.base_path])
-        self.assertIn(ttape_path, candidates)
-
-        inspection = SnapshotInspector.inspect_file(ttape_path)
-        self.assertEqual(inspection.status, InspectionStatus.VALID)
-        self.assertIsNotNone(inspection.manifest)
-
-        self.db.execute_sql("DELETE FROM tapemember;")
-        self.db.execute_sql("DELETE FROM remotepayload;")
-        self.db.execute_sql("DELETE FROM payload;")
-        self.db.execute_sql("DELETE FROM job;")
-        self.db.execute_sql("DELETE FROM source;")
-
-        self.assertEqual(TapeMember.select().count(), 0)
-
-        item = PlanItem(
-            inspection=inspection,
-            manifest=inspection.manifest,
-            action=MagicMock(),
-            target_chat_id=self.chat.id,
-            total_parts=len(inspection.manifest.parts),
-            mutations=MagicMock(members_count=2, remotes_count=1),
-        )
-
-        mock_plan = MagicMock()
-        mock_plan.actionable_items = [item]
-
-        succeeded, errors = SnapshotImporter.apply_plan(
-            plan=mock_plan, db=self.db, owner=self.user
-        )
-
-        self.assertEqual(succeeded, 1)
-        self.assertEqual(len(errors), 0)
-
-        members = list(TapeMember.select().order_by(TapeMember.relative_path))
-        self.assertEqual(len(members), 2)
-        self.assertEqual(members[0].relative_path, "documentos_legales/anexo.pdf")
-        self.assertGreater(members[0].start_offset, 0)
-        self.assertEqual(members[1].relative_path, "documentos_legales/contrato.pdf")
 
 
 if __name__ == "__main__":

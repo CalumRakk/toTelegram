@@ -6,7 +6,8 @@ from typer.testing import CliRunner
 
 from totelegram.cli.commands.config import app
 from totelegram.cli.state import CLIState
-from totelegram.identity import SettingsManager
+from totelegram.identity import Settings, SettingsManager
+from totelegram.schemas import AccessLevel
 
 runner = CliRunner()
 
@@ -37,6 +38,39 @@ class TestCliConfig(unittest.TestCase):
         except Exception:  # noqa: S110
             pass
 
+    def test_adr_001_immutable_profile_credentials(self):
+        """
+        ADR-001: Perfil Inmutable.
+
+        Las credenciales base (API_ID, API_HASH) y el nombre del perfil
+        DEBEN ser inmutables (DEBUG_READONLY) para garantizar la integridad de la sesión.
+        """
+        required_internal_fields = {"API_ID", "API_HASH", "PROFILE_NAME"}
+
+        api_id = Settings.get_info("API_ID")
+        api_hash = Settings.get_info("API_HASH")
+        profile_name = Settings.get_info("PROFILE_NAME")
+
+        error_message = (
+            f"\n\n[VIOLACIÓN DE ARQUITECTURA - ADR-001]\n"
+            f"Se intentó hacer editables campos críticos: {required_internal_fields}\n"
+            f"Estos campos deben permanecer en Settings con nivel DEBUG_READONLY.\n"
+        )
+
+        self.assertTrue(
+            api_id is not None and api_id.level == AccessLevel.DEBUG_READONLY,
+            error_message,
+        )
+        self.assertTrue(
+            api_hash is not None and api_hash.level == AccessLevel.DEBUG_READONLY,
+            error_message,
+        )
+        self.assertTrue(
+            profile_name is not None
+            and profile_name.level == AccessLevel.DEBUG_READONLY,
+            error_message,
+        )
+
     def test_config_display_table(self):
         """Verificar que el comando base muestra la tabla de configuración."""
         result = runner.invoke(app, obj=self.state)
@@ -47,7 +81,6 @@ class TestCliConfig(unittest.TestCase):
 
     def test_set_valid_value(self):
         """Probar que un cambio válido se persiste correctamente."""
-
         result = runner.invoke(
             app,
             ["set", "upload_limit_rate_kbps", "500"],
@@ -60,11 +93,7 @@ class TestCliConfig(unittest.TestCase):
         self.assertEqual(current_value, 500)
 
     def test_set_invalid_type_safety(self):
-        """
-        Si meto basura en un campo numérico,
-        Pydantic debe saltar y el comando debe fallar.
-        """
-
+        """Si se introduce un valor no numérico, Pydantic debe fallar."""
         result = runner.invoke(
             app, ["set", "MAX_FILESIZE_BYTES", "no_soy_un_numero"], obj=self.state
         )
@@ -72,22 +101,17 @@ class TestCliConfig(unittest.TestCase):
         self.assertEqual(result.exit_code, 1)
         self.assertIn("debe ser de tipo", result.stdout)
 
-        # El valor original no debería haber cambiado
         settings = self.manager.get_settings(self.profile_name)
         current_value = getattr(settings, "MAX_FILESIZE_BYTES", None)
         self.assertNotEqual(current_value, "no_soy_un_numero")
 
     def test_set_internal_field_protection(self):
-        """
-        ADR-001: API_ID y otros campos internos son inmutables tras la creación.
-        """
+        """ADR-001: API_ID y otros campos internos son inmutables tras la creación."""
         result = runner.invoke(app, ["set", "api_id", "99999"], obj=self.state)
-
         self.assertIn("Solo Lectura", result.stdout.replace("\n", ""))
 
     def test_list_add(self):
-        """Proba añadir elementos de una lista."""
-        # Añadir (confirmando con 'y')
+        """Probar añadir elementos a una lista."""
         runner.invoke(app, ["add", "exclude_files", "*.tmp", "*.bak"], obj=self.state)
 
         settings = self.manager.get_settings(self.profile_name)
@@ -96,7 +120,6 @@ class TestCliConfig(unittest.TestCase):
 
     def test_list_add_remove_flow(self):
         """Probar el flujo de añadir y quitar elementos de una lista (exclude_files)."""
-        # Añadir (confirmando con 'y')
         runner.invoke(
             app, ["add", "exclude_files", "*.tmp", "*.bak"], input="y\n", obj=self.state
         )
@@ -105,7 +128,6 @@ class TestCliConfig(unittest.TestCase):
         self.assertIn("*.tmp", settings.exclude_files)  # type: ignore
         self.assertIn("*.bak", settings.exclude_files)  # type: ignore
 
-        # Quitar uno
         runner.invoke(
             app, ["remove", "exclude_files", "*.tmp"], input="y\n", obj=self.state
         )
@@ -113,3 +135,7 @@ class TestCliConfig(unittest.TestCase):
         settings = self.manager.get_settings(self.profile_name)
         self.assertNotIn("*.tmp", settings.exclude_files)  # type: ignore
         self.assertIn("*.bak", settings.exclude_files)  # type: ignore
+
+
+if __name__ == "__main__":
+    unittest.main()

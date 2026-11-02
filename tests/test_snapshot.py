@@ -1,9 +1,12 @@
 import json
 import lzma
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
-from tempfile import TemporaryDirectory
+from tempfile import NamedTemporaryFile, TemporaryDirectory
 from unittest.mock import MagicMock, patch
+
+from pyrogram.errors import FloodWait
 
 from totelegram.database import DatabaseSession
 from totelegram.models import (
@@ -11,24 +14,30 @@ from totelegram.models import (
     Payload,
     RemotePayload,
     Source,
-    TapeMember,
     TelegramChat,
     TelegramUser,
 )
-from totelegram.packaging.schemas import MANIFEST_VERSION
-from totelegram.packaging.snapshot import SnapshotService
-from totelegram.schemas import (
-    JobStatus,
-    SourceType,
+from totelegram.packaging.publisher import (
+    SnapshotPublicationError,
+    SnapshotPublisher,
 )
+from totelegram.packaging.schemas import (
+    MANIFEST_VERSION,
+    RemotePart,
+    SourceMetadata,
+    UploadManifest,
+)
+from totelegram.packaging.snapshot import SnapshotService
+from totelegram.schemas import SourceType
 
 
 class TestSnapshotService(unittest.TestCase):
+    """Pruebas de generación y validación de snapshots (.json.xz y .ttape)."""
+
     def setUp(self):
         self.temp_dir = TemporaryDirectory()
         self.base_path = Path(self.temp_dir.name)
 
-        # Iniciar sesión de base de datos SQLite en memoria
         self.db_session = DatabaseSession("sqlite:///:memory:", auto_init_schema=True)
         self.db = self.db_session.start()
 
@@ -97,7 +106,6 @@ class TestSnapshotService(unittest.TestCase):
             )
             manifest, _ = SnapshotService.generate_snapshot(job)
 
-        # Validar retorno en memoria
         self.assertEqual(manifest.manifest_version, MANIFEST_VERSION)
         self.assertEqual(manifest.source.filename, "documento.pdf")
         self.assertEqual(manifest.source.md5sum, "hash_pdf_12345")
@@ -105,11 +113,8 @@ class TestSnapshotService(unittest.TestCase):
         self.assertEqual(manifest.parts[0].message_id, 101)
         self.assertEqual(manifest.parts[0].link, "https://t.me/c/123456789/101")
 
-        # Validar archivo físico comprimido en disco
         snapshot_file = file_path.with_name(f"{file_path.name}.json.xz")
-        self.assertTrue(
-            snapshot_file.exists(), "El archivo .json.xz no fue creado en disco"
-        )
+        self.assertTrue(snapshot_file.exists())
 
         with lzma.open(snapshot_file, "rt", encoding="utf-8") as f:
             disk_data = json.load(f)
@@ -130,19 +135,16 @@ class TestSnapshotService(unittest.TestCase):
         sub_dir.mkdir()
         (sub_dir / "archivo.txt").write_bytes(b"A" * 800)
 
-        # tartape genera el catálogo SQLite T0 (.tartape)
         tape = tartape.record(folder_path, checksum="md5", overwrite=True)
         self.assertTrue(tape.catalog_path.exists())
 
         source = Source.create_from_tape(tape, exclusion_patterns=[])
-
         job = Job.create(
             source=source,
             chat=self.chat,
             chunk_size=1000,
         )
 
-        # Crear 2 payloads simulando volúmenes
         p1 = Payload.create(
             job=job,
             sequence_index=0,
@@ -174,21 +176,12 @@ class TestSnapshotService(unittest.TestCase):
             RemotePayload.register_upload(payload=p2, tg_message=msg2, owner=self.user)
             manifest, _ = SnapshotService.generate_snapshot(job)
 
-        # Validaciones bajo el estándar v6.0 (.ttape)
         self.assertEqual(len(manifest.parts), 2)
 
-        # Debe generar físicamente el contenedor .ttape
         expected_ttape = folder_path.with_name(f"{folder_path.name}{TTAPE_EXTENSION}")
-        self.assertTrue(
-            expected_ttape.exists(), "El contenedor .ttape no fue creado en disco"
-        )
+        self.assertTrue(expected_ttape.exists())
+        self.assertFalse(tape.catalog_path.exists())
 
-        # Cero residuos: el catálogo suelto .tartape debe haber sido absorbido y eliminado
-        self.assertFalse(
-            tape.catalog_path.exists(), "El catálogo suelto .tartape no fue limpiado"
-        )
-
-        # El catálogo SQLite dentro del .ttape debe ser legible y contener los archivos
         with TapeContainer.open_catalog(expected_ttape) as cat:
             self.assertEqual(cat.fingerprint, tape.fingerprint)
             track = cat.locate("mis_documentos/sub/archivo.txt")
@@ -216,43 +209,126 @@ class TestSnapshotService(unittest.TestCase):
         with self.assertRaises(ValueError):
             SnapshotService.generate_snapshot(job)
 
-    def test_tape_member_get_slices_atomic_math(self):
-        """Verifica que TapeMember.get_slices calcule fragmentos exactos en O(1)."""
-        source = Source.create(
-            path_str="/tmp/test_tape",
-            md5sum="hash_tape_slices_test",
-            size=5000,
-            mtime=1.0,
-            mimetype="application/x-tar",
-            type=SourceType.FOLDER,
+
+class TestSnapshotPublisher(unittest.TestCase):
+    """Pruebas de publicación de snapshots a Telegram con reintentos y control de FloodWait."""
+
+    def setUp(self):
+        self.mock_client = MagicMock()
+        self.chat_id = -100123456789
+
+        self.manifest = UploadManifest(
+            manifest_version=MANIFEST_VERSION,
+            app_version="0.9.25",
+            created_at=datetime.now(timezone.utc),
+            chunk_size=1000,
+            chat_id=self.chat_id,
+            owner_id=12345,
+            owner_name="Tester",
+            source=SourceMetadata(
+                filename="documento.pdf",
+                size=500,
+                md5sum="4f5ab2c1e8d4a6b7c8d9e0f1a2b3c4d5",
+                mime_type="application/pdf",
+                mtime=1700000000.0,
+                type=SourceType.FILE,
+            ),
+            parts=[
+                RemotePart(
+                    sequence=0,
+                    message_id=101,
+                    chat_id=self.chat_id,
+                    link="https://t.me/c/123456789/101",
+                    part_filename="documento.pdf",
+                    part_size=500,
+                    part_md5sum="4f5ab2c1e8d4a6b7c8d9e0f1a2b3c4d5",
+                    start_offset=0,
+                    end_offset=500,
+                )
+            ],
         )
 
-        # Archivo que empieza en offset 1500 (TAR header) y mide 1200 bytes
-        # Con volúmenes de 1000 bytes:
-        # Contenido raw: [1500 + 512 = 2012] hasta [2012 + 1200 = 3212]
-        # Cruza Volumen 2 (2000-3000) y Volumen 3 (3000-4000)
-        member = TapeMember.create(
-            source=source,
-            relative_path="docs/manual.pdf",
-            size=1200,
-            md5sum="md5_manual",
-            start_offset=1500,
-        )
+    def test_publish_success(self):
+        """Valida la subida exitosa de un archivo snapshot a Telegram con su caption."""
+        with NamedTemporaryFile(suffix=".json.xz", delete=False) as tmp:
+            tmp.write(b"fake_snapshot_content")
+            tmp_path = Path(tmp.name)
 
-        slices = member.get_slices(volume_size=1000)
-        self.assertEqual(len(slices), 2)
+        try:
+            sent_msg = MagicMock()
+            sent_msg.id = 8888
+            self.mock_client.send_document.return_value = sent_msg
 
-        # Parte 1 (en volumen 2): del byte 2012 al 3000 -> offset 12, longitud 988
-        self.assertEqual(slices[0].volume_index, 2)
-        self.assertEqual(slices[0].volume_offset, 12)
-        self.assertEqual(slices[0].volume_length, 988)
-        self.assertEqual(slices[0].source_offset, 0)
+            result = SnapshotPublisher.publish(
+                client=self.mock_client,
+                chat_id=self.chat_id,
+                snapshot_path=tmp_path,
+                manifest=self.manifest,
+            )
 
-        # Parte 2 (en volumen 3): del byte 3000 al 3212 -> offset 0, longitud 212
-        self.assertEqual(slices[1].volume_index, 3)
-        self.assertEqual(slices[1].volume_offset, 0)
-        self.assertEqual(slices[1].volume_length, 212)
-        self.assertEqual(slices[1].source_offset, 988)
+            self.assertEqual(result.id, 8888)
+            self.mock_client.send_document.assert_called_once()
+            _, kwargs = self.mock_client.send_document.call_args
+            self.assertEqual(kwargs["chat_id"], self.chat_id)
+            self.assertEqual(kwargs["file_name"], tmp_path.name)
+            self.assertIn("#totelegram_manifest", kwargs["caption"])
+            self.assertIn("#type_file", kwargs["caption"])
+            self.assertIn("#src_4f5ab2c1e8d4a6b7c8d9e0f1a2b3c4d5", kwargs["caption"])
+        finally:
+            if tmp_path.exists():
+                tmp_path.unlink()
+
+    def test_publish_handles_flood_wait_and_retries(self):
+        """Si Telegram responde con FloodWait, debe pausar y reintentar exitosamente."""
+        with NamedTemporaryFile(suffix=".json.xz", delete=False) as tmp:
+            tmp.write(b"data")
+            tmp_path = Path(tmp.name)
+
+        try:
+            sent_msg = MagicMock()
+            sent_msg.id = 9999
+
+            # Primer intento: FloodWait de 2 segundos. Segundo intento: éxito.
+            self.mock_client.send_document.side_effect = [
+                FloodWait(value=2),
+                sent_msg,
+            ]
+
+            with patch("time.sleep") as mock_sleep:
+                result = SnapshotPublisher.publish(
+                    client=self.mock_client,
+                    chat_id=self.chat_id,
+                    snapshot_path=tmp_path,
+                    manifest=self.manifest,
+                )
+
+            self.assertEqual(result.id, 9999)
+            self.assertEqual(self.mock_client.send_document.call_count, 2)
+            mock_sleep.assert_called_once()
+        finally:
+            if tmp_path.exists():
+                tmp_path.unlink()
+
+    def test_publish_exhausts_retries_raises_error(self):
+        """Si se agotan los reintentos, debe elevar SnapshotPublicationError."""
+        with NamedTemporaryFile(suffix=".json.xz", delete=False) as tmp:
+            tmp.write(b"data")
+            tmp_path = Path(tmp.name)
+
+        try:
+            self.mock_client.send_document.side_effect = FloodWait(value=1)
+
+            with patch("time.sleep"):
+                with self.assertRaises(SnapshotPublicationError):
+                    SnapshotPublisher.publish(
+                        client=self.mock_client,
+                        chat_id=self.chat_id,
+                        snapshot_path=tmp_path,
+                        manifest=self.manifest,
+                    )
+        finally:
+            if tmp_path.exists():
+                tmp_path.unlink()
 
 
 if __name__ == "__main__":

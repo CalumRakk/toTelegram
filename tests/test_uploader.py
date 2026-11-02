@@ -6,7 +6,8 @@ from unittest.mock import MagicMock, patch
 
 from totelegram.concurrency import ConcurrencyCoordinator
 from totelegram.database import DatabaseSession
-from totelegram.engine.events import UploadObserver
+from totelegram.engine.events import ProgressMultiplexer, UploadObserver
+from totelegram.engine.factory import PayloadStreamFactory, UploadStream
 from totelegram.engine.uploader import CooperativeUploader
 from totelegram.models import (
     Job,
@@ -16,7 +17,102 @@ from totelegram.models import (
     TelegramUser,
 )
 from totelegram.schemas import SourceType
+from totelegram.stream import FileVolume
 from totelegram.types import UploadContext
+
+
+class TestPayloadStreamFactoryAndEvents(unittest.TestCase):
+    """Pruebas para la fábrica de flujos de subida y eventos de multiplexión."""
+
+    def setUp(self):
+        self.db_session = DatabaseSession("sqlite:///:memory:", auto_init_schema=True)
+        self.db = self.db_session.start()
+
+        self.chat = TelegramChat.create(
+            id=-100123456, title="Canal Streams", type="channel"
+        )
+        self.settings = MagicMock(exclude_files=[])
+
+    def tearDown(self):
+        self.db_session.close()
+
+    def test_payload_stream_factory_naming_resolution(self):
+        """Si el nombre <= 55 caracteres va limpio; si es > 55 usa nombre corto y pasa el largo a caption."""
+        source = Source.create(
+            path_str="/tmp/test.txt",
+            md5sum="hash1",
+            size=100,
+            mtime=1.0,
+            mimetype="text/plain",
+        )
+        job = Job.formalize_intent(source, self.chat, 1000)
+
+        p_short = Payload.create(
+            job=job,
+            sequence_index=0,
+            start_offset=0,
+            end_offset=100,
+            size=100,
+            filename="foto_vacaciones.jpg",
+            filename_short="h123.jpg",
+        )
+        name, caption = PayloadStreamFactory.resolve_naming(
+            p_short, max_filename_len=55
+        )
+        self.assertEqual(name, "foto_vacaciones.jpg")
+        self.assertIn("#totelegram_chunk", caption)
+        self.assertIn("#src_hash1", caption)
+
+        long_name = "a" * 60 + ".jpg"
+        p_long = Payload.create(
+            job=job,
+            sequence_index=1,
+            start_offset=0,
+            end_offset=100,
+            size=100,
+            filename=long_name,
+            filename_short="short_hash.jpg",
+        )
+        name_res, caption_res = PayloadStreamFactory.resolve_naming(
+            p_long, max_filename_len=55
+        )
+        self.assertEqual(name_res, "short_hash.jpg")
+        self.assertIn("#totelegram_chunk", caption_res)
+        self.assertIn("#src_hash1", caption_res)
+        self.assertIn("a" * 30, caption_res)
+
+    def test_payload_stream_factory_creates_file_volume(self):
+        """Para SourceType.FILE, create_stream debe retornar un UploadStream conteniendo FileVolume."""
+        with NamedTemporaryFile(delete=False) as tmp:
+            tmp.write(b"data" * 25)
+            tmp_path = Path(tmp.name)
+
+        try:
+            source = Source.get_or_create_from_filepath(tmp_path)
+            job = Job.formalize_intent(source, self.chat, 1000)
+            job.prepare_chunks(tmp_path, self.settings)
+            payload = job.payloads.first()
+
+            upload_stream = PayloadStreamFactory.create_stream(payload, tmp_path)
+            self.assertIsInstance(upload_stream, UploadStream)
+            self.assertIsInstance(upload_stream.stream, FileVolume)
+            self.assertEqual(upload_stream.size, 100)
+        finally:
+            if tmp_path.exists():
+                tmp_path.unlink()
+
+    def test_progress_multiplexer_dispatch(self):
+        """Verifica que el multiplexor notifique al heartbeat (DB) y al observer (UI) en cada chunk."""
+        mock_heartbeat = MagicMock()
+        mock_observer = MagicMock()
+
+        multiplexer = ProgressMultiplexer(
+            heartbeat=mock_heartbeat, observer=mock_observer
+        )
+        multiplexer(current=500, total=1000)
+
+        mock_heartbeat.pulse.assert_called_once_with(500, 1000)
+        mock_observer.on_payload_progress.assert_called_once_with(500, 1000)
 
 
 class TestCooperativeUploader(unittest.TestCase):
