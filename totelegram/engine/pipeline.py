@@ -18,7 +18,6 @@ from totelegram.exceptions import (
     PipelineCancelledError,
 )
 from totelegram.models import Job, Payload
-from totelegram.packaging.ledger import ReceiptLedger
 from totelegram.packaging.publisher import SnapshotPublisher
 from totelegram.packaging.snapshot import SnapshotService
 from totelegram.schemas import ExecutionDecision
@@ -390,16 +389,6 @@ class JobPipeline:
 
             with db_transaction(self.session.db):
                 job.set_snapshot_published(sent_msg.id, self.session.owner)
-
-            ReceiptLedger.record_upload(
-                file_path=job.path,
-                chat_id=self.session.tg_chat.id,
-                snapshot_message_id=sent_msg.id,
-                chunk_size=job.chunk_size,
-                total_parts=job.payloads.count(),
-                md5=job.source.md5sum,
-                chat_title=self.session.tg_chat.title,
-            )
 
         return True, True
 

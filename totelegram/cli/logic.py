@@ -24,10 +24,9 @@ from totelegram.exceptions import (
     TargetNotSetError,
 )
 from totelegram.identity import Settings
-from totelegram.models import TelegramUser
+from totelegram.models import Source, TelegramUser
 from totelegram.packaging.indexer import TapeIndexService
-from totelegram.packaging.ledger import ReceiptLedger
-from totelegram.schemas import ScanReport
+from totelegram.schemas import ScanReport, SourceType
 from totelegram.telegram.patches import get_patch_status
 from totelegram.telegram.resolver import TargetResolver
 from totelegram.telegram.types import TargetResolutionStatus
@@ -35,7 +34,7 @@ from totelegram.types import (
     JobExecutionResult,
     UploadSession,
 )
-from totelegram.utils import is_excluded
+from totelegram.utils import has_snapshot, is_excluded
 
 if TYPE_CHECKING:
     from pyrogram.client import Client
@@ -382,23 +381,85 @@ class InventoryEngine:
         self.force = force
         self.target_chat_id = target_chat_id
 
+    def _is_file_backed_up(self, path: Path) -> bool:
+        """Comprueba si el archivo ya está 100% respaldado en el chat destino."""
+        if has_snapshot(path):
+            return True
+
+        canonical_path = str(path.resolve())
+        stat = path.stat()
+
+        # Búsqueda rápida en DB
+        source = Source.get_or_none(Source.path_str == canonical_path)
+        if not source:
+            # Fallback para archivos movidos
+            source = (
+                Source.select()
+                .where((Source.size == stat.st_size) & (Source.type == SourceType.FILE))
+                .first()
+            )
+            if not (
+                source
+                and Path(source.path_str).name == path.name
+                and Source._is_mtime_matching(source.mtime, stat.st_mtime)
+            ):
+                return False
+
+        # Comprobar frescura y Job completado en el chat
+        if source.size != stat.st_size or not Source._is_mtime_matching(
+            source.mtime, stat.st_mtime
+        ):
+            return False
+
+        if self.target_chat_id is None:
+            return any(
+                j.is_completed_local and j.has_remote_snapshot for j in source.jobs
+            )
+
+        return any(
+            j.is_completed_local
+            and j.has_remote_snapshot
+            and str(j.chat_id) == str(self.target_chat_id)
+            for j in source.jobs
+        )
+
+    def _is_container_backed_up(self, path: Path) -> bool:
+        """Comprueba si la carpeta está respaldada como cinta en el chat destino."""
+        if has_snapshot(path):
+            return True
+
+        canonical_path = str(path.resolve())
+        source = Source.get_or_none(
+            (Source.path_str == canonical_path) & (Source.type == SourceType.FOLDER)
+        )
+        if not source:
+            return False
+
+        if self.target_chat_id is None:
+            return any(
+                j.is_completed_local and j.has_remote_snapshot for j in source.jobs
+            )
+
+        return any(
+            j.is_completed_local
+            and j.has_remote_snapshot
+            and str(j.chat_id) == str(self.target_chat_id)
+            for j in source.jobs
+        )
+
     def _validate_file(
         self, path: Path, report: ScanReport, check_snapshot: bool
     ) -> bool:
-        # Ignorar archivos internos de toTelegram y tartape
+        # Ignorar artefactos de toTelegram
         if path.suffix == ".xz" and path.name.endswith(".json.xz"):
-            return False
-        if path.name == ".totelegram.json" or path.name.startswith(".totelegram.tmp"):
             return False
         if path.suffix in (".tartape", ".ttape") or path.name.endswith(
             (".tartape", ".ttape")
         ):
             return False
 
-        # Validación contra el Ledger por Canal
-        if (check_snapshot and not self.force) and ReceiptLedger.is_backed_up(
-            path, self.target_chat_id
-        ):
+        # Validación directa contra DB / Snapshot visual
+        if (check_snapshot and not self.force) and self._is_file_backed_up(path):
             report.log_skip(path, "snapshot")
             return False
 
@@ -417,8 +478,8 @@ class InventoryEngine:
             report.log_skip(path, "exclusion")
             return False
 
-        # Comprobación de carpeta en el Ledger
-        if not self.force and ReceiptLedger.is_backed_up(path, self.target_chat_id):
+        # Comprobación de carpeta en DB / Snapshot visual
+        if not self.force and self._is_container_backed_up(path):
             report.log_skip(path, "snapshot")
             return False
 

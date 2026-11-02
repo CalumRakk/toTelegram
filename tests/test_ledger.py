@@ -1,303 +1,205 @@
-import json
 import tempfile
 import time
 import unittest
 from pathlib import Path
 
-from totelegram.packaging.ledger import (
-    LEDGER_FILENAME,
-    DirectoryReceipt,
-    ReceiptLedger,
+from totelegram.database import DatabaseSession
+from totelegram.models import (
+    Job,
+    Payload,
+    RemotePayload,
+    RemoteSnapshot,
+    Source,
+    TelegramChat,
+    TelegramUser,
 )
+from totelegram.packaging.auditor import AuditStatus, LocalAuditService
+from totelegram.schemas import SourceType
 
 
-class TestReceiptLedger(unittest.TestCase):
+class TestLocalAuditService(unittest.TestCase):
     def setUp(self):
-        """Crea un entorno de prueba temporal y archivos de muestra."""
         self.temp_dir = tempfile.TemporaryDirectory()
-        self.workdir = Path(self.temp_dir.name) / "videos"
+        self.workdir = Path(self.temp_dir.name) / "archivos"
         self.workdir.mkdir()
 
+        # Base de datos SQLite aislada en memoria
+        self.db_session = DatabaseSession("sqlite:///:memory:", auto_init_schema=True)
+        self.db = self.db_session.start()
+
+        self.chat = TelegramChat.create(
+            id=-100111222333, title="Canal Auditoría", type="channel"
+        )
+        self.user = TelegramUser.create(
+            id=1, first_name="AuditorUser", is_premium=False
+        )
+
+        # Archivo local de prueba
         self.file_a = self.workdir / "video1.mp4"
         self.file_a.write_bytes(b"DATA_VIDEO_1" * 100)
 
-        self.file_b = self.workdir / "video2.mp4"
-        self.file_b.write_bytes(b"DATA_VIDEO_2" * 50)
-
     def tearDown(self):
-        """Limpia el directorio temporal."""
+        self.db_session.close()
         self.temp_dir.cleanup()
 
-    def test_load_nonexistent_returns_empty_receipt(self):
-        receipt = ReceiptLedger.load(self.workdir)
-
-        self.assertIsInstance(receipt, DirectoryReceipt)
-        self.assertEqual(receipt.version, 1)
-        self.assertEqual(len(receipt.entries), 0)
-
-    def test_record_upload_and_atomic_save(self):
-        chat_id = -100123456789
-
-        receipt = ReceiptLedger.record_upload(
-            file_path=self.file_a,
-            chat_id=chat_id,
-            snapshot_message_id=500,
-            chunk_size=2000 * 1024 * 1024,
-            total_parts=1,
-            md5="fake_md5_hash_1",
-            chat_title="Mi Canal",
+    def _register_file_in_db(self, file_path: Path, chat: TelegramChat) -> Job:
+        stat = file_path.stat()
+        source = Source.create(
+            path_str=str(file_path.resolve()),
+            md5sum="hash_a1234567890",
+            size=stat.st_size,
+            mtime=stat.st_mtime,
+            mimetype="video/mp4",
+            type=SourceType.FILE,
         )
-
-        # Verificar que el archivo .totelegram.json existe en disco
-        ledger_path = self.workdir / LEDGER_FILENAME
-        self.assertTrue(ledger_path.exists())
-
-        # Verificar contenido deserializado
-        self.assertIn("video1.mp4", receipt.entries)
-        entry = receipt.entries["video1.mp4"]
-        self.assertEqual(entry.md5, "fake_md5_hash_1")
-        self.assertIn(str(chat_id), entry.destinations)
-
-        dest = entry.destinations[str(chat_id)]
-        self.assertEqual(dest.snapshot_message_id, 500)
-        self.assertEqual(dest.chat_title, "Mi Canal")
-
-    def test_is_backed_up_check(self):
-        chat_1 = -100111111111
-        chat_2 = -100222222222
-
-        ReceiptLedger.record_upload(
-            file_path=self.file_a,
-            chat_id=chat_1,
-            snapshot_message_id=10,
-            chunk_size=2000,
-            total_parts=1,
-            md5="hash_a",
+        job = Job.create(source=source, chat=chat, chunk_size=2000)
+        p = Payload.create(
+            job=job,
+            sequence_index=0,
+            start_offset=0,
+            end_offset=stat.st_size,
+            size=stat.st_size,
+            filename=file_path.name,
+            filename_short=file_path.name,
         )
-
-        # file_a está respaldado en chat_1
-        self.assertTrue(ReceiptLedger.is_backed_up(self.file_a, chat_1))
-
-        # file_a NO está respaldado en chat_2
-        self.assertFalse(ReceiptLedger.is_backed_up(self.file_a, chat_2))
-
-        # file_b NO está respaldado en ningún chat
-        self.assertFalse(ReceiptLedger.is_backed_up(self.file_b, chat_1))
-
-    def test_multi_channel_coexistence(self):
-        """Prueba que el mismo archivo puede tener múltiples destinos registrados sin colisión."""
-        chat_personal = -100111111111
-        chat_backup = -100222222222
-
-        ReceiptLedger.record_upload(
-            file_path=self.file_a,
-            chat_id=chat_personal,
-            snapshot_message_id=101,
-            chunk_size=2000,
-            total_parts=1,
-            md5="hash_a",
-            chat_title="Canal Personal",
+        RemotePayload.create(
+            payload=p,
+            message_id=50,
+            chat=chat,
+            owner=self.user,
+            json_metadata={"id": 50},
         )
+        RemoteSnapshot.register(job, 51, chat, self.user)
+        return job
 
-        ReceiptLedger.record_upload(
-            file_path=self.file_a,
-            chat_id=chat_backup,
-            snapshot_message_id=202,
-            chunk_size=4000,
-            total_parts=1,
-            md5="hash_a",
-            chat_title="Canal Backup",
-        )
+    def test_audit_unbacked_file_is_pending(self):
+        """Un archivo que solo existe en disco aparece como PENDING."""
+        items = LocalAuditService.audit_path(self.workdir)
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0].filename, "video1.mp4")
+        self.assertEqual(items[0].status, AuditStatus.PENDING)
+        self.assertFalse(items[0].is_safe_to_prune)
 
-        # Ambos destinos coexisten en el mismo archivo
-        receipt = ReceiptLedger.load(self.workdir)
-        destinations = receipt.entries["video1.mp4"].destinations
+    def test_audit_backed_up_file(self):
+        """Un archivo en disco con Job y RemoteSnapshot aparece como BACKED_UP."""
+        self._register_file_in_db(self.file_a, self.chat)
 
-        self.assertEqual(len(destinations), 2)
-        self.assertEqual(destinations[str(chat_personal)].snapshot_message_id, 101)
-        self.assertEqual(destinations[str(chat_backup)].snapshot_message_id, 202)
+        items = LocalAuditService.audit_path(self.workdir)
+        self.assertEqual(len(items), 1)
+        item = items[0]
+        self.assertEqual(item.status, AuditStatus.BACKED_UP)
+        self.assertTrue(item.is_safe_to_prune)
+        self.assertIn("Canal Auditoría", item.destinations[0])
 
-        self.assertTrue(ReceiptLedger.is_backed_up(self.file_a, chat_personal))
-        self.assertTrue(ReceiptLedger.is_backed_up(self.file_a, chat_backup))
+    def test_audit_protects_modified_file(self):
+        """Si el archivo en disco cambia de tamaño o mtime, pasa a MODIFIED."""
+        self._register_file_in_db(self.file_a, self.chat)
 
-    def test_mtime_invalidation(self):
-        """Si el archivo local es modificado después de la subida, se invalida el respaldo."""
-        chat_id = -100123456789
-
-        ReceiptLedger.record_upload(
-            file_path=self.file_a,
-            chat_id=chat_id,
-            snapshot_message_id=100,
-            chunk_size=2000,
-            total_parts=1,
-            md5="hash_original",
-        )
-
-        self.assertTrue(ReceiptLedger.is_backed_up(self.file_a, chat_id))
-
-        # Modificar el archivo local (cambia mtime y size)
+        # Modificamos el archivo localmente
         time.sleep(0.05)
-        self.file_a.write_bytes(b"DATA_MODIFICADA_NUEVA")
+        self.file_a.write_bytes(b"CONTENIDO_TOTALMENTE_NUEVO_Y_MAS_LARGO")
 
-        # Ahora el ledger debe detectar que no está al día
-        self.assertFalse(ReceiptLedger.is_backed_up(self.file_a, chat_id))
+        items = LocalAuditService.audit_path(self.workdir)
+        self.assertEqual(len(items), 1)
+        item = items[0]
+        self.assertEqual(item.status, AuditStatus.MODIFIED)
+        self.assertFalse(item.is_safe_to_prune)
 
-    def test_corrupted_ledger_recovery(self):
-        """Si el archivo .totelegram.json se corrompe en disco, load() no debe crashear."""
-        ledger_file = self.workdir / LEDGER_FILENAME
-        ledger_file.write_text("{ esto es un json roto !!!", encoding="utf-8")
+    def test_audit_moved_file_path_auto_update(self):
+        """Camino 2: Si el archivo se movió de carpeta, se detecta por (filename, size, mtime) y se actualiza path_str."""
+        job = self._register_file_in_db(self.file_a, self.chat)
 
-        receipt = ReceiptLedger.load(self.workdir)
-        self.assertIsInstance(receipt, DirectoryReceipt)
-        self.assertEqual(len(receipt.entries), 0)
+        # Movemos físicamente el archivo a otro subdirectorio
+        nuevo_dir = self.workdir / "subcarpeta"
+        nuevo_dir.mkdir()
+        nuevo_path = nuevo_dir / "video1.mp4"
+        self.file_a.rename(nuevo_path)
 
-    def test_remove_destination(self):
-        """Prueba la eliminación de un destino específico."""
-        chat_id = -100123456789
-        ReceiptLedger.record_upload(
-            file_path=self.file_a,
-            chat_id=chat_id,
-            snapshot_message_id=100,
-            chunk_size=2000,
-            total_parts=1,
-            md5="hash_a",
-        )
+        items = LocalAuditService.audit_path(nuevo_dir)
+        self.assertEqual(len(items), 1)
+        item = items[0]
+        self.assertEqual(item.status, AuditStatus.BACKED_UP)
 
-        self.assertTrue(ReceiptLedger.is_backed_up(self.file_a, chat_id))
+        # Verificar que SQLite actualizó el path_str automáticamente
+        source_refreshed = Source.get_by_id(job.source.id)
+        self.assertEqual(source_refreshed.path_str, str(nuevo_path.resolve()))
 
-        removed = ReceiptLedger.remove_destination(self.file_a, chat_id)
-        self.assertTrue(removed)
-        self.assertFalse(ReceiptLedger.is_backed_up(self.file_a, chat_id))
-
-    def test_assimilate_modern_v6_snapshot(self):
-        """Asimila automáticamente un snapshot .json.xz v6.0 presente en disco."""
-        import lzma
-        from datetime import datetime, timezone
-
-        from totelegram.packaging.schemas import (
-            RemotePart,
-            SourceMetadata,
-            UploadManifest,
-        )
-        from totelegram.schemas import SourceType
-
-        chat_id = -100555555555
-        manifest = UploadManifest(
-            manifest_version="6.0",
-            created_at=datetime.now(timezone.utc),
-            chunk_size=2000,
-            chat_id=chat_id,
-            owner_id=1,
-            owner_name="Test",
-            source=SourceMetadata(
-                filename="video1.mp4",
-                size=self.file_a.stat().st_size,
-                md5sum="fake_md5_hash_1",
-                mime_type="video/mp4",
-                mtime=self.file_a.stat().st_mtime,
-                type=SourceType.FILE,
-            ),
-            parts=[
-                RemotePart(
-                    sequence=0,
-                    message_id=888,
-                    chat_id=chat_id,
-                    link="https://t.me/c/1/888",
-                    part_filename="video1.mp4",
-                    part_size=self.file_a.stat().st_size,
-                    part_md5sum="fake_md5_hash_1",
-                    start_offset=0,
-                    end_offset=self.file_a.stat().st_size,
-                )
-            ],
-        )
-
-        # Crear el sidecar .json.xz
+    def test_audit_detects_legacy_snapshot_without_parsing(self):
+        """Comprueba que un snapshot .json.xz corrupto o no registrado se detecte sin abrirlo ni fallar."""
+        # Creamos un sidecar con contenido basura no-LZMA
         sidecar = self.workdir / f"{self.file_a.name}.json.xz"
-        with lzma.open(sidecar, "wt", encoding="utf-8") as f:
-            f.write(manifest.model_dump_json())
+        sidecar.write_bytes(b"ESTO NO ES UN ARCHIVO LZMA VALIDO")
 
-        # El ledger aún no existe
-        self.assertFalse((self.workdir / LEDGER_FILENAME).exists())
+        # LocalAuditService NO debe intentar descomprimirlo ni crashear
+        items = LocalAuditService.audit_path(self.workdir)
+        self.assertEqual(len(items), 1)
+        item = items[0]
+        self.assertEqual(item.status, AuditStatus.LOCAL_SNAPSHOT)
+        self.assertIn("Local (Snapshot)", item.destinations)
+        self.assertFalse(item.is_safe_to_prune)
 
-        # is_backed_up debe asimilarlo y crear .totelegram.json
-        self.assertTrue(ReceiptLedger.is_backed_up(self.file_a, chat_id))
-        self.assertTrue((self.workdir / LEDGER_FILENAME).exists())
+    def test_audit_unbacked_folder_is_neutral_directory(self):
+        """Una carpeta sin respaldo de cinta aparece como neutral (DIRECTORIO)."""
+        sub_dir = self.workdir / "mis_documentos"
+        sub_dir.mkdir()
 
-        dest = ReceiptLedger.get_destination(self.file_a, chat_id)
-        self.assertIsNotNone(dest)
-        self.assertEqual(dest.snapshot_message_id, 888)
-        self.assertEqual(dest.chunk_size, 2000)
+        items = LocalAuditService.audit_path(self.workdir)
+        item_dir = next(i for i in items if i.filename == "mis_documentos")
+        self.assertEqual(item_dir.status, AuditStatus.DIRECTORY)
+        self.assertTrue(item_dir.is_dir)
+        self.assertFalse(item_dir.is_safe_to_prune)
+        self.assertEqual(len(item_dir.destinations), 0)
 
-    def test_assimilate_archaeological_snapshot_without_chunk_size(self):
-        """Asimila un snapshot antiguo de versiones anteriores que no tenían chunk_size."""
-        import lzma
+    def test_audit_tape_folder_backup(self):
+        """Una carpeta registrada como cinta TAR aparece como TAPE_BACKUP."""
+        sub_dir = self.workdir / "fotos_vacaciones"
+        sub_dir.mkdir()
 
-        chat_id = -100777777777
-        ancient_json = {
-            "config": {
-                "chat_id": chat_id,
-                "tg_max_size": 1500,
-            },
-            "source": {
-                "size": self.file_a.stat().st_size,
-                "md5sum": "ancient_md5_1",
-            },
-            "parts": [{"message_id": 404, "size": self.file_a.stat().st_size}],
-        }
-
-        sidecar = self.workdir / f"{self.file_a.name}.json.xz"
-        with lzma.open(sidecar, "wt", encoding="utf-8") as f:
-            f.write(json.dumps(ancient_json))
-
-        # is_backed_up debe extraerlo con éxito usando la cascada heurística
-        self.assertTrue(ReceiptLedger.is_backed_up(self.file_a, chat_id))
-        dest = ReceiptLedger.get_destination(self.file_a, chat_id)
-        self.assertIsNotNone(dest)
-        self.assertEqual(dest.snapshot_message_id, 404)
-        self.assertEqual(dest.chunk_size, 1500)
-
-    def test_heal_directory_from_db(self):
-        """Auto-sana y reconstruye el .totelegram.json desde SQLite si fue eliminado."""
-        from totelegram.database import DatabaseSession
-        from totelegram.models import (
-            Job,
-            RemoteSnapshot,
-            Source,
-            TelegramChat,
-            TelegramUser,
+        source_folder = Source.create(
+            path_str=str(sub_dir.resolve()),
+            md5sum="fingerprint_folder_abc",
+            size=5000,
+            mtime=1700000000.0,
+            mimetype="application/x-tar",
+            type=SourceType.FOLDER,
         )
-        from totelegram.schemas import SourceType
+        job = Job.create(source=source_folder, chat=self.chat, chunk_size=2000)
+        p = Payload.create(
+            job=job,
+            sequence_index=0,
+            start_offset=0,
+            end_offset=5000,
+            size=5000,
+            filename="fotos.tar.01-01",
+            filename_short="f.tar.01-01",
+        )
+        RemotePayload.create(
+            payload=p,
+            message_id=60,
+            chat=self.chat,
+            owner=self.user,
+            json_metadata={"id": 60},
+        )
+        RemoteSnapshot.register(job, 61, self.chat, self.user)
 
-        with DatabaseSession("sqlite:///:memory:", auto_init_schema=True) as db:
-            chat = TelegramChat.create(
-                id=-100999999, title="Chat DB Heal", type="channel"
-            )
-            user = TelegramUser.create(id=1, first_name="HealUser", is_premium=False)
-            source = Source.create(
-                path_str=str(self.file_a),
-                md5sum="md5_heal_test",
-                size=self.file_a.stat().st_size,
-                mtime=self.file_a.stat().st_mtime,
-                mimetype="video/mp4",
-                type=SourceType.FILE,
-            )
-            job = Job.create(source=source, chat=chat, chunk_size=2000)
-            RemoteSnapshot.create(job=job, chat=chat, message_id=7711, owner=user)
+        items = LocalAuditService.audit_path(self.workdir)
+        item_folder = next(i for i in items if i.filename == "fotos_vacaciones")
+        self.assertEqual(item_folder.status, AuditStatus.TAPE_BACKUP)
+        self.assertTrue(item_folder.is_dir)
+        self.assertIn("Canal Auditoría", item_folder.destinations[0])
 
-            # Asegurar que no existe el archivo de ledger
-            ledger_file = self.workdir / LEDGER_FILENAME
-            if ledger_file.exists():
-                ledger_file.unlink()
+    def test_audit_remote_only_file(self):
+        """Un archivo registrado en DB que ya fue borrado de disco (prune) aparece como REMOTE_ONLY."""
+        self._register_file_in_db(self.file_a, self.chat)
+        # Borramos el archivo del disco
+        self.file_a.unlink()
 
-            healed_count = ReceiptLedger.heal_directory_from_db(self.workdir, db=db)
-            self.assertEqual(healed_count, 1)
-
-            # Ahora debe estar respaldado según el ledger auto-sanado
-            self.assertTrue(ReceiptLedger.is_backed_up(self.file_a, chat.id))
-            dest = ReceiptLedger.get_destination(self.file_a, chat.id)
-            self.assertEqual(dest.snapshot_message_id, 7711)
-            self.assertEqual(dest.chat_title, "Chat DB Heal")
+        items = LocalAuditService.audit_path(self.workdir)
+        self.assertEqual(len(items), 1)
+        item = items[0]
+        self.assertEqual(item.status, AuditStatus.REMOTE_ONLY)
+        self.assertIsNone(item.path)
+        self.assertFalse(item.is_safe_to_prune)
 
 
 if __name__ == "__main__":

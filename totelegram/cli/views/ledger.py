@@ -5,9 +5,10 @@ from rich.table import Table
 from tartape.units import format_size
 
 from totelegram.cli.ui import UI, console, log_table
+from totelegram.packaging.auditor import AuditStatus
 
 if TYPE_CHECKING:
-    from totelegram.packaging.ledger import FileAuditResult
+    from totelegram.packaging.auditor import AuditItem
 
 
 class DisplayLedger:
@@ -16,12 +17,12 @@ class DisplayLedger:
     @staticmethod
     def show_directory_status(
         dir_path: Path,
-        audit_results: list["FileAuditResult"],
+        audit_results: list["AuditItem"],
         target_chat_id: int | str | None = None,
     ) -> None:
         if not audit_results:
             UI.info(
-                f"El directorio '[bold]{dir_path.name}[/]' no contiene archivos para auditar."
+                f"El directorio '[bold]{dir_path.name}[/]' no contiene elementos para auditar."
             )
             return
 
@@ -32,30 +33,38 @@ class DisplayLedger:
             title_style="bold blue",
             expand=True,
         )
-        table.add_column("Archivo", style="white")
+        table.add_column("Elemento", style="white")
         table.add_column("Tamaño", justify="right", style="dim")
         table.add_column("Destinos en Telegram", style="dim")
         table.add_column("Estado", justify="center")
 
         for res in audit_results:
-            size_str = format_size(res.size)
+            # Tamaño: para directorios neutrales no mostramos tamaño
+            if res.status == AuditStatus.DIRECTORY:
+                size_str = "[dim]--[/dim]"
+            else:
+                size_str = format_size(res.size)
 
+            # Destinos en Telegram
             if res.destinations:
-                dest_labels = []
-                for cid, dest in res.destinations.items():
-                    title = dest.chat_title or f"Chat {cid}"
-                    dest_labels.append(f"{title} [dim]({dest.total_parts}p)[/]")
-                dest_str = ", ".join(dest_labels)
+                dest_str = ", ".join(res.destinations)
             else:
-                dest_str = "[dim]--[/]"
+                dest_str = "[dim]--[/dim]"
 
-            if not res.is_on_disk:
+            # Matriz de estados acordada
+            if res.status == AuditStatus.DIRECTORY:
+                status_str = "[dim]Directorio[/dim]"
+            elif res.status == AuditStatus.TAPE_BACKUP:
+                status_str = "[bold green]✓ Cinta TAR[/bold green]"
+            elif res.status == AuditStatus.LOCAL_SNAPSHOT:
+                status_str = "[cyan]✓ Respaldado (Snapshot local)[/cyan]"
+            elif res.status == AuditStatus.REMOTE_ONLY:
                 status_str = "[dim red]☁ Solo en Telegram[/dim red]"
-            elif res.is_modified:
+            elif res.status == AuditStatus.MODIFIED:
                 status_str = "[bold yellow]! Modificado localmente[/bold yellow]"
-            elif res.is_backed_up:
+            elif res.status == AuditStatus.BACKED_UP:
                 status_str = "[bold green]✓ Respaldado[/bold green]"
-            else:
+            else:  # AuditStatus.PENDING
                 status_str = "[dim]Pendiente de subida[/dim]"
 
             table.add_row(res.filename, size_str, dest_str, status_str)
@@ -64,9 +73,7 @@ class DisplayLedger:
         log_table(table, f"Estado de Respaldo Local — {dir_path.name}")
 
     @staticmethod
-    def show_prune_candidates(
-        candidates: list["FileAuditResult"], total_bytes: int
-    ) -> None:
+    def show_prune_candidates(candidates: list["AuditItem"], total_bytes: int) -> None:
         table = Table(
             title="Archivos Respaldados Listos para Liberar Espacio",
             show_header=True,
@@ -79,10 +86,8 @@ class DisplayLedger:
         table.add_column("Verificado en Telegram", style="dim")
 
         for c in candidates:
-            dest_titles = [
-                d.chat_title or str(cid) for cid, d in c.destinations.items()
-            ]
-            table.add_row(c.filename, format_size(c.size), ", ".join(dest_titles))
+            dest_str = ", ".join(c.destinations) if c.destinations else "[dim]--[/dim]"
+            table.add_row(c.filename, format_size(c.size), dest_str)
 
         console.print(table)
         UI.info(
@@ -96,6 +101,6 @@ class DisplayLedger:
             f"recuperando [bold cyan]{format_size(freed_bytes)}[/] de espacio en disco."
         )
         UI.tip(
-            "El recibo '.totelegram.json' se ha conservado intacto. "
+            "El registro se conserva en la base de datos local ('☁ Solo en Telegram'). "
             "Puedes restaurar cualquiera de estos archivos cuando lo necesites usando 'totelegram download'."
         )

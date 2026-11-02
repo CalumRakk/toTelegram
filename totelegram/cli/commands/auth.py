@@ -220,31 +220,23 @@ def status_command(
                     UI.error(res.error_message or f"Destino '{target}' inválido.")
                     raise typer.Exit(1)
 
-        from totelegram.cli.ui import DisplayLedger
-        from totelegram.packaging.ledger import ReceiptLedger
+        from totelegram.cli.views.ledger import DisplayLedger
+        from totelegram.packaging.auditor import LocalAuditService
 
-        if target_path.is_file():
-            # Auditar solo el archivo específico dentro de su carpeta
-            audit_list = ReceiptLedger.audit_directory(
-                target_path.parent, target_chat_id=resolved_chat_id
-            )
-            audit_list = [a for a in audit_list if a.filename == target_path.name]
-            UI.separator()
-            DisplayLedger.show_directory_status(
-                target_path.parent, audit_list, target_chat_id=resolved_chat_id
-            )
-        elif target_path.is_dir():
-            audit_list = ReceiptLedger.audit_directory(
-                target_path, target_chat_id=resolved_chat_id
-            )
-            UI.separator()
-            DisplayLedger.show_directory_status(
-                target_path, audit_list, target_chat_id=resolved_chat_id
-            )
-        else:
+        if not target_path.exists():
             UI.error(f"La ruta '{path}' no existe.")
             raise typer.Exit(1)
 
+        with state.scope() as (_client, _db):
+            audit_list = LocalAuditService.audit_path(
+                target_path, target_chat_id=resolved_chat_id
+            )
+
+        display_dir = target_path if target_path.is_dir() else target_path.parent
+        UI.separator()
+        DisplayLedger.show_directory_status(
+            display_dir, audit_list, target_chat_id=resolved_chat_id
+        )
         return
 
     # MODO B: Estado de la cuenta de Telegram (Comportamiento habitual)

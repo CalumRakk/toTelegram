@@ -14,6 +14,7 @@ from totelegram.cli.logic import (
     run_upload_flow,
 )
 from totelegram.cli.state import CLIState
+from totelegram.database import DatabaseSession
 from totelegram.identity import SettingsManager
 from totelegram.types import JobExecutionResult, StrategyResult
 
@@ -24,6 +25,10 @@ class TestCliUploadFlow(unittest.TestCase):
     """Pruebas del runner unificado de subidas y los objetos de orquestación."""
 
     def setUp(self):
+        # Base de datos SQLite en memoria para que db_proxy esté inicializado
+        self.db_session = DatabaseSession("sqlite:///:memory:", auto_init_schema=True)
+        self.db = self.db_session.start()
+
         self.tmp_file = NamedTemporaryFile(delete=False)  # noqa: SIM115
         self.tmp_file.write(b"DATA_UPLOAD_TEST" * 50)
         self.tmp_file.close()
@@ -32,6 +37,7 @@ class TestCliUploadFlow(unittest.TestCase):
     def tearDown(self):
         if self.file_path.exists():
             self.file_path.unlink()
+        self.db_session.close()
 
     def _build_mock_cli_state(self) -> MagicMock:
         """Helper para construir un mock consistente de CLIState."""
@@ -42,7 +48,7 @@ class TestCliUploadFlow(unittest.TestCase):
 
         @contextmanager
         def fake_scope():
-            yield MagicMock(), MagicMock()
+            yield MagicMock(), self.db
 
         mock_state.scope = fake_scope
 
@@ -58,12 +64,13 @@ class TestCliUploadFlow(unittest.TestCase):
     def _build_mock_session(self, mock_state: MagicMock) -> MagicMock:
         """Helper para construir un mock de UploadSession con settings tipados."""
         mock_ctx = MagicMock()
+        mock_ctx.db = self.db
         mock_ctx.owner.first_name = "TestOwner"
         mock_ctx.owner.username = "tester"
         mock_ctx.tg_chat.id = -100123
         mock_ctx.tg_chat.title = "Chat Test"
         mock_ctx.tg_chat.username = None
-        mock_ctx.settings = mock_state.settings  # Conecta los settings numéricos reales
+        mock_ctx.settings = mock_state.settings
         return mock_ctx
 
     # PRUEBAS DEL ORQUESTADOR (run_upload_flow)
@@ -180,7 +187,7 @@ class TestCliUploadFlow(unittest.TestCase):
             )
 
         mock_job.investigate.assert_called_once()
-        # Cuando is_fulfilled es True, sella snapshot/ledger pero NO transfiere bytes
+        # Cuando is_fulfilled es True, sella snapshot pero NO transfiere bytes
         mock_job.transfer.assert_not_called()
         mock_job.seal.assert_called_once()
 

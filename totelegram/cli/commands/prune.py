@@ -6,7 +6,7 @@ import typer
 from totelegram.cli.state import CLIState
 from totelegram.cli.ui import UI, console
 from totelegram.cli.views.ledger import DisplayLedger
-from totelegram.packaging.ledger import FileAuditResult, ReceiptLedger
+from totelegram.packaging.auditor import AuditItem, LocalAuditService
 from totelegram.telegram.resolver import TargetResolver
 from totelegram.telegram.types import TargetResolutionStatus
 
@@ -48,7 +48,7 @@ def prune_files(
 ):
     """
     Libera espacio en disco eliminando de forma segura los archivos locales que ya
-    han sido respaldados al 100% en Telegram, conservando el recibo (.totelegram.json).
+    han sido respaldados al 100% en Telegram, conservando el registro en la base de datos local.
     """
     state: CLIState = ctx.obj
     resolved_target_id: int | str | None = None
@@ -76,13 +76,16 @@ def prune_files(
             if d.is_dir() and not d.name.startswith(".")
         )
 
-    candidates: list[FileAuditResult] = []
+    candidates: list[AuditItem] = []
 
-    with console.status(
-        "[bold cyan]Auditando recibos locales (.totelegram.json)...[/]"
+    with (
+        state.scope() as (_client, _db),
+        console.status(
+            "[bold cyan]Auditando estado contra la base de datos local...[/]"
+        ),
     ):
         for d in dirs_to_scan:
-            audit_list = ReceiptLedger.audit_directory(
+            audit_list = LocalAuditService.audit_path(
                 d, target_chat_id=resolved_target_id
             )
             for item in audit_list:
@@ -118,7 +121,7 @@ def prune_files(
             UI.info("Operación cancelada por el usuario.")
             raise typer.Exit(0)
 
-    # Eliminación física segura de los archivos locales
+    # Eliminación física segura: solo del disco, SQLite queda intacto
     deleted_count = 0
     freed_bytes = 0
 

@@ -679,26 +679,6 @@ class SnapshotImporter:
         ):
             cls._bulk_ingest_tape_members(source, item.inspection.path)
 
-        # Sincronizar el Recibo Agregado local si el archivo/carpeta original existe en disco
-        try:
-            source_file = Path(source.path_str).resolve()
-            if source_file.exists():
-                from totelegram.packaging.ledger import ReceiptLedger
-
-                ReceiptLedger.record_upload(
-                    file_path=source_file,
-                    chat_id=chat.id,
-                    snapshot_message_id=resolved_snapshot_msg_id,
-                    chunk_size=job.chunk_size,
-                    total_parts=len(manifest.parts),
-                    md5=source.md5sum,
-                    chat_title=chat.title,
-                )
-        except Exception as e:
-            logger.debug(
-                f"Aviso actualizando ReceiptLedger desde SnapshotImporter: {e}"
-            )
-
         # AUTO-ENLACE / PUBLICACIÓN EN TELEGRAM
         if not job.remote_snapshot and client is not None:
             cls._resolve_or_publish_remote_snapshot(

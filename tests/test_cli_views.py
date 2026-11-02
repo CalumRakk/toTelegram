@@ -9,6 +9,7 @@ from totelegram.cli.views.settings import DisplayConfig, DisplayProfile, Display
 from totelegram.cli.views.snapshots import DisplaySnapshotPlan
 from totelegram.cli.views.upload import DisplayIndexer, DisplayUpload
 from totelegram.identity import Profile, Settings, SettingsManager
+from totelegram.packaging.auditor import AuditItem, AuditStatus
 from totelegram.packaging.importer import (
     DbMutations,
     ImportPlan,
@@ -17,7 +18,6 @@ from totelegram.packaging.importer import (
     PlanItem,
     SnapshotInspection,
 )
-from totelegram.packaging.ledger import BackupDestinationRecord, FileAuditResult
 from totelegram.packaging.schemas import SourceMetadata, UploadManifest
 from totelegram.schemas import ScanReport, SourceType
 from totelegram.telegram.types import (
@@ -43,42 +43,33 @@ class TestCliViews(unittest.TestCase):
         report.log_skip(Path("cache.tmp"), "exclusion")
         report.log_skip(Path("corrupto.bin"), "error")
 
-        # No debe lanzar excepción
         DisplayUpload.show_skip_report(report, item_type="archivo", force_verbose=True)
         DisplayUpload.show_skip_report(report, item_type="archivo", force_verbose=False)
 
     def test_display_ledger_rendering(self):
-        """Verifica el renderizado de la tabla de auditoría y prune."""
-        dest = BackupDestinationRecord(
-            chat_id=-100123456,
-            chat_title="Mi Canal",
-            snapshot_message_id=42,
-            chunk_size=1000,
-            total_parts=1,
-        )
-        audit_result = FileAuditResult(
+        """Verifica el renderizado de la tabla de auditoría y prune con AuditItem."""
+        audit_result = AuditItem(
             filename="foto.jpg",
             path=Path("/tmp/foto.jpg"),
             size=5000,
-            is_on_disk=True,
-            is_backed_up=True,
-            is_modified=False,
-            destinations={"-100123456": dest},
+            is_dir=False,
+            status=AuditStatus.BACKED_UP,
+            destinations=["Mi Canal (-100123456)"],
         )
 
-        # Verificar tabla de estado
+        # 1. Tabla de estado
         DisplayLedger.show_directory_status(
             dir_path=Path("/tmp"),
             audit_results=[audit_result],
         )
 
-        # Verificar tabla de candidatos a prune
+        # 2. Tabla de candidatos a prune
         DisplayLedger.show_prune_candidates(
             candidates=[audit_result],
             total_bytes=5000,
         )
 
-        # Verificar resumen final
+        # 3. Resumen final de prune
         DisplayLedger.show_prune_summary(deleted_count=1, freed_bytes=5000)
 
     def test_display_settings_and_profiles(self):
@@ -122,26 +113,19 @@ class TestCliViews(unittest.TestCase):
             match=match,
         )
 
-        # 1. Diagnóstico exitoso
         DisplayTarget.show_diagnostic(
             resolution=resolution_ok,
             can_delete=True,
             account_max_size=2000 * 1024 * 1024,
             is_premium=False,
         )
-
-        # 2. Ambigüedad
         DisplayTarget.show_ambiguous_targets("canal_test", [match])
-
-        # 3. Lista de conocidos
         DisplayTarget.show_known_targets([])
 
     def test_display_indexer_notice(self):
-        """Verifica el aviso de indexación pendiente."""
         DisplayIndexer.show_unindexed_notice(count=5)
 
     def test_display_snapshot_plan_tables(self):
-        """Verifica la generación del balance y tablas del plan de importación."""
         manifest = UploadManifest(
             chunk_size=1000,
             created_at=MagicMock(),

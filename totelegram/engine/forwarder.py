@@ -15,7 +15,6 @@ from totelegram.models import (
     TelegramChat,
     TelegramUser,
 )
-from totelegram.packaging.ledger import ReceiptLedger
 from totelegram.packaging.publisher import SnapshotPublisher
 from totelegram.packaging.schemas import (
     TTAPE_EXTENSION,
@@ -242,22 +241,6 @@ class SnapshotForwarder:
 
             # Sellar RemoteSnapshot
             job.set_snapshot_published(published_msg.id, owner)
-
-        # Actualizar el Recibo Agregado si el archivo original existe en disco
-        try:
-            orig_file = snapshot_path.parent / manifest.source.filename
-            if orig_file.exists():
-                ReceiptLedger.record_upload(
-                    file_path=orig_file,
-                    chat_id=target_chat_id,
-                    snapshot_message_id=published_msg.id,
-                    chunk_size=manifest.chunk_size,
-                    total_parts=total_parts,
-                    md5=manifest.source.md5sum,
-                    chat_title=target_chat.title,
-                )
-        except Exception as e:
-            logger.debug(f"Aviso actualizando ReceiptLedger en forward: {e}")
 
         return ForwardReport(
             source_chat_id=source_chat_id,
