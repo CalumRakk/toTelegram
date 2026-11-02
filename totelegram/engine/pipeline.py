@@ -16,7 +16,7 @@ from totelegram.exceptions import (
     PermissionDeniedCleanupError,
     PipelineCancelledError,
 )
-from totelegram.models import Job
+from totelegram.models import Job, Payload
 from totelegram.packaging.ledger import ReceiptLedger
 from totelegram.packaging.publisher import SnapshotPublisher
 from totelegram.packaging.snapshot import SnapshotService
@@ -101,10 +101,21 @@ class JobContext:
             )
 
         if report.decision == ExecutionDecision.INCOMPATIBLE_CAPACITY:
+            valid_payload_ids = {r.payload_id for r in report.valid_remotes}
+            pending_payloads = [
+                p
+                for p in self.job.payloads.order_by(Payload.sequence_index)
+                if p.id not in valid_payload_ids
+            ]
+            pending_size = (
+                pending_payloads[0].size if pending_payloads else self.job.chunk_size
+            )
+
             raise IncompatibleCapacityError(
                 job_chunk_size=self.job.chunk_size,
                 account_max_size=self.account_max_size,
                 is_premium=self.session.owner.is_premium,
+                pending_payload_size=pending_size,
             )
 
         return self.report
@@ -277,7 +288,14 @@ class JobPipeline:
 
         if (
             report.decision == ExecutionDecision.CLEAN_RESTART
-            and force
+            and (
+                force
+                or (
+                    account_max_size
+                    and job.chunk_size > account_max_size
+                    and len(report.valid_remotes) == 0
+                )
+            )
             and job.payloads.count() > 0
         ):
             old_msg_ids = [r.message_id for r in report.valid_remotes]

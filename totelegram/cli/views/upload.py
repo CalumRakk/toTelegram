@@ -152,27 +152,22 @@ class DisplayUpload:
         )
 
     @staticmethod
-    def show_incompatible_capacity_panel(err: IncompatibleCapacityError):
-        """Muestra un panel visual explicando la degradación de capacidad de la cuenta."""
-        job_mb = err.job_chunk_size // (1024 * 1024)
+    def show_incompatible_capacity_panel(
+        err: IncompatibleCapacityError,
+        filename: str | None = None,
+    ):
+        """Muestra un panel visual explicando que la pieza pendiente supera la capacidad de la cuenta."""
+        size_to_report = err.pending_payload_size or err.job_chunk_size
+        part_mb = size_to_report // (1024 * 1024)
         acc_mb = err.account_max_size // (1024 * 1024)
         account_type = "Premium" if err.is_premium else "Estándar"
+        file_desc = f" para '[bold]{filename}[/]'" if filename else ""
 
         msg = (
-            f"Este archivo tiene una subida pendiente iniciada con bloques de [bold]{job_mb} MB[/].\n"
+            f"Omitiendo subida{file_desc}: la siguiente parte pendiente mide [bold]{part_mb} MB[/].\n"
             f"La cuenta activa actual es [bold]{account_type}[/] y solo puede transferir bloques de hasta [bold]{acc_mb} MB[/].\n\n"
-            f"[dim]Para mantener la integridad matemática de los fragmentos, no se pueden mezclar trozos de diferente tamaño.[/dim]"
         )
-        UI.educational_tip(
-            message=msg,
-            title="Incompatibilidad de Capacidad",
-            commands=[
-                "totelegram switch <cuenta_premium>    # Cambiar a una cuenta con capacidad suficiente",
-                "totelegram send ... --force           # Descartar intento previo y reiniciar con la capacidad actual",
-            ],
-            spacing="block",
-            border_style="yellow",
-        )
+        UI.warn(message=msg)
 
     @staticmethod
     def show_permission_denied_panel(err: PermissionDeniedCleanupError):

@@ -35,13 +35,29 @@ class CooperativeUploader:
         limit_bytes = session.settings.upload_limit_rate_kbps * 1024
         total_chunks = job.payloads.count()
 
+        # TODO: REFACTOR
+        account_max_size = None
+        if hasattr(session, "settings") and session.settings:
+            is_premium = (
+                getattr(getattr(session, "owner", None), "is_premium", False) is True
+            )
+            raw_max = (
+                getattr(session.settings, "tg_max_size_premium", None)
+                if is_premium
+                else getattr(session.settings, "tg_max_size_normal", None)
+            )
+            if isinstance(raw_max, int) and raw_max > 0:
+                account_max_size = raw_max
+
         logger.info(
             f"Iniciando subida física para Job {job.id} ({job.source.path_str})"
         )
 
         while True:
             with session.coordinator.claim_next_payload(
-                job, session.account_id
+                job=job,
+                account_id=session.account_id,
+                max_payload_size=account_max_size,
             ) as claim:
                 if claim is None:
                     logger.debug(

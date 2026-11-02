@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, List, cast
 import peewee
 from pyrogram import enums
 from pyrogram.errors import RPCError
+from tartape import format_size
 
 from totelegram.common.helpers import batched
 from totelegram.database import db_transaction
@@ -92,12 +93,29 @@ class DiscoveryService:
 
         # Si hay partes parciales (subida a medias):
         if valid_count > 0:
-            # A) Comprobación de corte incompatible (ej. Job de 4 GB con cuenta degradada a 2 GB)
-            if account_max_chunk_size and job.chunk_size > account_max_chunk_size:
+            valid_payload_ids = {r.payload_id for r in valid_remotes}
+            pending_payloads = [
+                p
+                for p in job.payloads.order_by(Payload.sequence_index)
+                if p.id not in valid_payload_ids
+            ]
+            next_pending_payload = pending_payloads[0] if pending_payloads else None
+            next_pending_size = (
+                next_pending_payload.size if next_pending_payload else job.chunk_size
+            )
+
+            # A) Comprobación de corte incompatible:
+            has_incompatible_pending = bool(
+                isinstance(account_max_chunk_size, int)
+                and account_max_chunk_size > 0
+                and next_pending_size > account_max_chunk_size
+            )
+
+            if has_incompatible_pending:
                 if not force:
                     logger.warning(
-                        f"Job {job.id} exige bloques de {job.chunk_size // (1024 * 1024)} MB, "
-                        f"pero la cuenta solo soporta {account_max_chunk_size // (1024 * 1024)} MB."
+                        f"Job {job.id}: La siguiente pieza ({format_size(next_pending_size)}) "
+                        f"supera el límite de subida de la cuenta activa ({format_size(account_max_chunk_size)})."
                     )
                     return InvestigationReport(
                         decision=ExecutionDecision.INCOMPATIBLE_CAPACITY,
@@ -105,11 +123,9 @@ class DiscoveryService:
                         orphaned_remotes=orphaned_remotes,
                         total_parts=expected_count,
                         potential_duplicates=potential_duplicates,
-                        detail="El corte previo del archivo supera el límite de subida de la cuenta activa.",
+                        detail=f"La siguiente pieza pendiente ({format_size(next_pending_size)}) supera la capacidad de la cuenta.",
                     )
                 else:
-                    # Con --force, el usuario desea descartar el corte incompatible y reiniciar en 2GB.
-                    # Requiere permiso para eliminar los trozos de 4GB viejos de Telegram.
                     if not self.access_service.can_delete_messages(job.chat.id):
                         return InvestigationReport(
                             decision=ExecutionDecision.PERMISSION_DENIED_CLEANUP,
@@ -122,7 +138,7 @@ class DiscoveryService:
                         valid_remotes=valid_remotes,
                         total_parts=expected_count,
                         potential_duplicates=potential_duplicates,
-                        detail="Reinicio limpio: se eliminarán partes de 4GB viejas y se reanudará en 2GB.",
+                        detail="Reinicio limpio: se eliminarán partes viejas y se reanudará con la capacidad actual.",
                     )
 
             # B) Corte compatible con --force (Anti-Waste TOC): Reubicar al fondo
@@ -161,13 +177,14 @@ class DiscoveryService:
                 detail="Subida incompleta compatible. Reanudando partes faltantes en su sitio.",
             )
 
-        # Sin partes previas válidas -> Subida limpia desde cero
+        # Sin partes previas válidas (o todas fueron orfanadas por JIT) -> Subida limpia desde cero
         return InvestigationReport(
             decision=ExecutionDecision.CLEAN_RESTART,
+            valid_remotes=[],
             orphaned_remotes=orphaned_remotes,
             total_parts=expected_count,
             potential_duplicates=potential_duplicates,
-            detail="No hay partes previas válidas. Requiere subida limpia.",
+            detail="No hay partes previas válidas en Telegram. Requiere subida limpia.",
         )
 
     def _is_snapshot_fulfilled_in_chat(self, job: Job) -> bool:

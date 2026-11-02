@@ -18,6 +18,7 @@ from totelegram.discovery import DiscoveryService
 from totelegram.engine.pipeline import JobPipeline
 from totelegram.exceptions import (
     ConfigurationError,
+    IncompatibleCapacityError,
     InfrastructureError,
     TargetAmbiguousError,
     TargetNotSetError,
@@ -161,6 +162,10 @@ class CandidateItem:
     @property
     def label(self) -> str:
         return "Carpeta" if self.is_backup else "Archivo"
+
+    def announce_incompatible_capacity(self, err: IncompatibleCapacityError) -> None:
+        """Informa que el elemento fue omitido por requerir una cuenta con mayor capacidad."""
+        DisplayUpload.show_incompatible_capacity_panel(err, filename=self.path.name)
 
     def announce_start(self) -> None:
         """Emite el encabezado y análisis visual previo al inicio de la subida."""
@@ -487,6 +492,9 @@ def run_upload_flow(
         inventory = UploadInventory.discover(session=session, request=request)
         candidates = inventory.ensure_candidates()
 
+        processed_count = 0
+        skipped_by_capacity: list[CandidateItem] = []
+
         with session.exclusive_lock():
             observer = RichUploadObserver()
             pipeline = JobPipeline(session=session, observer=observer)
@@ -494,27 +502,38 @@ def run_upload_flow(
             for item in candidates:
                 item.announce_start()
 
-                with pipeline.track_job(
-                    path=item.path,
-                    is_last_in_batch=item.is_last,
-                    force=request.force,
-                    auto_truncate=request.auto_truncate,
-                    yes=request.yes,
-                    confirm_cleanup=request.confirm_cleanup,
-                ) as job:
-                    # Investiga disponibilidad en Telegram
-                    report = job.investigate()
+                try:
+                    with pipeline.track_job(
+                        path=item.path,
+                        is_last_in_batch=item.is_last,
+                        force=request.force,
+                        auto_truncate=request.auto_truncate,
+                        yes=request.yes,
+                        confirm_cleanup=request.confirm_cleanup,
+                    ) as job:
+                        # Investiga disponibilidad en Telegram
+                        report = job.investigate()
 
-                    # ¿Ya está completado al 100% en este canal?
-                    if report.is_fulfilled:
+                        # ¿Ya está completado al 100% en este canal?
+                        if report.is_fulfilled:
+                            job.seal()
+                            item.announce_already_fulfilled()
+                            continue
+
+                        job.transfer()
+
                         job.seal()
-                        item.announce_already_fulfilled()
-                        continue
 
-                    job.transfer()
+                    item.announce_success(job.result)
+                    processed_count += 1
 
-                    job.seal()
-
-                item.announce_success(job.result)
+                except IncompatibleCapacityError as e:
+                    item.announce_incompatible_capacity(e)
+                    skipped_by_capacity.append(item)
+                    continue
 
         inventory.report_final_integrity()
+
+        # Si había candidatos pero NINGUNO pudo subirse debido a la capacidad, salir con código 1
+        if skipped_by_capacity and processed_count == 0:
+            raise typer.Exit(1)

@@ -149,18 +149,26 @@ class PipelineExecutionError(ToTelegramError):
 class IncompatibleCapacityError(DomainError):
     """Lanzada cuando un Job previo exige capacidades superiores a la sesión actual (ej. 4GB vs 2GB)."""
 
-    def __init__(self, job_chunk_size: int, account_max_size: int, is_premium: bool):
+    def __init__(
+        self,
+        job_chunk_size: int,
+        account_max_size: int,
+        is_premium: bool,
+        pending_payload_size: int | None = None,
+    ):
         self.job_chunk_size = job_chunk_size
         self.account_max_size = account_max_size
         self.is_premium = is_premium
+        self.pending_payload_size = pending_payload_size
 
-        job_mb = job_chunk_size // (1024 * 1024)
+        size_to_report = pending_payload_size or job_chunk_size
+        part_mb = size_to_report // (1024 * 1024)
         acc_mb = account_max_size // (1024 * 1024)
         account_type = "Premium" if is_premium else "Estándar"
 
         super().__init__(
             message=(
-                f"Este archivo tiene una subida pendiente iniciada con bloques de {job_mb} MB, "
+                f"Este archivo tiene una parte pendiente de {part_mb} MB, "
                 f"pero la cuenta activa actual es {account_type} y solo puede transferir bloques de hasta {acc_mb} MB."
             ),
             title="Incompatibilidad de Capacidad",

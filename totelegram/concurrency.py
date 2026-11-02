@@ -247,6 +247,7 @@ class ConcurrencyCoordinator:
         job: Job,
         account_id: int | None = None,
         ttl_seconds: int = 300,
+        max_payload_size: int | None = None,
     ) -> Generator[PayloadClaim | None, None, None]:
         """
         Busca y bloquea atómicamente la siguiente pieza libre de un Job.
@@ -264,10 +265,16 @@ class ConcurrencyCoordinator:
 
         # Obtener candidatos pendientes ordenados por secuencia
         query = (
-            Payload.select()
-            .where((Payload.job == job) & (~Payload.id.in_(fulfilled_ids)))  # type: ignore
-            .order_by(Payload.sequence_index)
+            Payload.select().where(
+                (Payload.job == job) & (~Payload.id.in_(fulfilled_ids))
+            )  # type: ignore
         )
+
+        # Filtro de capacidad: no reclamar piezas cuyo tamaño supere lo que la cuenta puede subir
+        if isinstance(max_payload_size, int) and max_payload_size > 0:
+            query = query.where(Payload.size <= max_payload_size)
+
+        query = query.order_by(Payload.sequence_index)
 
         candidates = list(query)
         selected_payload: Payload | None = None
