@@ -22,7 +22,6 @@ class TestCliConfig(unittest.TestCase):
             "test_user",
             {
                 "profile_name": self.profile_name,
-                "chat_id": "123456789",
                 "upload_limit_rate_kbps": "1000",
                 "api_id": "123456789",
                 "api_hash": "123456789",
@@ -44,7 +43,7 @@ class TestCliConfig(unittest.TestCase):
         self.assertEqual(result.exit_code, 0)
         self.assertIn("Configuración", result.stdout)
         self.assertIn("test_user", result.stdout)
-        self.assertIn("chat_id", result.stdout)
+        self.assertIn("upload_limit_rate_kbps", result.stdout)
 
     def test_set_valid_value(self):
         """Probar que un cambio válido se persiste correctamente."""

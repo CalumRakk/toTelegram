@@ -26,7 +26,7 @@ from totelegram.identity import Settings
 from totelegram.models import TelegramUser
 from totelegram.packaging.indexer import TapeIndexService
 from totelegram.packaging.ledger import ReceiptLedger
-from totelegram.schemas import VALUE_NOT_SET, ScanReport
+from totelegram.schemas import ScanReport
 from totelegram.telegram.patches import get_patch_status
 from totelegram.telegram.resolver import TargetResolver
 from totelegram.telegram.types import TargetResolutionStatus
@@ -248,7 +248,7 @@ class UploadInventory:
         """Presenta las omisiones y retorna los candidatos listos para subida."""
         DisplayUpload.show_skip_report(
             self.scan_report,
-            item_type=cast("archivo | carpeta", self.request.item_label),  # noqa: F821
+            item_type=cast("archivo | carpeta", self.request.item_label),  # noqa: F821 # type: ignore
             force_verbose=False if self.request.is_backup else None,
         )
         raw_candidates = self.scan_report.ensure_has_candidates(
@@ -298,40 +298,29 @@ def prepare_upload_session(
     settings: Settings,
     target_override: str | None = None,
 ) -> UploadSession:
-    """Prepara el entorno técnico de subida aplicando la jerarquía de resolución de destino."""
+    """Prepara el entorno técnico de subida resolviendo el destino obligatorio."""
+    if not target_override:
+        raise TargetNotSetError()
+
     resolver = TargetResolver(client, db)
     resolved_chat_id: int | str | None = None
 
-    # El usuario especificó --target dinámicamente en el comando
-    if target_override:
-        with UI.loading(f"Resolviendo destino '[bold]{target_override}[/]'..."):
-            resolution = resolver.resolve(target_override)
+    with UI.loading(f"Resolviendo destino '[bold]{target_override}[/]'..."):
+        resolution = resolver.resolve(target_override)
 
-        if resolution.status == TargetResolutionStatus.RESOLVED:
-            assert resolution.chat_id is not None
-            resolved_chat_id = resolution.chat_id
-            logger.info(
-                f"Destino temporal resuelto: {resolution.title} ({resolved_chat_id})"
-            )
-
-        elif resolution.status == TargetResolutionStatus.AMBIGUOUS:
-            raise TargetAmbiguousError(target_override, resolution.candidates)
-
-        else:
-            raise ConfigurationError(
-                message=resolution.error_message
-                or f"No se pudo resolver el destino '{target_override}'.",
-                hint=resolution.hint,
-                exit_code=1,
-            )
-
-    # Fallback al chat por defecto configurado en el perfil
-    elif settings.chat_id != VALUE_NOT_SET:
-        resolved_chat_id = settings.chat_id
-
-    # Ningún destino disponible (bloqueo instructivo)
+    if resolution.status == TargetResolutionStatus.RESOLVED:
+        assert resolution.chat_id is not None
+        resolved_chat_id = resolution.chat_id
+        logger.info(f"Destino resuelto: {resolution.title} ({resolved_chat_id})")
+    elif resolution.status == TargetResolutionStatus.AMBIGUOUS:
+        raise TargetAmbiguousError(target_override, resolution.candidates)
     else:
-        raise TargetNotSetError()
+        raise ConfigurationError(
+            message=resolution.error_message
+            or f"No se pudo resolver el destino '{target_override}'.",
+            hint=resolution.hint,
+            exit_code=1,
+        )
 
     # Sincronización con Telegram
     with UI.loading("Sincronizando con Telegram..."):

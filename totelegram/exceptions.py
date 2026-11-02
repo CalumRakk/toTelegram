@@ -97,22 +97,22 @@ class NoPendingCandidatesError(OperationAbortNotice):
 
 
 class TargetNotSetError(ConfigurationError):
-    """Lanzada cuando se intenta operar sin un chat de destino especificado ni por defecto."""
+    """Lanzada cuando se intenta operar sin un chat de destino especificado."""
 
     def __init__(self):
         super().__init__(
             message="No se ha especificado un chat de destino.",
             title="Destino requerido",
             hint=(
-                "El perfil activo no tiene un chat por defecto y no indicaste '--target'.\n\n"
-                "Tienes dos formas de continuar:\n"
-                "1. Definir el destino solo para esta subida usando [bold]--target <chat>[/].\n"
-                "2. Guardar un destino por defecto permanente usando [bold]totelegram target <chat>[/]."
+                "Las operaciones de subida, réplica e indexación requieren un destino explícito.\n\n"
+                "Tienes dos formas de indicarlo:\n"
+                "1. Mediante la opción [bold]-t / --target <chat>[/] en el comando.\n"
+                "2. O definiendo la variable de entorno [bold]TOTELEGRAM_TARGET[/]."
             ),
             suggested_commands=[
-                'totelegram send ... --target "Mi Canal"',
-                "totelegram send ... --target me",
-                'totelegram target "Mi Canal"',
+                'totelegram send ... -t "Mi Canal"',
+                "totelegram send ... -t me",
+                'export TOTELEGRAM_TARGET="Mi Canal"',
             ],
             exit_code=1,
             severity="error",

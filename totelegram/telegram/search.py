@@ -3,6 +3,7 @@ import logging
 from typing import TYPE_CHECKING, Generator
 
 from totelegram.telegram.types import ChatMatch, ChatResolution
+from totelegram.telegram.utils import normalize_text_for_search
 
 if TYPE_CHECKING:
     from pyrogram.client import Client
@@ -63,27 +64,15 @@ class ChatSearchService:
     def search_by_name(
         self, query: str, depth: int = 100, is_exact: bool = True
     ) -> ChatResolution:
-        """
-        Busca entre los chats recientes el chat con el nombre indicado. Si ``is_exact`` es True,
-        se busca una coincidencia exacta.
-
-        Args:
-            query (str): Nombre del chat a buscar.
-            is_exact (bool): Si es True, exige coincidencia exacta (case-sensitive).
-                            Si es False, acepta coincidencia parcial (case-insensitive).
-            depth (int): Número máximo de diálogos recientes a inspeccionar.
-
-        Returns:
-            ChatResolution: Estado final de la búsqueda y candidatos encontrados.
-        """
         from pyrogram.types import Dialog
 
-        query = query.strip()
+        clean_query = query.strip()
+        norm_query = normalize_text_for_search(clean_query)
 
         logger.debug(f"Resolviendo chat {query=} {is_exact=} {depth=}")
 
         result = ChatResolution(
-            query=query, search_depth=depth, is_exact_requested=is_exact
+            query=clean_query, search_depth=depth, is_exact_requested=is_exact
         )
 
         candidates: list[ChatMatch] = []
@@ -93,19 +82,28 @@ class ChatSearchService:
 
         for dialog in dialogs:
             title = dialog.chat.title or dialog.chat.first_name or ""
+            norm_title = normalize_text_for_search(title)
+            username = dialog.chat.username or ""
+            norm_username = normalize_text_for_search(username)
+
             match_data = ChatMatch.from_chat(dialog.chat)
 
+            is_match_exact = (norm_title == norm_query) or (norm_username == norm_query)
+            is_match_partial = (norm_query in norm_title) or (
+                norm_query in norm_username
+            )
+
             if is_exact:
-                if title == query:
+                if is_match_exact:
                     candidates.append(match_data)
-                elif query.lower() in title.lower():
-                    # No es exacto, pero se parece.
+                elif is_match_partial:
                     suggestions.append(match_data)
             else:
-                if query.lower() in title.lower():
+                if is_match_exact:
+                    candidates.insert(0, match_data)  # Exactos primero
+                elif is_match_partial:
                     candidates.append(match_data)
 
-        # Clasificacion de resultado.
         if len(candidates) == 1:
             result.winner = candidates[0]
             logger.info(f"Chat resuelto exitosamente {query=} {result.winner.id=}")
@@ -113,14 +111,10 @@ class ChatSearchService:
         elif len(candidates) > 1:
             result.conflicts = candidates
             logger.info(
-                f"Resolución ambigua  {query=} conflictos={len(result.conflicts)}"
+                f"Resolución con múltiples candidatos {query=} conflictos={len(result.conflicts)}"
             )
 
-        # Las sugerencias solo se llenan si no hubo un ganador claro
         if not result.winner:
             result.suggestions = suggestions
-            logger.debug(
-                f"Sin coincidencia exacta {query=} sugerencias={len(result.suggestions)}"
-            )
 
         return result

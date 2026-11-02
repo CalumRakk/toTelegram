@@ -16,6 +16,7 @@ from totelegram.telegram.types import (
 from totelegram.telegram.utils import (
     is_direct_identifier,
     normalize_chat_id,
+    normalize_text_for_search,
 )
 
 if TYPE_CHECKING:
@@ -27,9 +28,9 @@ logger = logging.getLogger(__name__)
 class TargetResolver:
     """
     Resolvedor de destinos en 3 niveles de velocidad:
-    1. Directo: IDs numéricos, 'me', @usernames y links.
-    2. Caché SQLite: Coincidencias previas en la tabla TelegramChat.
-    3. Telegram API: Búsqueda exhaustiva en diálogos con discriminación anti-ambigüedad.
+    1. Directo: IDs numéricos, 'me', @usernames y links (O(1), 0 ms de red).
+    2. Caché SQLite: Coincidencias previas verificadas en TelegramChat (O(1), <1 ms).
+    3. Telegram API: Búsqueda exhaustiva en diálogos con Exact Match Precedence.
     """
 
     def __init__(
@@ -47,45 +48,28 @@ class TargetResolver:
         query: str | int | None,
         depth: int = 100,
     ) -> TargetResolution:
-        """
-        Resuelve una consulta de destino a un chat de Telegram verificado.
-
-        Args:
-            query: Identificador o nombre ('me', '-100...', '@canal', 'Respaldos').
-            depth: Profundidad de búsqueda de diálogos en la API de Telegram.
-
-        Returns:
-            TargetResolution: DTO con el estado, el chat resuelto y candidatos si es ambiguo.
-        """
         raw_query = "" if query is None else str(query).strip()
 
-        # Validación de entrada
         if not raw_query or raw_query.upper() == VALUE_NOT_SET:
             return TargetResolution(
                 status=TargetResolutionStatus.INVALID_INPUT,
                 query=raw_query,
-                error_message="No se proporcionó un destino válido.",
-                hint="Especifica un destino usando --target <chat> o configura uno global con 'totelegram target <chat>'.",
+                error_message="No se proporcionó un destino.",
+                hint="Especifica el destino usando '-t <chat>' (ej: '-t me' o '-t \"Mi Canal\"').",
             )
 
-        # Identificador Directo O(1)
-        # (IDs numéricos, 'me', alias de guardados, @usernames, links)
-
+        # Nivel 1: Identificador Directo O(1)
         if is_direct_identifier(raw_query):
             logger.debug(f"[TargetResolver] Nivel 1 (Directo): {raw_query}")
             return self._resolve_direct(raw_query)
 
-        # Caché Local SQLite O(1)
-        # (Búsqueda en la tabla TelegramChat de chats previamente validados)
-
+        # Nivel 2: Caché Local SQLite O(1)
         cached_resolution = self._resolve_from_cache(raw_query)
         if cached_resolution is not None:
             logger.debug(f"[TargetResolver] Nivel 2 (Caché SQLite): {raw_query}")
             return cached_resolution
 
-        # Búsqueda en vivo en Telegram API
-        # (Escaneo de diálogos con filtro estricto de ambigüedad)
-
+        # Nivel 3: Búsqueda en vivo en Telegram API
         logger.debug(f"[TargetResolver] Nivel 3 (API Telegram): {raw_query}")
         return self._resolve_from_telegram_search(raw_query, depth=depth)
 
@@ -131,11 +115,7 @@ class TargetResolver:
         )
 
     def _resolve_from_cache(self, query: str) -> TargetResolution | None:
-        """
-        Intenta resolver consultando la base de datos local.
-        Retorna TargetResolution si encuentra una coincidencia exacta y única verificada,
-        o None si no existe o hay dudas para que el Nivel 3 se encargue.
-        """
+        """Busca en SQLite si el chat ya fue verificado anteriormente, tolerando mayúsculas y tildes."""
         from totelegram.database import db_proxy
 
         active_db = self.db or (
@@ -146,42 +126,40 @@ class TargetResolver:
         if not active_db:
             return None
 
-        clean_query = query.strip().lower()
+        norm_query = normalize_text_for_search(query)
 
         try:
-            # Buscar coincidencia exacta por título o username (case-insensitive)
-            matches = list(
-                TelegramChat.select().where(
-                    (peewee.fn.LOWER(TelegramChat.title) == clean_query)
-                    | (peewee.fn.LOWER(TelegramChat.username) == clean_query)
-                )
-            )
+            # Traer chats conocidos de local para comparar con normalización de acentos en memoria
+            all_cached = list(TelegramChat.select())
+            exact_cached = [
+                c
+                for c in all_cached
+                if normalize_text_for_search(c.title) == norm_query
+                or (c.username and normalize_text_for_search(c.username) == norm_query)
+            ]
 
-            # Si hay más de un chat en local con el mismo nombre, es ambiguo en caché
-            if len(matches) != 1:
-                return None
-
-            cached_chat = matches[0]
-
-            # Verificación JIT de que el chat de la caché siga existiendo y tengamos permisos
-            access_report = self.access_service.verify_access(cached_chat.id)
-            if access_report.is_ready and access_report.chat:
-                return TargetResolution(
-                    status=TargetResolutionStatus.RESOLVED,
-                    query=query,
-                    chat_id=access_report.chat.id,
-                    title=access_report.chat.title,
-                    match=access_report.chat,
-                )
-
+            # Si hay una única coincidencia exacta en caché, validamos que siga viva
+            if len(exact_cached) == 1:
+                cached_chat = exact_cached[0]
+                access_report = self.access_service.verify_access(cached_chat.id)
+                if access_report.is_ready and access_report.chat:
+                    return TargetResolution(
+                        status=TargetResolutionStatus.RESOLVED,
+                        query=query,
+                        chat_id=access_report.chat.id,
+                        title=access_report.chat.title,
+                        match=access_report.chat,
+                    )
         except Exception as e:
             logger.debug(f"Aviso consultando caché de chats en SQLite: {e}")
 
         return None
 
     def _resolve_from_telegram_search(self, query: str, depth: int) -> TargetResolution:
-        """Busca en los diálogos recientes de Telegram aplicando filtros de ambigüedad."""
+        """Busca en diálogos recientes aplicando la regla Exact Match Precedence."""
         clean_query = query.strip()
+        norm_query = normalize_text_for_search(clean_query)
+
         search_result = self.search_service.search_by_name(
             clean_query, depth=depth, is_exact=False
         )
@@ -192,43 +170,48 @@ class TargetResolver:
                 status=TargetResolutionStatus.NOT_FOUND,
                 query=query,
                 error_message=f"No se encontró ningún chat que coincida con '{query}'.",
-                hint="Tip: Envía un mensaje en el chat desde tu app de Telegram para que aparezca en los diálogos recientes.",
+                hint="Tip: Envía un mensaje en el chat desde tu app de Telegram para que aparezca en diálogos recientes, o usa su ID numérico.",
             )
 
-        # Prioridad: Coincidencias exactas por título (case-insensitive)
+        # Regla de Oro: Coincidencias Exactas (Normalizadas sin tildes/mayúsculas)
         exact_matches = [
-            m for m in all_unique if m.title.strip().lower() == clean_query.lower()
+            m
+            for m in all_unique
+            if normalize_text_for_search(m.title) == norm_query
+            or (m.username and normalize_text_for_search(m.username) == norm_query)
         ]
 
+        # 1. Si hay exactamente 1 coincidencia exacta, GANA automáticamente
         if len(exact_matches) == 1:
             return self._verify_and_build(exact_matches[0], query)
 
+        # 2. Si hay múltiples llamadas exactamente igual, es una ambigüedad real de Telegram
         if len(exact_matches) > 1:
             return TargetResolution(
                 status=TargetResolutionStatus.AMBIGUOUS,
                 query=query,
                 candidates=exact_matches,
                 error_message=f"Se encontraron múltiples chats llamados exactamente '{query}'.",
-                hint="Especifica el ID directo (ej: --target -100xxxxxxxxxx) para desempatar.",
+                hint="Especifica el ID directo (ej: -t -100xxxxxxxxxx) para desempatar.",
             )
 
-        # Si no hubo coincidencia exacta, evaluamos coincidencias parciales
+        # 3. Si no hubo coincidencia exacta pero solo hay 1 parcial, gana la parcial
         if len(all_unique) == 1:
             return self._verify_and_build(all_unique[0], query)
 
-        # Si hay múltiples coincidencias parciales -> Ambiguo
+        # 4. Múltiples parciales sin exacto -> Ambiguo
         return TargetResolution(
             status=TargetResolutionStatus.AMBIGUOUS,
             query=query,
             candidates=all_unique,
-            error_message=f"El nombre '{query}' es ambiguo. Se encontraron {len(all_unique)} coincidencias.",
-            hint="Usa el ID directo de uno de los candidatos mostrados.",
+            error_message=f"El nombre '{query}' es ambiguo ({len(all_unique)} coincidencias encontradas).",
+            hint="Especifica el ID directo de uno de los candidatos mostrados.",
         )
 
     def _verify_and_build(
         self, candidate: ChatMatch, original_query: str
     ) -> TargetResolution:
-        """Verifica permisos del candidato ganador y construye el resultado."""
+        """Verifica permisos de escritura y construye el resultado resuelto."""
         access_report = self.access_service.verify_access(candidate.id)
 
         if access_report.is_ready and access_report.chat:
@@ -258,7 +241,7 @@ class TargetResolver:
         )
 
     def _cache_chat_if_possible(self, chat: ChatMatch) -> None:
-        """Guarda o actualiza el chat en la base de datos local SQLite si está disponible."""
+        """Guarda o actualiza el chat en SQLite para acelerar próximas resoluciones a 0 ms."""
         from totelegram.database import db_proxy
 
         active_db = self.db or (

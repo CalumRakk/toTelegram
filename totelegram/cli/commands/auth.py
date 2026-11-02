@@ -17,7 +17,6 @@ from totelegram.identity import (
     sanitize_alias,
 )
 from totelegram.models import TelegramUser
-from totelegram.schemas import VALUE_NOT_SET
 from totelegram.telegram.auth import AuthLogic
 from totelegram.telegram.resolver import TargetResolver
 
@@ -157,7 +156,6 @@ def login_command(ctx: typer.Context):
             "api_id": final_api_id,
             "api_hash": final_api_hash,
             "profile_name": final_alias,
-            "chat_id": VALUE_NOT_SET,
             "telegram_account_id": account_id,
             "has_custom_app": has_custom_app,
         }
@@ -174,12 +172,12 @@ def login_command(ctx: typer.Context):
         title="Próximo paso sugerido",
         message=(
             "Tu cuenta ya está lista para operar.\n"
-            "Puedes definir un chat de destino por defecto o enviar archivos directamente:"
+            "Puedes enviar o respaldar archivos indicando el destino con [bold]-t[/]:"
         ),
         commands=[
-            "totelegram target me                # Usar tus Mensajes Guardados",
-            'totelegram target "Mi Canal"        # Buscar y fijar un canal/grupo',
-            'totelegram send video.mp4 --target "Mi Canal"  # Subir directamente',
+            "totelegram send video.mp4 -t me               # Enviar a tus Mensajes Guardados",
+            'totelegram send video.mp4 -t "Mi Canal"       # Enviar a un canal o grupo',
+            'totelegram backup ./mis_datos -t "Backups"    # Respaldar carpeta completa',
         ],
         spacing="block",
         border_style="green",
@@ -264,8 +262,6 @@ def status_command(
         UI.loading("Consultando estado de cuenta en Telegram..."),
     ):
         me = cast("TelegramUser", client.get_me())
-        resolver = TargetResolver(client)
-        resolution = resolver.resolve(settings.chat_id)
 
     content = [
         f"• Cuenta activa: [bold green]{active_name}[/]",
@@ -273,23 +269,7 @@ def status_command(
         f"• Account ID:    [dim]{me.id}[/]",
         f"• Telegram:      {'[bold cyan]Premium ★[/]' if getattr(me, 'is_premium', False) else 'Estándar'}",
         f"• Credenciales:  {'[bold green]Propias (Custom App)[/]' if settings.has_custom_app else '[bold yellow]Públicas compartidas (Default)[/]'}",
-        "",
     ]
-
-    if resolution.is_resolved and resolution.match:
-        m = resolution.match
-        content.append(f"• Destino:       [bold cyan]{m.title}[/] [dim]({m.id})[/]")
-        content.append("• Estado destino: [green]Listo para recibir archivos[/]")
-    elif settings.chat_id == VALUE_NOT_SET:
-        content.append("• Destino:       [yellow]NOT-SET (Sin configurar)[/]")
-        content.append(
-            "  [dim]↳ Requiere la bandera '--target <chat>' al subir, o usa 'totelegram target <chat>'.[/dim]"
-        )
-    else:
-        content.append(f"• Destino:       [red]{settings.chat_id} (No accesible)[/]")
-        content.append(
-            f"  [dim]↳ Motivo: {resolution.error_message or 'Error de permisos'}[/dim]"
-        )
 
     panel = Panel(
         "\n".join(content),

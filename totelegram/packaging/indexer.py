@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING
 import peewee
 from pyrogram import enums
 
-from totelegram.identity import ChatID
 from totelegram.models import Source, TapeMember
 from totelegram.telegram.captions import ManifestCaption
 
@@ -88,7 +87,7 @@ class TapeIndexService:
             unindexed_messages=unindexed_messages,
         )
 
-    def auto_heal_or_report(self, chat_id: ChatID) -> UnindexedTapesReport:
+    def auto_heal_or_report(self, chat_id) -> UnindexedTapesReport:
         """
         Aplica la heurística adaptativa:
         - Si <= 3: Descarga silenciosa, indexa en SQLite y auto-sana.

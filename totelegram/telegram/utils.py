@@ -1,6 +1,19 @@
 import re
+import unicodedata
 
 from totelegram.schemas import SELF_CHAT_ALIASES, VALUE_NOT_SET
+
+
+def normalize_text_for_search(text: str | None) -> str:
+    """Normaliza un texto para búsqueda: minúsculas, sin acentos/diacríticos y espacios limpios.
+
+    Ejemplo: '  Música & Películas  ' -> 'musica & peliculas'
+    """
+    if not text:
+        return ""
+    decomposed = unicodedata.normalize("NFKD", str(text))
+    without_accents = "".join(c for c in decomposed if not unicodedata.combining(c))
+    return " ".join(without_accents.strip().lower().split())
 
 
 def is_potential_username(value: str) -> bool:
@@ -18,7 +31,7 @@ def is_direct_identifier(chat_id: str | int | None) -> bool:
 
     clean = str(chat_id).strip().lower()
 
-    if clean.upper() == VALUE_NOT_SET:
+    if clean.upper() == VALUE_NOT_SET or not clean:
         return False
 
     if clean.replace("-", "").isdigit():
@@ -40,7 +53,7 @@ def normalize_chat_id(value: str | int) -> int | str:
 
     raw = str(value).strip()
     if not raw or raw.upper() == VALUE_NOT_SET:
-        return VALUE_NOT_SET
+        raise ValueError("El identificador de chat no puede estar vacío.")
 
     if raw.lower() in SELF_CHAT_ALIASES:
         return "me"
@@ -49,7 +62,6 @@ def normalize_chat_id(value: str | int) -> int | str:
     if re.fullmatch(r"-?\d+", potential_number):
         return int(potential_number)
 
-    # Importamos dinámicamente para evitar problemas de rendimiento.
     from pyrogram.client import Client
 
     if Client.INVITE_LINK_RE.fullmatch(raw):
@@ -62,4 +74,4 @@ def normalize_chat_id(value: str | int) -> int | str:
     if raw.startswith("@"):
         return raw.strip()
 
-    raise ValueError(f"Invalid chat ID: {value}")
+    raise ValueError(f"Identificador de chat no válido: '{value}'")

@@ -30,7 +30,6 @@ from pydantic.fields import FieldInfo
 
 from totelegram.common.helpers import get_type_annotation, parse_comma_list
 from totelegram.schemas import VALUE_NOT_SET, AccessLevel, InfoField
-from totelegram.telegram.utils import normalize_chat_id
 
 logger = logging.getLogger(__name__)
 
@@ -45,10 +44,6 @@ CommaSeparatedList = Annotated[
     BeforeValidator(parse_comma_list),
 ]
 
-ChatID = Annotated[
-    int | str,
-    BeforeValidator(normalize_chat_id),
-]
 
 DEFAULT_TG_API_ID = 611335
 DEFAULT_TG_API_HASH = "d524b414d21f4d37f08684c1df41ac9c"
@@ -61,11 +56,6 @@ class Settings(BaseModel):
     """Modelo canónico de configuración para un perfil de toTelegram."""
 
     max_filename_length: ClassVar[int] = 55
-    chat_id: ChatID = Field(
-        default=VALUE_NOT_SET,
-        description="ID del chat destino. NOT_SET indica configuración pendiente.",
-        json_schema_extra={"is_sensitive": False, "access": AccessLevel.EDITABLE},
-    )
     exclude_files: CommaSeparatedList = Field(
         default_factory=list,
         json_schema_extra={"is_sensitive": False, "access": AccessLevel.EDITABLE},
@@ -93,7 +83,7 @@ class Settings(BaseModel):
         json_schema_extra={"is_sensitive": False, "access": AccessLevel.DEBUG_READONLY},
     )
     profile_name: str = Field(
-        default=VALUE_NOT_SET,
+        default="NOT-SET",
         description="Nombre o alias para la cuenta",
         json_schema_extra={"is_sensitive": False, "access": AccessLevel.DEBUG_READONLY},
     )

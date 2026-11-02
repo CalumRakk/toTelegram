@@ -107,7 +107,7 @@ class TestCliViews(unittest.TestCase):
             )
 
     def test_display_target_status(self):
-        """Verifica el renderizado de estados de destino."""
+        """Verifica el renderizado de estados y diagnósticos de destino."""
         match = ChatMatch(
             id=-100111222,
             title="Canal Target",
@@ -121,14 +121,20 @@ class TestCliViews(unittest.TestCase):
             title="Canal Target",
             match=match,
         )
-        DisplayTarget.show_current_status("test_user", resolution_ok, -100111222)
 
-        resolution_err = TargetResolution(
-            query="canal_test",
-            status=TargetResolutionStatus.AMBIGUOUS,
-            error_message="Permisos insuficientes",
+        # 1. Diagnóstico exitoso
+        DisplayTarget.show_diagnostic(
+            resolution=resolution_ok,
+            can_delete=True,
+            account_max_size=2000 * 1024 * 1024,
+            is_premium=False,
         )
-        DisplayTarget.show_current_status("test_user", resolution_err, -100111222)
+
+        # 2. Ambigüedad
+        DisplayTarget.show_ambiguous_targets("canal_test", [match])
+
+        # 3. Lista de conocidos
+        DisplayTarget.show_known_targets([])
 
     def test_display_indexer_notice(self):
         """Verifica el aviso de indexación pendiente."""

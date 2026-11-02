@@ -1,23 +1,21 @@
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import Literal
 
 import typer
 from rich.markup import escape
 from rich.panel import Panel
 from rich.table import Table
+from tartape.units import format_size
 
-from totelegram.cli.ui import UI, console, get_friendly_chat_name, log_table
+from totelegram.cli.ui import UI, console, log_table
 from totelegram.identity import Profile, Settings, SettingsManager
+from totelegram.models import TelegramChat
 from totelegram.schemas import (
     COLORS,
-    VALUE_NOT_SET,
     AccessLevel,
     Commands,
 )
-from totelegram.telegram.types import ChatMatch
-
-if TYPE_CHECKING:
-    from totelegram.telegram.types import TargetResolution
+from totelegram.telegram.types import ChatMatch, TargetResolution
 
 
 class DisplayConfig:
@@ -96,10 +94,7 @@ class DisplayConfig:
             is_value_default = value != default_value
             value_style = "bold green" if is_value_default else "dim white"
 
-            if field_name.lower() == "chat_id":
-                value = get_friendly_chat_name(value, manager.database_path)
-                display_val = "?"
-            elif info.is_sensitive and value is not None:
+            if info.is_sensitive and value is not None:
                 display_val = cls._mark_sensitive(value)
             else:
                 display_val = str(value)
@@ -124,6 +119,8 @@ class DisplayConfig:
 
 
 class DisplayProfile:
+    """Componentes visuales para la gestión y listado de perfiles."""
+
     @classmethod
     def render_profiles_table(
         cls,
@@ -131,47 +128,40 @@ class DisplayProfile:
         active: str | None,
         profiles: list[Profile],
         quiet: bool = False,
-    ):
+    ) -> None:
         console.print()
         if quiet:
             console.print("Perfiles disponibles:")
             for profile in profiles:
-                console.print(" - " + profile.name)
+                console.print(f" - {profile.name}")
             return
 
         table = Table(title="Perfiles disponibles", title_style=COLORS.TABLE_TITLE)
         table.add_column("Estado", no_wrap=True)
-        table.add_column("Perfil")
-        table.add_column("Session (.session)", justify="center")
-        table.add_column("Config (.env)", justify="center")
-        table.add_column("Destino (Chat ID)")
+        table.add_column("Perfil", style="bold white")
+        table.add_column("Sesión (.session)", justify="center")
+        table.add_column("Configuración (.json)", justify="center")
 
         was_orphan = False
         for profile in profiles:
             is_active = profile.name == active
-            active_marker = "[bold green]*[/]" if is_active else ""
-            auth_status = (
-                "[green] OK [/]" if profile.has_session else "[red] MISSING [/]"
-            )
+            active_marker = "[bold green]*[/]" if is_active else " "
 
-            if profile.has_env:
-                settings = manager.get_settings(profile.name)
-                chat_id = settings.chat_id
-                config_status = "[green] OK [/]"
-                target_desc = (
-                    f"[white]{chat_id}[/]"
-                    if chat_id != VALUE_NOT_SET
-                    else "[yellow]Pendiente[/]"
-                )
-            else:
-                config_status = "[red] MISSING [/]"
-                target_desc = "[dim]--[/]"
+            auth_status = (
+                "[bold green]OK[/]" if profile.has_session else "[bold red]FALTA[/]"
+            )
+            config_status = (
+                "[bold green]OK[/]" if profile.has_config else "[bold red]FALTA[/]"
+            )
 
             if not profile.is_trinity:
                 was_orphan = True
 
             table.add_row(
-                active_marker, profile.name, auth_status, config_status, target_desc
+                active_marker,
+                profile.name,
+                auth_status,
+                config_status,
             )
 
         console.print(table)
@@ -179,105 +169,150 @@ class DisplayProfile:
 
         if was_orphan:
             console.print()
-            UI.warn("Se detectó al menos un perfil huérfano.")
-            UI.info("Usa 'totelegram logout <PERFIL>' para limpiar perfiles huérfanos.")
+            UI.warn("Se detectó al menos un perfil huérfano o incompleto.")
+            UI.info("Usa 'totelegram logout <PERFIL>' para limpiarlo.")
 
     @staticmethod
-    def announce_profile_used(profile_name: str):
+    def announce_profile_used(profile_name: str) -> None:
         UI.info(f"Perfil Actual: [bold]{profile_name}[/]")
 
 
 class DisplayTarget:
+    """Componentes visuales para la inspección y diagnóstico de destinos."""
+
     @staticmethod
-    def show_no_target_warning():
-        UI.warn("El perfil activo no tiene un chat destino por defecto.")
-        tip_text = (
-            "Puedes configurar un destino predeterminado con:\n"
-            "  • totelegram target me               (Tus Mensajes Guardados)\n"
-            '  • totelegram target "Mi Canal"       (Búsqueda inteligente)\n'
-            "  • totelegram target -100xxxxxxxxxx   (ID directo o @username)\n\n"
-            "O puedes subir directamente sin destino global usando:\n"
-            '  • totelegram send <archivo> --target "Mi Canal"'
+    def show_diagnostic(
+        resolution: TargetResolution,
+        can_delete: bool,
+        account_max_size: int,
+        is_premium: bool,
+    ) -> None:
+        """Muestra el reporte detallado de un destino validado con éxito."""
+        match = resolution.match
+        assert match is not None
+
+        content = [
+            f"• Título:       [bold cyan]{match.title}[/]",
+            f"• ID del chat:  [dim]{match.id}[/]",
+            f"• Tipo de chat: [magenta]{match.type}[/]",
+        ]
+        if match.username:
+            content.append(f"• Alias:        @{match.username}")
+
+        # Permisos y capacidades
+        tier_label = "Premium (4 GB)" if is_premium else "Estándar (2 GB)"
+        content.append(
+            f"• Capacidad:    [bold green]{format_size(account_max_size)}[/] [dim]({tier_label})[/dim]"
         )
+
+        delete_perm = (
+            "[bold green]Sí[/] [dim](permite reorganización limpia)[/]"
+            if can_delete
+            else "[yellow]No[/] [dim](solo subidas continuas sin limpieza)[/]"
+        )
+        content.append(f"• Borrar msgs:  {delete_perm}")
+
         panel = Panel(
-            tip_text,
-            title="[bold yellow]Destino Pendiente (NOT-SET)[/]",
-            border_style="yellow",
+            "\n".join(content),
+            title="[bold green]✓ Destino verificado y listo para operar[/bold green]",
+            border_style="green",
             padding=(1, 2),
         )
         console.print(panel)
 
-    @staticmethod
-    def show_current_status(
-        profile_name: str, resolution: "TargetResolution", raw_chat_id
-    ):
-        if resolution.is_resolved and resolution.match:
-            match = resolution.match
-            content = [
-                "[bold green]✓ Listo para subir archivos[/bold green]",
-                f"• Perfil:  [white]{profile_name}[/]",
-                f"• Título:  [bold cyan]{match.title}[/]",
-                f"• ID:      [dim]{match.id}[/]",
-                f"• Tipo:    [magenta]{match.type}[/]",
-            ]
-            if match.username:
-                content.append(f"• Alias:   @{match.username}")
-
-            panel = Panel(
-                "\n".join(content),
-                title="[bold green]Destino Actual[/bold green]",
-                border_style="green",
-                padding=(1, 2),
-            )
-            console.print(panel)
-        else:
-            content = [
-                "[bold red]! Destino con problemas[/bold red]",
-                f"• Perfil:     [white]{profile_name}[/]",
-                f"• ID guardado: [dim]{raw_chat_id}[/]",
-                f"• Motivo:     [yellow]{resolution.error_message or 'Error de acceso'}[/]",
-            ]
-            if resolution.hint:
-                content.append(f"\n[dim]{resolution.hint}[/dim]")
-
-            panel = Panel(
-                "\n".join(content),
-                title="[bold red]Destino no disponible[/bold red]",
-                border_style="red",
-                padding=(1, 2),
-            )
-            console.print(panel)
+        # Sugerencias prácticas listas para copiar
+        target_param = f'"{match.title}"' if " " in match.title else match.title
+        UI.educational_tip(
+            title="Cómo usar este destino",
+            message="Usa la opción [bold]-t / --target[/] en tus operaciones:",
+            commands=[
+                f"totelegram send archivo.mp4 -t {target_param}",
+                f"totelegram backup ./mi_carpeta -t {target_param}",
+                f'export TOTELEGRAM_TARGET="{match.title}"  # Para sesiones continuas',
+            ],
+            spacing="top",
+            border_style="cyan",
+        )
 
     @staticmethod
-    def prompt_candidate_selection(candidates: list[ChatMatch]) -> ChatMatch | None:
+    def show_ambiguous_targets(query: str, candidates: list[ChatMatch]) -> None:
+        """Muestra los candidatos cuando un nombre coincide con múltiples chats."""
+        UI.warn(
+            f"La búsqueda '[bold]{query}[/]' arrojó múltiples coincidencias ({len(candidates)} chats)."
+        )
         table = Table(
-            title="Chats coincidentes",
+            title="Coincidencias encontradas en Telegram",
             show_header=True,
             header_style="bold cyan",
             title_style="bold blue",
+            expand=True,
         )
-        table.add_column("#", justify="right", style="bold yellow")
+        table.add_column("ID Directo", style="bold yellow", no_wrap=True)
         table.add_column("Título", style="white")
         table.add_column("Tipo", style="magenta")
-        table.add_column("ID / Username", style="dim")
+        table.add_column("Username / Alias", style="dim")
 
-        for idx, c in enumerate(candidates, 1):
-            identifier = f"@{c.username}" if c.username else str(c.id)
-            table.add_row(str(idx), c.title, c.type, identifier)
+        for c in candidates:
+            alias = f"@{c.username}" if c.username else "[dim]--[/dim]"
+            table.add_row(str(c.id), c.title, c.type, alias)
 
         console.print(table)
+        UI.tip(
+            "Para evitar ambigüedad, usa el ID numérico directo en lugar del nombre:",
+            commands=[f"totelegram send ... -t {candidates[0].id}"],
+            spacing="top",
+        )
 
-        while True:
-            choice = typer.prompt(
-                f"\nSelecciona un chat (1-{len(candidates)}) o '0' para cancelar",
-                default="1",
+    @staticmethod
+    def show_known_targets(chats: list[TelegramChat]) -> None:
+        """Renderiza la tabla de destinos conocidos en la base de datos local."""
+        table = Table(
+            title="Destinos conocidos en este equipo",
+            show_header=True,
+            header_style="bold cyan",
+            title_style="bold blue",
+            expand=True,
+        )
+        table.add_column("Destino", style="bold white")
+        table.add_column("Identificador / -t", style="bold yellow")
+        table.add_column("Tipo", style="magenta")
+        table.add_column("Última verificación", style="dim")
+
+        # Siempre incluimos Mensajes Guardados en primer lugar
+        table.add_row(
+            "Mensajes Guardados (Buzón personal)",
+            "me",
+            "Personal",
+            "[dim]Siempre disponible[/dim]",
+        )
+
+        for chat in chats:
+            # Omitimos el registro especial 0 o chats sin ID real
+            if chat.id == 0:
+                continue
+
+            title = chat.title or (
+                f"@{chat.username}" if chat.username else f"Chat {chat.id}"
             )
-            if choice.strip() == "0":
-                return None
-            try:
-                selected_idx = int(choice) - 1
-                if 0 <= selected_idx < len(candidates):
-                    return candidates[selected_idx]
-            except ValueError:
-                pass
-            console.print("[red]Opción inválida. Intenta nuevamente.[/red]")
+            identifier = (
+                f'"{chat.title}"'
+                if (chat.title and " " in chat.title)
+                else str(chat.id)
+            )
+
+            last_v = (
+                chat.last_verified.strftime("%Y-%m-%d %H:%M")
+                if chat.last_verified
+                else "[dim]Desconocida[/dim]"
+            )
+            table.add_row(title, identifier, chat.type, str(last_v))
+
+        console.print(table)
+        UI.tip(
+            "Puedes usar cualquiera de estos nombres o IDs con la opción [bold]-t[/]:",
+            commands=[
+                "totelegram send archivo.mp4 -t me",
+                'totelegram send archivo.mp4 -t "Nombre del Chat"',
+            ],
+            spacing="top",
+        )

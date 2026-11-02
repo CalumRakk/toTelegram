@@ -18,7 +18,8 @@ def send_files(
         None,
         "--target",
         "-t",
-        help="Nombre, @username o ID del chat destino para esta subida (sobrescribe el destino por defecto).",
+        envvar="TOTELEGRAM_TARGET",
+        help="Destino en Telegram: ID, @username, 'me' o nombre del canal (o define TOTELEGRAM_TARGET).",
     ),
     force: bool = typer.Option(
         False,

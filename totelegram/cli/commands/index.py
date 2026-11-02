@@ -7,16 +7,29 @@ from pyrogram.types import Message
 
 from totelegram.cli.state import CLIState
 from totelegram.cli.ui import UI, console
+from totelegram.exceptions import (
+    ConfigurationError,
+    TargetAmbiguousError,
+    TargetNotSetError,
+)
 from totelegram.models import TelegramUser
 from totelegram.packaging.importer import SnapshotImporter
 from totelegram.packaging.indexer import TapeIndexService
-from totelegram.schemas import VALUE_NOT_SET
+from totelegram.telegram.resolver import TargetResolver
+from totelegram.telegram.types import TargetResolutionStatus
 
 logger = logging.getLogger(__name__)
 
 
 def index_tapes(
     ctx: typer.Context,
+    target: str | None = typer.Option(
+        None,
+        "--target",
+        "-t",
+        envvar="TOTELEGRAM_TARGET",
+        help="Chat o canal en Telegram donde buscar las cintas archivadas (o define TOTELEGRAM_TARGET).",
+    ),
     force: bool = typer.Option(
         False,
         "--force",
@@ -35,39 +48,49 @@ def index_tapes(
     Permite la búsqueda rápida de archivos internos con 'download --file'.
     """
     state: CLIState = ctx.obj
-    settings = state.settings
 
-    if settings.chat_id == VALUE_NOT_SET:
-        UI.error("El chat destino no está configurado.")
-        UI.tip(
-            "Configura un destino predeterminado con:",
-            commands=[
-                "totelegram target me",
-                'totelegram target "Mi Canal"',
-            ],
-        )
-        raise typer.Exit(1)
+    if not target:
+        raise TargetNotSetError()
 
     UI.separator()
 
     with state.scope() as (client, db):
+        resolver = TargetResolver(client, db)
+
+        with UI.loading(f"Resolviendo destino '[bold]{target}[/]'..."):
+            resolution = resolver.resolve(target)
+
+        if resolution.status == TargetResolutionStatus.RESOLVED:
+            assert resolution.chat_id is not None
+            resolved_chat_id = resolution.chat_id
+        elif resolution.status == TargetResolutionStatus.AMBIGUOUS:
+            raise TargetAmbiguousError(target, resolution.candidates)
+        else:
+            raise ConfigurationError(
+                message=resolution.error_message
+                or f"No se pudo resolver el destino '{target}'.",
+                hint=resolution.hint,
+                exit_code=1,
+            )
+
         indexer = TapeIndexService(client, db)
 
-        with UI.loading("Buscando cintas archivadas (#type_tape) en Telegram..."):
-            report = indexer.check_unindexed_tapes(settings.chat_id)
+        with UI.loading(
+            f"Buscando cintas archivadas (#type_tape) en '{resolution.title}'..."
+        ):
+            report = indexer.check_unindexed_tapes(resolved_chat_id)
 
-        # Determinar qué mensajes procesar
         if force:
             try:
                 messages_to_process = cast(
                     list[Message],
                     list(
                         client.search_messages(
-                            chat_id=settings.chat_id,
+                            chat_id=resolved_chat_id,
                             query="#type_tape",
                             filter=enums.MessagesFilter.DOCUMENT,
                             limit=200,
-                        )  # type: ignore
+                        )
                     ),
                 )
             except Exception as e:
@@ -91,7 +114,6 @@ def index_tapes(
             f"(de {report.total_remote_tapes} totales en Telegram)."
         )
 
-        # Confirmación interactiva
         if not yes:
             console.print()
             confirmed = typer.confirm(
@@ -102,7 +124,6 @@ def index_tapes(
                 UI.info("Operación cancelada por el usuario.")
                 raise typer.Exit(0)
 
-        # Resolver el usuario actual de Telegram para trazabilidad de propiedad
         owner = None
         try:
             me = client.get_me()
@@ -111,7 +132,6 @@ def index_tapes(
         except Exception:  # noqa: S110
             pass
 
-        # Proceso de descarga e inserción delegado en SnapshotImporter
         console.print()
         with console.status(
             "[bold green]Descargando e indexando cintas...[/]"
@@ -133,14 +153,13 @@ def index_tapes(
         succeeded = result.succeeded_count
         total_errors = result.errors
 
-        # Balance final
         UI.separator()
         if succeeded > 0:
             UI.success(
                 f"Indexación completada: [bold]{succeeded}[/] cintas archivadas registradas con éxito."
             )
             UI.info(
-                "Ahora puedes buscar archivos dentro de estas carpetas o extraerlos quirúrgicamente."
+                "Ahora puedes buscar archivos dentro de estas carpetas o extraerlos quirúrgicamente con 'download --file'."
             )
 
         if total_errors:

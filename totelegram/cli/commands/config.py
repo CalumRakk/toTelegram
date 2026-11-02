@@ -8,12 +8,11 @@ import typer
 from totelegram.cli.state import CLIState
 from totelegram.cli.ui import UI
 from totelegram.cli.views.settings import DisplayConfig
-from totelegram.cli.views.upload import DisplayIndexer
 from totelegram.database import DatabaseSession
 from totelegram.identity import ConfigService
 from totelegram.migration import DatabaseState, inspect_database
 from totelegram.models import TelegramChat
-from totelegram.schemas import NETWORK_FIELDS, VALUE_NOT_SET, Commands
+from totelegram.schemas import VALUE_NOT_SET, Commands
 from totelegram.telegram.access import ChatAccessService
 from totelegram.telegram.utils import (
     normalize_chat_id,
@@ -148,22 +147,11 @@ def set_configs(
     Modifica una o varias configuraciones. Valida automáticamente endpoints de red
     (chat_id) en tiempo real a menos que se use --force.
     """
-    state: CLIState = ctx.obj
+
     settings_name, service = _get_config_tools(ctx)
     updates = service.prepare_updates(args)
 
     for key, val in updates.items():
-        is_network_key = key in NETWORK_FIELDS
-
-        # Validación en vivo si es una clave de red (chat_id) y no se forzó
-        if is_network_key and not force and key == "chat_id":
-            val, _ = _validate_live_chat_id(val, settings_name, state)
-
-        if is_network_key and force:
-            UI.warn(
-                f"Guardando [bold]{key}[/] sin verificación de red (--force activo)."
-            )
-
         changed, final_val = service.apply_set(settings_name, key, val)
         if changed:
             UI.success(
@@ -215,7 +203,7 @@ def remove_config(
 @app.command("check")
 @handle_config_errors
 def check_config(ctx: typer.Context):
-    """Verifica que el perfil actual esté listo para subir archivos."""
+    """Verifica que el perfil actual esté listo para operar."""
     state: CLIState = ctx.obj
     manager = state.manager
 
@@ -224,7 +212,7 @@ def check_config(ctx: typer.Context):
         UI.error("No hay un perfil activo o el perfil especificado no existe.")
         raise typer.Exit(1)
 
-    # Verificación de archivos locales (.env y .session)
+    # 1. Verificación de integridad de archivos locales (.json y .session)
     with UI.loading(
         f"Comprobando integridad local del perfil: [bold]{profile_name}[/]"
     ):
@@ -236,18 +224,14 @@ def check_config(ctx: typer.Context):
             raise typer.Exit(1)
 
         if not profile.is_trinity:
-            # TODO: la db de pyrogram guarda el api_id, con ese valor podemos deducir si el usuario esta logeandose con otras credenciales
             UI.error(f"El perfil '{profile_name}' está incompleto.")
-            if not profile.has_env:
-                UI.info("Falta el archivo de configuración (.env).")
+            if not profile.has_config:
+                UI.info("Falta el archivo de configuración (.json).")
             if not profile.has_session:
                 UI.info("Falta el archivo de sesión de Telegram (.session).")
-
             raise typer.Exit(1)
 
-    settings = state.settings
-
-    # Verificación de la Base de Datos SQLite local
+    # 2. Verificación de la Base de Datos SQLite local y Esquema
     with UI.loading("Verificando conexión y esquema de base de datos..."):
         try:
             with DatabaseSession(manager.database_path, auto_init_schema=False) as db:
@@ -291,50 +275,34 @@ def check_config(ctx: typer.Context):
             UI.error(f"Error conectando a la base de datos: {e}")
             raise typer.Exit(1)
 
-    # Verificación del destino (chat_id)
-    if settings.chat_id == VALUE_NOT_SET:
-        UI.warn("El destino (chat_id) no está configurado.")
-        UI.tip(
-            "Configura un destino predeterminado con:",
-            commands=[
-                "totelegram target me",
-                'totelegram target "Mi Canal"',
-            ],
-        )
-        raise typer.Exit(code=1)
-
-    # Verificación de Telegram y Permisos
+    # 3. Verificación de Conexión activa con Telegram
     with state.get_telegram_session(profile_name) as client:
-        with UI.loading("Verificando conexión y permisos en Telegram..."):
-            validator = ChatAccessService(client)
-            access_report = validator.verify_access(settings.chat_id)
-
-        if not access_report.is_ready:
-            UI.warn("No tienes permisos de escritura en el chat destino.")
-            UI.info(f"Motivo: {access_report.reason}")
-            if access_report.hint:
-                UI.info(access_report.hint)
-            raise typer.Exit(code=1)
-
-        # SOLO comprobar catálogo si la base de datos está inicializada y operativa
-        if report.is_operational:
-            from totelegram.packaging.indexer import TapeIndexService
-
-            with DatabaseSession(manager.database_path, auto_init_schema=False) as db:
-                indexer = TapeIndexService(client, db)
-                with UI.loading("Comprobando catálogo de cintas archivadas..."):
-                    tape_report = indexer.auto_heal_or_report(settings.chat_id)
-
-                if tape_report.auto_healed:
-                    UI.info(
-                        f"Auto-sanadas [bold]{tape_report.healed_count}[/] cintas no indexadas en segundo plano."
+        with UI.loading("Verificando conexión y credenciales con Telegram..."):
+            try:
+                me = client.get_me()
+                if not me:
+                    UI.error(
+                        "No se pudo obtener la información de la cuenta en Telegram."
                     )
-                elif tape_report.needs_manual_sync:
-                    DisplayIndexer.show_unindexed_notice(tape_report.unindexed_count)
+                    raise typer.Exit(1)
+            except Exception as e:
+                UI.error(f"Error de conexión con los servidores de Telegram: {e}")
+                raise typer.Exit(1)
 
-        UI.success(f"Perfil '{profile_name}' verificado y listo para operar.")
-        if access_report.chat:
-            UI.info(
-                f"Destino confirmado: [bold]{access_report.chat.title}[/] "
-                f"[dim](ID: {access_report.chat.id})[/dim]"
-            )
+        tier_badge = (
+            "[bold cyan]Premium ★[/]"
+            if getattr(me, "is_premium", False)
+            else "Estándar"
+        )
+        user_name = me.first_name or me.username or "Usuario"
+
+        UI.success(
+            f"Conexión con Telegram exitosa: [bold]{user_name}[/] ({tier_badge})"
+        )
+        UI.success(
+            f"Perfil '[bold green]{profile_name}[/]' verificado y listo para operar."
+        )
+        UI.print(
+            "[dim]Nota: Para subir o respaldar archivos recuerda indicar el destino con [bold]-t / --target[/].[/dim]",
+            spacing="top",
+        )

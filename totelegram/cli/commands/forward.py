@@ -7,9 +7,13 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 from totelegram.cli.state import CLIState
 from totelegram.cli.ui import UI, console
 from totelegram.engine.forwarder import ForwardError, SnapshotForwarder
+from totelegram.exceptions import (
+    ConfigurationError,
+    TargetAmbiguousError,
+    TargetNotSetError,
+)
 from totelegram.models import TelegramChat, TelegramUser
 from totelegram.packaging.snapshot import SnapshotService
-from totelegram.schemas import VALUE_NOT_SET
 from totelegram.telegram.resolver import TargetResolver
 from totelegram.telegram.types import TargetResolutionStatus
 
@@ -30,7 +34,8 @@ def forward_snapshot(
         None,
         "--target",
         "-t",
-        help="Nombre, @username o ID del chat de destino (sobrescribe el destino por defecto).",
+        envvar="TOTELEGRAM_TARGET",
+        help="Destino en Telegram hacia donde replicar (o define TOTELEGRAM_TARGET).",
     ),
     yes: bool = typer.Option(
         False,
@@ -44,7 +49,9 @@ def forward_snapshot(
     de forma instantánea y sin consumir ancho de banda de subida (0 bytes transferidos desde tu PC).
     """
     state: CLIState = ctx.obj
-    settings = state.settings
+
+    if not target:
+        raise TargetNotSetError()
 
     # Cargar y validar el snapshot original
     with UI.loading(f"Cargando snapshot: [bold]{snapshot_path.name}[/]..."):
@@ -66,28 +73,22 @@ def forward_snapshot(
 
     with state.scope() as (client, db):
         resolver = TargetResolver(client, db)
-        resolved_chat_id: int | str | None = None
 
-        if target:
-            with UI.loading(f"Resolviendo destino '[bold]{target}[/]'..."):
-                resolution = resolver.resolve(target)
-            if resolution.status == TargetResolutionStatus.RESOLVED:
-                resolved_chat_id = resolution.chat_id
-            else:
-                UI.error(
-                    resolution.error_message
-                    or f"No se pudo resolver el destino '{target}'."
-                )
-                raise typer.Exit(1)
-        elif settings.chat_id != VALUE_NOT_SET:
-            resolved_chat_id = settings.chat_id
+        with UI.loading(f"Resolviendo destino '[bold]{target}[/]'..."):
+            resolution = resolver.resolve(target)
+
+        if resolution.status == TargetResolutionStatus.RESOLVED:
+            assert resolution.chat_id is not None
+            resolved_chat_id = resolution.chat_id
+        elif resolution.status == TargetResolutionStatus.AMBIGUOUS:
+            raise TargetAmbiguousError(target, resolution.candidates)
         else:
-            UI.error("No se ha especificado un chat de destino.")
-            UI.tip(
-                "Especifica un destino usando --target <chat> o configura uno por defecto:",
-                commands=['totelegram forward ... --target "Mi Canal"'],
+            raise ConfigurationError(
+                message=resolution.error_message
+                or f"No se pudo resolver el destino '{target}'.",
+                hint=resolution.hint,
+                exit_code=1,
             )
-            raise typer.Exit(1)
 
         # Pre-flight de destino
         try:
@@ -117,7 +118,6 @@ def forward_snapshot(
                 UI.info("Operación cancelada por el usuario.")
                 raise typer.Exit(0)
 
-        # Ejecución del reenvío
         forwarder = SnapshotForwarder(client)
 
         with Progress(
@@ -151,10 +151,6 @@ def forward_snapshot(
                 )
             except ForwardError as e:
                 UI.error(str(e))
-                raise typer.Exit(1)
-            except Exception as e:
-                UI.error(f"Error crítico durante el reenvío: {e}")
-                logger.exception("Error en comando forward")
                 raise typer.Exit(1)
 
         UI.separator()
