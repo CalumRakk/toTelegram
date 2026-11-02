@@ -12,6 +12,7 @@ from totelegram.engine.planner import JobPlanner
 from totelegram.engine.relocator import ChunkRelocator
 from totelegram.engine.uploader import CooperativeUploader
 from totelegram.exceptions import (
+    ConcurrencyError,
     IncompatibleCapacityError,
     PermissionDeniedCleanupError,
     PipelineCancelledError,
@@ -263,6 +264,32 @@ class JobPipeline:
 
     # SUBMÉTODOS PRIVADOS DEL MOTOR (Reubicación, Transferencia, Sellado)
 
+    def _ensure_no_active_claims_on_job(self, job: Job) -> None:
+        """Verifica que ningún otro nodo esté procesando activamente piezas de este Job."""
+        from totelegram.common.helpers import get_utc_now
+        from totelegram.models import Claim
+
+        payload_ids = [f"payload:{p.id}" for p in job.payloads]
+        if not payload_ids:
+            return
+
+        now = get_utc_now()
+        active_claims = list(
+            Claim.select().where(
+                (Claim.resource_id.in_(payload_ids))
+                & (Claim.node_id != self.session.coordinator.node_id)
+                & (Claim.expires_at > now)
+            )
+        )
+        if active_claims:
+            holder = active_claims[0].node_id
+            raise ConcurrencyError(
+                f"No se puede reiniciar ni purgar el Job {job.id} con --force: "
+                f"el nodo '{holder}' está procesando activamente una de sus piezas.",
+                title="Recurso en uso activo",
+                hint="Espera a que la otra subida finalice o que expire su lease antes de forzar un reinicio.",
+            )
+
     def _prepare_job_state(
         self,
         job: Job,
@@ -286,18 +313,15 @@ class JobPipeline:
             )
             return job
 
+        # La purga y reinicio de Job solo se permite con --force explícito
         if (
             report.decision == ExecutionDecision.CLEAN_RESTART
-            and (
-                force
-                or (
-                    account_max_size
-                    and job.chunk_size > account_max_size
-                    and len(report.valid_remotes) == 0
-                )
-            )
+            and force
             and job.payloads.count() > 0
         ):
+            # Comprobar que no haya otro nodo subiendo una pieza de este Job
+            self._ensure_no_active_claims_on_job(job)
+
             old_msg_ids = [r.message_id for r in report.valid_remotes]
 
             if old_msg_ids and not yes and confirm_cleanup:
@@ -318,11 +342,12 @@ class JobPipeline:
                 except Exception as e:
                     logger.warning(f"Aviso limpiando mensajes viejos en Telegram: {e}")
 
+            target_chunk_size = account_max_size or job.chunk_size
             with db_transaction(self.session.db):
                 source = job.source
                 chat = job.chat
                 job.purge(self.session.db)
-                job = Job.formalize_intent(source, chat, chunk_size=account_max_size)
+                job = Job.formalize_intent(source, chat, chunk_size=target_chunk_size)
 
         return job
 

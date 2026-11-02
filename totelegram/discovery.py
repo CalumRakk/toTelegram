@@ -91,57 +91,63 @@ class DiscoveryService:
                 detail="Todas las partes físicas ya están en Telegram. Solo falta sellar el Snapshot.",
             )
 
-        # Si hay partes parciales (subida a medias):
-        if valid_count > 0:
-            valid_payload_ids = {r.payload_id for r in valid_remotes}
-            pending_payloads = [
-                p
-                for p in job.payloads.order_by(Payload.sequence_index)
-                if p.id not in valid_payload_ids
-            ]
-            next_pending_payload = pending_payloads[0] if pending_payloads else None
-            next_pending_size = (
-                next_pending_payload.size if next_pending_payload else job.chunk_size
-            )
+        # Subida incompleta (0 <= valid_count < expected_count):
+        valid_payload_ids = {r.payload_id for r in valid_remotes}
+        pending_payloads = [
+            p
+            for p in job.payloads.order_by(Payload.sequence_index)
+            if p.id not in valid_payload_ids
+        ]
+        next_pending_payload = pending_payloads[0] if pending_payloads else None
+        next_pending_size = (
+            next_pending_payload.size
+            if next_pending_payload
+            else min(job.source.size, job.chunk_size)
+        )
 
-            # A) Comprobación de corte incompatible:
-            has_incompatible_pending = bool(
-                isinstance(account_max_chunk_size, int)
-                and account_max_chunk_size > 0
-                and next_pending_size > account_max_chunk_size
-            )
+        # A) Comprobación de corte incompatible con la cuenta activa:
+        has_incompatible_pending = bool(
+            isinstance(account_max_chunk_size, int)
+            and account_max_chunk_size > 0
+            and next_pending_size > account_max_chunk_size
+        )
 
-            if has_incompatible_pending:
-                if not force:
-                    logger.warning(
-                        f"Job {job.id}: La siguiente pieza ({format_size(next_pending_size)}) "
-                        f"supera el límite de subida de la cuenta activa ({format_size(account_max_chunk_size)})."
-                    )
+        if has_incompatible_pending:
+            if not force:
+                logger.warning(
+                    f"Job {job.id}: La siguiente pieza ({format_size(next_pending_size)}) "
+                    f"supera el límite de subida de la cuenta activa ({format_size(account_max_chunk_size)})."
+                )
+                return InvestigationReport(
+                    decision=ExecutionDecision.INCOMPATIBLE_CAPACITY,
+                    valid_remotes=valid_remotes,
+                    orphaned_remotes=orphaned_remotes,
+                    total_parts=expected_count,
+                    potential_duplicates=potential_duplicates,
+                    detail=f"La siguiente pieza pendiente ({format_size(next_pending_size)}) supera la capacidad de la cuenta.",
+                )
+            else:
+                if valid_remotes and not self.access_service.can_delete_messages(
+                    job.chat.id
+                ):
                     return InvestigationReport(
-                        decision=ExecutionDecision.INCOMPATIBLE_CAPACITY,
+                        decision=ExecutionDecision.PERMISSION_DENIED_CLEANUP,
                         valid_remotes=valid_remotes,
                         orphaned_remotes=orphaned_remotes,
                         total_parts=expected_count,
-                        potential_duplicates=potential_duplicates,
-                        detail=f"La siguiente pieza pendiente ({format_size(next_pending_size)}) supera la capacidad de la cuenta.",
+                        detail="Faltan permisos para eliminar los trozos viejos con corte incompatible.",
                     )
-                else:
-                    if not self.access_service.can_delete_messages(job.chat.id):
-                        return InvestigationReport(
-                            decision=ExecutionDecision.PERMISSION_DENIED_CLEANUP,
-                            valid_remotes=valid_remotes,
-                            total_parts=expected_count,
-                            detail="Faltan permisos para eliminar los trozos viejos con corte incompatible.",
-                        )
-                    return InvestigationReport(
-                        decision=ExecutionDecision.CLEAN_RESTART,
-                        valid_remotes=valid_remotes,
-                        total_parts=expected_count,
-                        potential_duplicates=potential_duplicates,
-                        detail="Reinicio limpio: se eliminarán partes viejas y se reanudará con la capacidad actual.",
-                    )
+                return InvestigationReport(
+                    decision=ExecutionDecision.CLEAN_RESTART,
+                    valid_remotes=valid_remotes,
+                    orphaned_remotes=orphaned_remotes,
+                    total_parts=expected_count,
+                    potential_duplicates=potential_duplicates,
+                    detail="Reinicio limpio: se eliminarán partes viejas y se reanudará con la capacidad actual.",
+                )
 
-            # B) Corte compatible con --force (Anti-Waste TOC): Reubicar al fondo
+        # B) Corte compatible con partes ya subidas en Telegram:
+        if valid_count > 0:
             if force:
                 if not self.access_service.can_delete_messages(job.chat.id):
                     logger.warning(
@@ -150,6 +156,7 @@ class DiscoveryService:
                     return InvestigationReport(
                         decision=ExecutionDecision.PERMISSION_DENIED_CLEANUP,
                         valid_remotes=valid_remotes,
+                        orphaned_remotes=orphaned_remotes,
                         total_parts=expected_count,
                         detail="Faltan permisos para eliminar los trozos antiguos al reordenar el chat.",
                     )
@@ -167,7 +174,7 @@ class DiscoveryService:
                     detail="Subida a medias con corte compatible y --force. Se reubicarán trozos al fondo.",
                 )
 
-            # C) Corte compatible sin --force: Reanudar en el sitio
+            # Corte compatible sin --force: Reanudar en el sitio
             return InvestigationReport(
                 decision=ExecutionDecision.RESUMED_IN_PLACE,
                 valid_remotes=valid_remotes,
@@ -177,14 +184,19 @@ class DiscoveryService:
                 detail="Subida incompleta compatible. Reanudando partes faltantes en su sitio.",
             )
 
-        # Sin partes previas válidas (o todas fueron orfanadas por JIT) -> Subida limpia desde cero
+        # C) Sin partes previas válidas en Telegram (valid_count == 0):
+        detail_msg = (
+            "Reinicio limpio forzado por el usuario."
+            if force
+            else "No hay partes previas válidas en Telegram. Requiere subida limpia."
+        )
         return InvestigationReport(
             decision=ExecutionDecision.CLEAN_RESTART,
             valid_remotes=[],
             orphaned_remotes=orphaned_remotes,
             total_parts=expected_count,
             potential_duplicates=potential_duplicates,
-            detail="No hay partes previas válidas en Telegram. Requiere subida limpia.",
+            detail=detail_msg,
         )
 
     def _is_snapshot_fulfilled_in_chat(self, job: Job) -> bool:
