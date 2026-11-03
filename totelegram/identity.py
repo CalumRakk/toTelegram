@@ -105,7 +105,7 @@ class Settings(BaseModel):
         json_schema_extra={"is_sensitive": False, "access": AccessLevel.EDITABLE},
     )
     upload_pause_range: IntList = Field(
-        default_factory=lambda: [0, 0],
+        default_factory=lambda: [60, 120],
         description="Rango de pausa aleatoria entre subidas (en minutos). Ej: '10,30'. [0,0] para desactivar.",
         json_schema_extra={"is_sensitive": False, "access": AccessLevel.EDITABLE},
     )

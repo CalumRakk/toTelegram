@@ -5,8 +5,11 @@ import time
 from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from pathlib import Path
+from typing import TYPE_CHECKING
 
+from totelegram.concurrency import ConcurrencyCoordinator
 from totelegram.database import db_transaction
+from totelegram.discovery import DiscoveryService
 from totelegram.engine.events import NullObserver, UploadObserver
 from totelegram.engine.planner import JobPlanner
 from totelegram.engine.relocator import ChunkRelocator
@@ -17,7 +20,8 @@ from totelegram.exceptions import (
     PermissionDeniedCleanupError,
     PipelineCancelledError,
 )
-from totelegram.models import Job, Payload
+from totelegram.identity import Settings
+from totelegram.models import Job, Payload, TelegramChat, TelegramUser
 from totelegram.packaging.publisher import SnapshotPublisher
 from totelegram.packaging.snapshot import SnapshotService
 from totelegram.schemas import ExecutionDecision
@@ -28,26 +32,32 @@ from totelegram.types import (
     UploadSession,
 )
 
+if TYPE_CHECKING:
+    import peewee
+    from pyrogram.types import Chat
+
+    from totelegram.cli.state import CLIState
+
 logger = logging.getLogger(__name__)
 
 
-class JobContext:
-    """Representa el contexto y ciclo de vida de ejecución de un Job individual."""
+class JobSession:
+    """Representa la sesión activa de red en Telegram para procesar un Job específico."""
 
     def __init__(
         self,
         pipeline: "JobPipeline",
+        session: UploadSession,
         job: Job,
-        path: Path,
         force: bool = False,
         yes: bool = False,
         confirm_cleanup: Callable[[int, str], bool] | None = None,
     ):
         self.pipeline = pipeline
-        self.session = pipeline.session
+        self.session = session
         self.observer = pipeline.observer
         self.job = job
-        self.path = path
+        self.path = job.path
         self.force = force
         self.yes = yes
         self.confirm_cleanup = confirm_cleanup
@@ -68,7 +78,7 @@ class JobContext:
         return self.report is not None and self.report.is_fulfilled
 
     def investigate(self) -> InvestigationReport:
-        """Analiza el estado físico JIT en Telegram y evalúa guardias tempranas."""
+        """Analiza el estado físico JIT en Telegram con conexión activa y fresca."""
         report = self.session.discovery.investigate(
             job=self.job,
             force=self.force,
@@ -81,7 +91,6 @@ class JobContext:
         logger.info(f"Decisión de ejecución resuelta: {report.decision.value}")
         self.report = report
 
-        # Guardias tempranas
         if report.decision == ExecutionDecision.ALREADY_FULFILLED:
             self.strategy_result = StrategyResult(
                 strategy_name="None",
@@ -121,7 +130,7 @@ class JobContext:
         return self.report
 
     def transfer(self) -> StrategyResult:
-        """Prepara el estado del chat (reubicación/purga) y ejecuta la subida física."""
+        """Prepara el estado del chat y ejecuta la subida física de trozos pendientes."""
         if self.is_fulfilled:
             assert self.strategy_result is not None
             return self.strategy_result
@@ -130,8 +139,8 @@ class JobContext:
             "Debe ejecutarse investigate() antes de transfer()."
         )
 
-        # Preparación del estado del chat
         self.job = self.pipeline._prepare_job_state(
+            session=self.session,
             job=self.job,
             path=self.path,
             report=self.report,
@@ -141,13 +150,13 @@ class JobContext:
             confirm_cleanup=self.confirm_cleanup,
         )
 
-        # Ejecución física o sellado directo
-        self.strategy_result = self.pipeline._execute_transfer(self.job, self.report)
+        self.strategy_result = self.pipeline._execute_transfer(
+            self.session, self.job, self.report
+        )
         return self.strategy_result
 
     def seal(self) -> tuple[bool, bool]:
-        """Genera el snapshot, lo publica en Telegram y actualiza el Ledger."""
-        # Si ya estaba 100% completado en Telegram, no re-generamos snapshot
+        """Genera el snapshot, lo publica en Telegram y actualiza el estado local."""
         if self.is_fulfilled:
             self.is_completed = True
             self.snapshot_generated = False
@@ -155,7 +164,7 @@ class JobContext:
             return self.is_completed, self.snapshot_generated
 
         self.is_completed, self.snapshot_generated = self.pipeline._seal_job_snapshot(
-            self.job
+            self.session, self.job
         )
         self.observer.on_job_complete(self.job, self.snapshot_generated)
         return self.is_completed, self.snapshot_generated
@@ -178,222 +187,140 @@ class JobContext:
         )
 
 
+# Alias para retrocompatibilidad
+JobContext = JobSession
+
+
 class JobPipeline:
+    """Orquestador de ejecución desacoplado para planificar y procesar Jobs."""
+
     def __init__(
         self,
-        session: UploadSession,
+        state: "CLIState | None" = None,
+        db: "peewee.Database | None" = None,
+        target_chat: "Chat | TelegramChat | None" = None,
+        owner: "TelegramUser | None" = None,
+        settings: "Settings | None" = None,
         observer: UploadObserver | None = None,
+        session: UploadSession | None = None,
+        tg_chat: "Chat | TelegramChat | None" = None,
     ):
-        self.session = session
         self.observer = observer or NullObserver()
         self.uploader = CooperativeUploader()
 
-    @contextmanager
-    def track_job(
+        # Soporte para inyección directa en tests unitarios
+        self._test_session = session
+
+        self.state = state
+        self.db = db or (session.db if session else None)
+        self.target_chat = (
+            target_chat or tg_chat or (session.tg_chat if session else None)
+        )
+        self.owner = owner or (session.owner if session else None)
+        self.settings = settings or (session.settings if session else None)
+
+    def plan_job(
         self,
         path: Path,
-        is_last_in_batch: bool = False,
         force: bool = False,
         auto_truncate: bool = False,
-        yes: bool = False,
-        confirm_cleanup: Callable[[int, str], bool] | None = None,
-    ) -> Generator[JobContext, None, None]:
-        """
-        Administrador de contexto declarativo para el ciclo de vida de un Job.
-        Planifica la intención, asegura el lock y gestiona la pausa inter-job al finalizar.
-        """
-        logger.info(f"=== Iniciando Pipeline para: {path.name} ===")
-
-        # Planificación de la intención
-        job = JobPlanner.plan(
+    ) -> Job:
+        """Planifica el Job de forma 100% offline contra el disco y SQLite."""
+        return JobPlanner.plan(
             path=path,
-            session=self.session,
             observer=self.observer,
             force=force,
             auto_truncate=auto_truncate,
+            tg_chat=self.target_chat,
+            settings=self.settings,
+            owner=self.owner,
         )
 
+    @contextmanager
+    def open_telegram_session(
+        self,
+        job: Job,
+        force: bool = False,
+        yes: bool = False,
+        confirm_cleanup: Callable[[int, str], bool] | None = None,
+    ) -> Generator[JobSession, None, None]:
+        """Abre una sesión de Telegram y bloqueo de cuenta acotados a la ejecución de este Job."""
         total_pieces = job.payloads.count() or job.total_expected_parts
         self.observer.on_job_start(job, total_pieces)
 
-        context = JobContext(
-            pipeline=self,
-            job=job,
-            path=path,
-            force=force,
-            yes=yes,
-            confirm_cleanup=confirm_cleanup,
-        )
-
-        with self.session.exclusive_lock():
-            try:
-                yield context
-            finally:
-                # Pausa inter-job si se transmitieron bytes reales y no es el último
-                if (
-                    not is_last_in_batch
-                    and context.strategy_result
-                    and context.strategy_result.did_upload_bytes
-                ):
-                    self._apply_inter_job_pause()
-
-    def process(
-        self,
-        path: Path,
-        is_last_in_batch: bool = False,
-        force: bool = False,
-        auto_truncate: bool = False,
-        yes: bool = False,
-        confirm_cleanup: Callable[[int, str], bool] | None = None,
-    ) -> JobExecutionResult:
-        """Método de fachada retrocompatible: orquesta las 3 fases secuencialmente."""
-        with self.track_job(
-            path=path,
-            is_last_in_batch=is_last_in_batch,
-            force=force,
-            auto_truncate=auto_truncate,
-            yes=yes,
-            confirm_cleanup=confirm_cleanup,
-        ) as job_ctx:
-            report = job_ctx.investigate()
-            if not report.is_fulfilled:
-                job_ctx.transfer()
-            job_ctx.seal()
-            return job_ctx.result
-
-    # SUBMÉTODOS PRIVADOS DEL MOTOR (Reubicación, Transferencia, Sellado)
-
-    def _ensure_no_active_claims_on_job(self, job: Job) -> None:
-        """Verifica que ningún otro nodo esté procesando activamente piezas de este Job."""
-        from totelegram.common.helpers import get_utc_now
-        from totelegram.models import Claim
-
-        payload_ids = [f"payload:{p.id}" for p in job.payloads]
-        if not payload_ids:
+        if self._test_session is not None:
+            # Modo test unitario con sesión inyectada
+            job_session = JobSession(
+                pipeline=self,
+                session=self._test_session,
+                job=job,
+                force=force,
+                yes=yes,
+                confirm_cleanup=confirm_cleanup,
+            )
+            with self._test_session.exclusive_lock():
+                yield job_session
             return
 
-        now = get_utc_now()
-        active_claims = list(
-            Claim.select().where(
-                (Claim.resource_id.in_(payload_ids))
-                & (Claim.node_id != self.session.coordinator.node_id)
-                & (Claim.expires_at > now)
-            )
+        # Modo producción
+        assert self.state is not None, (
+            "Se requiere CLIState para abrir la sesión de Telegram."
         )
-        if active_claims:
-            holder = active_claims[0].node_id
-            raise ConcurrencyError(
-                f"No se puede reiniciar ni purgar el Job {job.id} con --force: "
-                f"el nodo '{holder}' está procesando activamente una de sus piezas.",
-                title="Recurso en uso activo",
-                hint="Espera a que la otra subida finalice o que expire su lease antes de forzar un reinicio.",
+        assert self.db is not None, "Se requiere conexión a la base de datos."
+        assert self.target_chat is not None, "Se requiere el chat destino resuelto."
+        assert self.owner is not None, "Se requiere el usuario autenticado."
+        assert self.settings is not None, "Se requieren los ajustes del perfil."
+
+        with self.state.get_telegram_session() as client:
+            coordinator = ConcurrencyCoordinator(
+                db=self.db,
+                node_id=self.state.manager.node_id,
+                client=client,
+            )
+            discovery = DiscoveryService(client, self.db)
+            session = UploadSession(
+                client=client,
+                db=self.db,
+                tg_chat=self.target_chat,  # type: ignore
+                owner=self.owner,
+                settings=self.settings,
+                coordinator=coordinator,
+                discovery=discovery,
             )
 
-    def _prepare_job_state(
-        self,
-        job: Job,
-        path: Path,
-        report: InvestigationReport,
-        force: bool,
-        account_max_size: int,
-        yes: bool,
-        confirm_cleanup: Callable[[int, str], bool] | None,
-    ) -> Job:
-        if report.decision == ExecutionDecision.RELOCATED_AND_RESUMED:
-            logger.info(
-                f"Job {job.id}: Ejecutando reubicación atómica de {len(report.valid_remotes)} trozos..."
+            job_session = JobSession(
+                pipeline=self,
+                session=session,
+                job=job,
+                force=force,
+                yes=yes,
+                confirm_cleanup=confirm_cleanup,
             )
-            self.observer.on_relocation_start(len(report.valid_remotes))
-            ChunkRelocator.relocate(
-                client=self.session.client,
-                db=self.session.db,
-                chat_id=self.session.tg_chat.id,
-                remotes=report.valid_remotes,
-            )
-            return job
 
-        # La purga y reinicio de Job solo se permite con --force explícito
+            with session.exclusive_lock():
+                yield job_session
+
+    def apply_pause(
+        self, is_last: bool = False, result: JobExecutionResult | None = None
+    ) -> None:
+        """Aplica la pausa de seguridad de forma 100% offline (sin sockets de red activos)."""
+        if is_last:
+            return
+
         if (
-            report.decision == ExecutionDecision.CLEAN_RESTART
-            and force
-            and job.payloads.count() > 0
+            result
+            and result.strategy_result
+            and not result.strategy_result.did_upload_bytes
         ):
-            # Comprobar que no haya otro nodo subiendo una pieza de este Job
-            self._ensure_no_active_claims_on_job(job)
+            return
 
-            old_msg_ids = [r.message_id for r in report.valid_remotes]
+        actual_settings = self.settings or (
+            self._test_session.settings if self._test_session else None
+        )
+        if not actual_settings:
+            return
 
-            if old_msg_ids and not yes and confirm_cleanup:
-                confirmed = confirm_cleanup(len(old_msg_ids), path.name)
-                if not confirmed:
-                    raise PipelineCancelledError(
-                        f"Operación cancelada por el usuario para {path.name}."
-                    )
-
-            logger.info(
-                f"Job {job.id}: Purgando intento previo para reinicio limpio con --force..."
-            )
-            if old_msg_ids:
-                try:
-                    self.session.client.delete_messages(
-                        chat_id=self.session.tg_chat.id, message_ids=old_msg_ids
-                    )
-                except Exception as e:
-                    logger.warning(f"Aviso limpiando mensajes viejos en Telegram: {e}")
-
-            target_chunk_size = account_max_size or job.chunk_size
-            with db_transaction(self.session.db):
-                source = job.source
-                chat = job.chat
-                job.purge(self.session.db)
-                job = Job.formalize_intent(source, chat, chunk_size=target_chunk_size)
-
-        return job
-
-    def _execute_transfer(
-        self,
-        job: Job,
-        report: InvestigationReport,
-    ) -> StrategyResult:
-        if report.decision == ExecutionDecision.SEAL_HEALED:
-            logger.info(f"Job {job.id}: Sellando snapshot faltante (SEAL_HEALED)...")
-            return StrategyResult(
-                strategy_name="SealHealing",
-                pieces_processed=len(report.valid_remotes),
-                did_upload_bytes=False,
-                is_completed=True,
-                message="Todas las partes ya estaban en Telegram. Snapshot sellado exitosamente.",
-            )
-
-        return self.uploader.upload(job, self.session, self.observer)
-
-    def _seal_job_snapshot(self, job: Job) -> tuple[bool, bool]:
-        if not job.is_completed_local:
-            return False, False
-
-        if job.remote_snapshot is not None:
-            return True, False
-
-        with tempfile.TemporaryDirectory() as staging_dir:
-            staging_path = Path(staging_dir)
-            manifest, temp_snapshot_file = SnapshotService.generate_snapshot(
-                job, staging_dir=staging_path
-            )
-
-            sent_msg = SnapshotPublisher.publish(
-                client=self.session.client,
-                chat_id=self.session.tg_chat.id,
-                snapshot_path=temp_snapshot_file,
-                manifest=manifest,
-            )
-
-            with db_transaction(self.session.db):
-                job.set_snapshot_published(sent_msg.id, self.session.owner)
-
-        return True, True
-
-    def _apply_inter_job_pause(self) -> None:
-        pause_range = self.session.settings.upload_pause_range
+        pause_range = actual_settings.upload_pause_range
         if not pause_range or pause_range == [0, 0]:
             return
 
@@ -408,3 +335,162 @@ class JobPipeline:
                 time.sleep(1)
                 remaining -= 1
             self.observer.on_pause_end()
+
+    def process(
+        self,
+        path: Path,
+        force: bool = False,
+        auto_truncate: bool = False,
+        is_last_in_batch: bool = True,
+        yes: bool = False,
+        confirm_cleanup: Callable[[int, str], bool] | None = None,
+    ) -> JobExecutionResult:
+        """Ejecuta el ciclo de vida completo de un archivo de forma síncrona."""
+        job = self.plan_job(path, force=force, auto_truncate=auto_truncate)
+        with self.open_telegram_session(
+            job, force=force, yes=yes, confirm_cleanup=confirm_cleanup
+        ) as session:
+            report = session.investigate()
+            if not report.is_fulfilled:
+                session.transfer()
+            session.seal()
+            result = session.result
+
+        if not is_last_in_batch:
+            self.apply_pause(is_last=is_last_in_batch, result=result)
+
+        return result
+
+    def _ensure_no_active_claims_on_job(
+        self, job: Job, session: UploadSession | None = None
+    ) -> None:
+        from totelegram.common.helpers import get_utc_now
+        from totelegram.models import Claim
+
+        payload_ids = [f"payload:{p.id}" for p in job.payloads]
+        if not payload_ids:
+            return
+
+        active_session = session or self._test_session
+        current_node_id = (
+            active_session.coordinator.node_id
+            if active_session
+            else (self.state.manager.node_id if self.state else "")
+        )
+
+        now = get_utc_now()
+        active_claims = list(
+            Claim.select().where(
+                (Claim.resource_id.in_(payload_ids))
+                & (Claim.node_id != current_node_id)
+                & (Claim.expires_at > now)
+            )
+        )
+        if active_claims:
+            holder = active_claims[0].node_id
+            raise ConcurrencyError(
+                f"No se puede reiniciar ni purgar el Job {job.id} con --force: "
+                f"el nodo '{holder}' está procesando activamente una de sus piezas.",
+                title="Recurso en uso activo",
+                hint="Espera a que la otra subida finalice o que expire su lease.",
+            )
+
+    def _prepare_job_state(
+        self,
+        session: UploadSession,
+        job: Job,
+        path: Path,
+        report: InvestigationReport,
+        force: bool,
+        account_max_size: int,
+        yes: bool,
+        confirm_cleanup: Callable[[int, str], bool] | None,
+    ) -> Job:
+        if report.decision == ExecutionDecision.RELOCATED_AND_RESUMED:
+            logger.info(
+                f"Job {job.id}: Reubicando {len(report.valid_remotes)} trozos al fondo del chat..."
+            )
+            self.observer.on_relocation_start(len(report.valid_remotes))
+            ChunkRelocator.relocate(
+                client=session.client,
+                db=session.db,
+                chat_id=session.tg_chat.id,
+                remotes=report.valid_remotes,
+            )
+            return job
+
+        if (
+            report.decision == ExecutionDecision.CLEAN_RESTART
+            and force
+            and job.payloads.count() > 0
+        ):
+            self._ensure_no_active_claims_on_job(job, session=session)
+            old_msg_ids = [r.message_id for r in report.valid_remotes]
+
+            if old_msg_ids and not yes and confirm_cleanup:
+                confirmed = confirm_cleanup(len(old_msg_ids), path.name)
+                if not confirmed:
+                    raise PipelineCancelledError(
+                        f"Operación cancelada por el usuario para {path.name}."
+                    )
+
+            logger.info(f"Job {job.id}: Purgando intento previo con --force...")
+            if old_msg_ids:
+                try:
+                    session.client.delete_messages(
+                        chat_id=session.tg_chat.id, message_ids=old_msg_ids
+                    )
+                except Exception as e:
+                    logger.warning(f"Aviso limpiando mensajes en Telegram: {e}")
+
+            target_chunk_size = account_max_size or job.chunk_size
+            with db_transaction(session.db):
+                source = job.source
+                chat = job.chat
+                job.purge(session.db)
+                job = Job.formalize_intent(source, chat, chunk_size=target_chunk_size)
+
+        return job
+
+    def _execute_transfer(
+        self,
+        session: UploadSession,
+        job: Job,
+        report: InvestigationReport,
+    ) -> StrategyResult:
+        if report.decision == ExecutionDecision.SEAL_HEALED:
+            logger.info(f"Job {job.id}: Sellando snapshot faltante (SEAL_HEALED)...")
+            return StrategyResult(
+                strategy_name="SealHealing",
+                pieces_processed=len(report.valid_remotes),
+                did_upload_bytes=False,
+                is_completed=True,
+                message="Todas las partes ya estaban en Telegram. Snapshot sellado exitosamente.",
+            )
+
+        return self.uploader.upload(job, session, self.observer)
+
+    def _seal_job_snapshot(self, session: UploadSession, job: Job) -> tuple[bool, bool]:
+        if not job.is_completed_local:
+            return False, False
+
+        if job.remote_snapshot is not None:
+            return True, False
+
+        with tempfile.TemporaryDirectory() as staging_dir:
+            staging_path = Path(staging_dir)
+            manifest, temp_snapshot_file = SnapshotService.generate_snapshot(
+                job, staging_dir=staging_path
+            )
+
+            sent_msg = SnapshotPublisher.publish(
+                client=session.client,
+                chat_id=session.tg_chat.id,
+                snapshot_path=temp_snapshot_file,
+                manifest=manifest,
+            )
+
+            with db_transaction(session.db):
+                job.set_snapshot_published(sent_msg.id, session.owner)
+
+        return True, True

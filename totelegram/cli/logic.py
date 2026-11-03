@@ -14,6 +14,7 @@ from totelegram.cli.state import CLIState
 from totelegram.cli.ui import UI, console
 from totelegram.cli.views.upload import DisplayIndexer, DisplayUpload
 from totelegram.concurrency import ConcurrencyCoordinator
+from totelegram.database import DatabaseSession
 from totelegram.discovery import DiscoveryService
 from totelegram.engine.pipeline import JobPipeline
 from totelegram.exceptions import (
@@ -116,8 +117,17 @@ class UploadRequest:
         return typer.confirm("¿Deseas eliminarlas y continuar?", default=False)
 
     @contextmanager
-    def open_session(self) -> Generator[UploadSession, None, None]:
-        """Abre el entorno técnico de base de datos y Telegram bajo el perfil activo."""
+    def open_database(self) -> Generator[peewee.Database, None, None]:
+        """Abre la base de datos local SQLite para toda la duración del comando."""
+        db_target = getattr(self.state.manager, "database_path", None) or ":memory:"
+        with DatabaseSession(db_target, auto_init_schema=True) as db:
+            yield db
+
+    @contextmanager
+    def open_preflight_session(
+        self, db: peewee.Database
+    ) -> Generator[UploadSession, None, None]:
+        """Abre una conexión inicial a Telegram para validar destino, identidad y escanear inventario."""
         self.state.announce_profile()
 
         if self.force:
@@ -125,7 +135,7 @@ class UploadRequest:
                 f"Forzando la subida de {self.item_plural_label} sin comprobar el estado previo."
             )
 
-        with self.state.scope() as (client, db):
+        with self.state.scope() as (client, _):
             session = prepare_upload_session(
                 state=self.state,
                 client=client,
@@ -134,6 +144,9 @@ class UploadRequest:
                 target_override=self.target,
             )
             yield session
+
+    # Alias para retrocompatibilidad
+    open_session = open_preflight_session
 
 
 class CandidateItem:
@@ -252,7 +265,7 @@ class UploadInventory:
         """Presenta las omisiones y retorna los candidatos listos para subida."""
         DisplayUpload.show_skip_report(
             self.scan_report,
-            item_type=cast("archivo | carpeta", self.request.item_label),  # noqa: F821 # type: ignore
+            item_type=cast("archivo | carpeta", self.request.item_label),  # type: ignore  # noqa: F821
             force_verbose=False if self.request.is_backup else None,
         )
         raw_candidates = self.scan_report.ensure_has_candidates(
@@ -547,54 +560,72 @@ def run_upload_flow(
         auto_truncate=auto_truncate,
     )
 
-    with request.open_session() as session:
-        announce_session_connection(session)
+    with request.open_database() as db:
+        # breve conexión inicial para resolver destino, usuario e inventario
+        with request.open_preflight_session(db) as preflight:
+            announce_session_connection(preflight)
+            inventory = UploadInventory.discover(session=preflight, request=request)
+            candidates = inventory.ensure_candidates()
 
-        inventory = UploadInventory.discover(session=session, request=request)
-        candidates = inventory.ensure_candidates()
+            resolved_target_chat = preflight.tg_chat
+            resolved_owner = preflight.owner
+            resolved_settings = preflight.settings
 
         processed_count = 0
         skipped_by_capacity: list[CandidateItem] = []
 
-        with session.exclusive_lock():
-            observer = RichUploadObserver()
-            pipeline = JobPipeline(session=session, observer=observer)
+        observer = RichUploadObserver()
+        pipeline = JobPipeline(
+            state=request.state,
+            db=db,
+            target_chat=resolved_target_chat,
+            owner=resolved_owner,
+            settings=resolved_settings,
+            observer=observer,
+        )
 
-            for item in candidates:
-                item.announce_start()
+        for item in candidates:
+            item.announce_start()
 
-                try:
-                    with pipeline.track_job(
-                        path=item.path,
-                        is_last_in_batch=item.is_last,
-                        force=request.force,
-                        auto_truncate=request.auto_truncate,
-                        yes=request.yes,
-                        confirm_cleanup=request.confirm_cleanup,
-                    ) as job:
-                        # Investiga disponibilidad en Telegram
-                        report = job.investigate()
+            # Planificación Offline (Hash MD5)
+            job = pipeline.plan_job(
+                path=item.path,
+                force=request.force,
+                auto_truncate=request.auto_truncate,
+            )
 
-                        # ¿Ya está completado al 100% en este canal?
-                        if report.is_fulfilled:
-                            job.seal()
-                            item.announce_already_fulfilled()
-                            continue
+            # Sesión de Red en Telegram (Investigar -> Transferir -> Sellar)
+            try:
+                with pipeline.open_telegram_session(
+                    job=job,
+                    force=request.force,
+                    yes=request.yes,
+                    confirm_cleanup=request.confirm_cleanup,
+                ) as session:
+                    report = session.investigate()
 
-                        job.transfer()
+                    if report.is_fulfilled:
+                        session.seal()
+                        item.announce_already_fulfilled()
+                    else:
+                        session.transfer()
+                        session.seal()
 
-                        job.seal()
+                    execution_result = session.result
 
-                    item.announce_success(job.result)
-                    processed_count += 1
+                # Anuncio inmediato de resultado
+                item.announce_success(execution_result)
+                processed_count += 1
 
-                except IncompatibleCapacityError as e:
-                    item.announce_incompatible_capacity(e)
-                    skipped_by_capacity.append(item)
-                    continue
+                # Pausa de seguridad si aplica.
+                pipeline.apply_pause(is_last=item.is_last, result=execution_result)
+
+            except IncompatibleCapacityError as e:
+                item.announce_incompatible_capacity(e)
+                skipped_by_capacity.append(item)
+                continue
 
         inventory.report_final_integrity()
 
-        # Si había candidatos pero NINGUNO pudo subirse debido a la capacidad, salir con código 1
         if skipped_by_capacity and processed_count == 0:
             raise typer.Exit(1)

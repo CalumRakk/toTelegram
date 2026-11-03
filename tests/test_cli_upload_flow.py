@@ -45,6 +45,7 @@ class TestCliUploadFlow(unittest.TestCase):
         mock_state.profile_name = "test_profile"
         mock_state.manager = MagicMock(spec=SettingsManager)
         mock_state.manager.resolve_profile_name.return_value = "test_profile"
+        mock_state.manager.database_path = ":memory:"
 
         @contextmanager
         def fake_scope():
@@ -80,17 +81,18 @@ class TestCliUploadFlow(unittest.TestCase):
     def test_run_upload_flow_executes_lifecycle_successfully(
         self, mock_pipeline_cls, mock_prep_ctx
     ):
-        """Verifica que run_upload_flow orqueste el ciclo completo: track_job -> investigate -> transfer -> seal."""
+        """Verifica que run_upload_flow orqueste el ciclo completo: plan_job -> open_telegram_session -> investigate -> transfer -> seal -> apply_pause."""
         mock_state = self._build_mock_cli_state()
         mock_ctx = self._build_mock_session(mock_state)
         mock_prep_ctx.return_value = mock_ctx
 
-        mock_job = MagicMock()
+        mock_job_obj = MagicMock()
+        mock_session = MagicMock()
         mock_report = MagicMock()
         mock_report.is_fulfilled = False
-        mock_job.investigate.return_value = mock_report
-        mock_job.result = JobExecutionResult(
-            job=MagicMock(),
+        mock_session.investigate.return_value = mock_report
+        mock_session.result = JobExecutionResult(
+            job=mock_job_obj,
             path=self.file_path,
             is_completed=True,
             strategy_result=StrategyResult(
@@ -103,12 +105,13 @@ class TestCliUploadFlow(unittest.TestCase):
 
         mock_pipeline = MagicMock()
         mock_pipeline_cls.return_value = mock_pipeline
+        mock_pipeline.plan_job.return_value = mock_job_obj
 
         @contextmanager
-        def fake_track_job(**kwargs):
-            yield mock_job
+        def fake_open_session(**kwargs):
+            yield mock_session
 
-        mock_pipeline.track_job.side_effect = fake_track_job
+        mock_pipeline.open_telegram_session.side_effect = fake_open_session
 
         mock_typer_ctx = MagicMock()
         mock_typer_ctx.obj = mock_state
@@ -127,14 +130,21 @@ class TestCliUploadFlow(unittest.TestCase):
 
         # Verificar llamadas del ciclo de vida
         mock_prep_ctx.assert_called_once()
-        mock_pipeline.track_job.assert_called_once()
+        mock_pipeline.plan_job.assert_called_once_with(
+            path=self.file_path,
+            force=False,
+            auto_truncate=False,
+        )
+        mock_pipeline.open_telegram_session.assert_called_once()
         self.assertEqual(
-            mock_pipeline.track_job.call_args.kwargs["path"], self.file_path
+            mock_pipeline.open_telegram_session.call_args.kwargs["job"],
+            mock_job_obj,
         )
 
-        mock_job.investigate.assert_called_once()
-        mock_job.transfer.assert_called_once()
-        mock_job.seal.assert_called_once()
+        mock_session.investigate.assert_called_once()
+        mock_session.transfer.assert_called_once()
+        mock_session.seal.assert_called_once()
+        mock_pipeline.apply_pause.assert_called_once()
 
     @patch("totelegram.cli.logic.prepare_upload_session")
     @patch("totelegram.cli.logic.JobPipeline")
@@ -146,12 +156,13 @@ class TestCliUploadFlow(unittest.TestCase):
         mock_ctx = self._build_mock_session(mock_state)
         mock_prep_ctx.return_value = mock_ctx
 
-        mock_job = MagicMock()
+        mock_job_obj = MagicMock()
+        mock_session = MagicMock()
         mock_report = MagicMock()
         mock_report.is_fulfilled = True  # Ya está completo en Telegram
-        mock_job.investigate.return_value = mock_report
-        mock_job.result = JobExecutionResult(
-            job=MagicMock(),
+        mock_session.investigate.return_value = mock_report
+        mock_session.result = JobExecutionResult(
+            job=mock_job_obj,
             path=self.file_path,
             is_completed=True,
             strategy_result=StrategyResult(
@@ -164,12 +175,13 @@ class TestCliUploadFlow(unittest.TestCase):
 
         mock_pipeline = MagicMock()
         mock_pipeline_cls.return_value = mock_pipeline
+        mock_pipeline.plan_job.return_value = mock_job_obj
 
         @contextmanager
-        def fake_track_job(**kwargs):
-            yield mock_job
+        def fake_open_session(**kwargs):
+            yield mock_session
 
-        mock_pipeline.track_job.side_effect = fake_track_job
+        mock_pipeline.open_telegram_session.side_effect = fake_open_session
 
         mock_typer_ctx = MagicMock()
         mock_typer_ctx.obj = mock_state
@@ -186,10 +198,12 @@ class TestCliUploadFlow(unittest.TestCase):
                 is_backup=False,
             )
 
-        mock_job.investigate.assert_called_once()
+        mock_pipeline.plan_job.assert_called_once()
+        mock_pipeline.open_telegram_session.assert_called_once()
+        mock_session.investigate.assert_called_once()
         # Cuando is_fulfilled es True, sella snapshot pero NO transfiere bytes
-        mock_job.transfer.assert_not_called()
-        mock_job.seal.assert_called_once()
+        mock_session.transfer.assert_not_called()
+        mock_session.seal.assert_called_once()
 
     # PRUEBAS DE DELEGACIÓN DE COMANDOS (send y backup)
 
