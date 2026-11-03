@@ -10,6 +10,7 @@ from rich.panel import Panel
 
 from totelegram.cli.state import CLIState
 from totelegram.cli.ui import UI, console
+from totelegram.exceptions import UnsupportedTargetTypeError
 from totelegram.identity import (
     DEFAULT_TG_API_HASH,
     DEFAULT_TG_API_ID,
@@ -19,6 +20,7 @@ from totelegram.identity import (
 from totelegram.models import TelegramUser
 from totelegram.telegram.auth import AuthLogic
 from totelegram.telegram.resolver import TargetResolver
+from totelegram.telegram.types import TargetResolutionStatus
 
 logger = logging.getLogger(__name__)
 
@@ -176,7 +178,7 @@ def login_command(ctx: typer.Context):
         ),
         commands=[
             "totelegram send video.mp4 -t me               # Enviar a tus Mensajes Guardados",
-            'totelegram send video.mp4 -t "Mi Canal"       # Enviar a un canal o grupo',
+            'totelegram send video.mp4 -t "Mi Canal"       # Enviar a un canal de difusión',
             'totelegram backup ./mis_datos -t "Backups"    # Respaldar carpeta completa',
         ],
         spacing="block",
@@ -222,6 +224,12 @@ def status_command(
                 res = resolver.resolve(target)
                 if res.is_resolved:
                     resolved_chat_id = res.chat_id
+                elif res.status == TargetResolutionStatus.UNSUPPORTED_TYPE:
+                    raise UnsupportedTargetTypeError(
+                        chat_id=res.chat_id or target,
+                        chat_title=res.title,
+                        chat_type=res.match.type if res.match else None,
+                    )
                 else:
                     UI.error(res.error_message or f"Destino '{target}' inválido.")
                     raise typer.Exit(1)

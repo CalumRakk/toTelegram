@@ -21,9 +21,6 @@ class ChatAccessService:
         """
         Recorre los diálogos recientes para forzar la actualización
         de la caché interna de peers (access_hash).
-
-        Útil cuando Telegram no reconoce un chat aún presente
-        en los diálogos del usuario.
         """
         try:
             for _ in self.client.get_dialogs(depth):  # type: ignore
@@ -31,10 +28,26 @@ class ChatAccessService:
         except Exception as e:
             logger.debug(f"Error refrescando peers: {e}")
 
+    def _is_self_chat(self, chat: "Chat") -> bool:
+        """Determina si un chat corresponde inequívocamente a Mensajes Guardados ('me')."""
+        from pyrogram.enums import ChatType
+
+        if chat.type != ChatType.PRIVATE:
+            return False
+
+        me = getattr(self.client, "me", None)
+        if me and chat.id == me.id:
+            return True
+
+        try:
+            my_info = self.client.get_me()
+            return bool(my_info and chat.id == my_info.id)
+        except Exception:
+            return False
+
     def _get_membership(self, chat: "Chat") -> Optional["ChatMember"]:  # noqa: UP045
         """
         Obtiene el objeto ChatMember del usuario actual para el chat dado.
-
         Devuelve None si el chat es privado, el usuario no es miembro
         o no se puede determinar la membresía.
         """
@@ -43,10 +56,6 @@ class ChatAccessService:
 
         if chat.type == ChatType.PRIVATE:
             return None
-
-        # Nota:
-        # Se esta tratando como 'no miembro' estos casos: Errror RCP, Fallo de telegram y problemas de red.
-        # Dificil que ocurra, pero se contempla por las dudas.
 
         try:
             return self.client.get_chat_member(chat.id, "me")
@@ -59,9 +68,7 @@ class ChatAccessService:
     def _can_interact_channel(self, chat: "Chat") -> bool:
         """
         Determina si el usuario puede publicar mensajes en un canal.
-
-        Solo propietarios o administradores con permisos explícitos
-        de publicación pueden interactuar.
+        Solo propietarios o administradores con permisos explícitos de publicación pueden interactuar.
         """
         from pyrogram.enums import ChatMemberStatus
 
@@ -77,79 +84,25 @@ class ChatAccessService:
 
         return False
 
-    def _can_interact_group(self, chat: "Chat") -> bool:
-        """
-        Evalúa si el usuario puede enviar mensajes en un grupo o supergrupo.
-
-        Considera el estado del miembro y las restricciones
-        definidas tanto a nivel de chat como individuales.
-        """
-        from pyrogram.enums import ChatMemberStatus
-
-        member = self._get_membership(chat)
-        if member is None:
-            return False
-
-        if member.status in (
-            ChatMemberStatus.OWNER,
-            ChatMemberStatus.ADMINISTRATOR,
-        ):
-            return True
-
-        if member.status == ChatMemberStatus.MEMBER:
-            return bool(chat.permissions and chat.permissions.can_send_media_messages)
-
-        if member.status == ChatMemberStatus.RESTRICTED:
-            return bool(
-                member.permissions and member.permissions.can_send_media_messages
-            )
-
-        return False
-
     def can_interact(self, chat: "Chat") -> bool:
         """
-        Determina si el usuario actual puede enviar mensajes
-        en el chat especificado.
-
-        Aplica reglas distintas según el tipo de chat.
+        Determina si el usuario actual puede enviar mensajes en el chat especificado.
+        Solo es válido para Mensajes Guardados ('me') o Canales con permisos de publicación.
         """
         from pyrogram.enums import ChatType
 
-        if chat.type == ChatType.PRIVATE:
+        if self._is_self_chat(chat):
             return True
 
         if chat.type == ChatType.CHANNEL:
             return self._can_interact_channel(chat)
 
-        if chat.type in (ChatType.GROUP, ChatType.SUPERGROUP):
-            return self._can_interact_group(chat)
-
         return False
-
-    def send_action(self, chat: "Chat") -> bool:
-        """
-        Intenta enviar una acción de chat (por ejemplo, 'typing')
-        para verificar capacidad básica de escritura.
-
-        Devuelve True si la acción se envía correctamente.
-        """
-
-        # TODO: Analizar si esto es mejor que usar `self.can_interact`
-
-        from pyrogram.enums import ChatAction
-
-        try:
-            self.client.send_chat_action(chat.id, ChatAction.TYPING)
-            return True
-        except ValueError:
-            return False
 
     def get_chat(self, chat_id: str | int) -> Optional["Chat"]:  # noqa: UP045
         """
         Obtiene el objeto Chat correspondiente al identificador dado.
-
-        Si el chat no está en caché, intenta refrescar los diálogos
-        antes de devolver None.
+        Si el chat no está en caché, intenta refrescar los diálogos antes de fallar.
         """
         from pyrogram.errors import ChannelPrivate, PeerIdInvalid, UsernameInvalid
         from pyrogram.types import Chat
@@ -167,7 +120,6 @@ class ChatAccessService:
             except PeerIdInvalid:
                 pass
         except (UsernameInvalid, ChannelPrivate):
-            # TODO: ¿Deberiamos soportar estos errores?
             pass
 
         logger.error(f"Error: No se encuentra el chat '{chat_id}'.")
@@ -175,13 +127,10 @@ class ChatAccessService:
 
     def verify_access(self, query: str | int) -> AccessReport:
         """
-        Evalúa el acceso del usuario a un destino en tres etapas:
-
-        - existencia del chat
-        - membresía
-        - permisos de interacción.
-
-        Devuelve un AccessReport con el resultado del análisis.
+        Evalúa el acceso del usuario a un destino validando:
+        1. Existencia del chat.
+        2. Compatibilidad del tipo de destino (solo Canales o 'me').
+        3. Membresía y permisos de administrador en caso de ser canal.
         """
         logger.info(f"Verificando permisos de acceso para el destino: {query}")
         normalized_id = normalize_chat_id(query)
@@ -190,48 +139,72 @@ class ChatAccessService:
             return AccessReport(
                 status=AccessStatus.NOT_FOUND,
                 reason=f"Telegram no reconoce el destino '{query}'.",
-                hint="Tip: Si es un ID, asegúrate de haber interactuado con él. Si no, busca por nombre con 'config resolve'.",
+                hint="Tip: Si es un ID, asegúrate de haber interactuado con él. Si no, busca por nombre con 'totelegram target'.",
             )
 
         from pyrogram.enums import ChatType
 
-        if chat.type != ChatType.PRIVATE:
-            # Nota:
-            # _get_membership puede ser llamado más de una vez durante el flujo.
-            # Asumo el costo a cambio de un código más legible.
-            if not self._get_membership(chat):
-                return AccessReport(
-                    status=AccessStatus.NOT_MEMBER,
-                    chat=ChatMatch.from_chat(chat),
-                    reason=f"Encontré '{chat.title}', pero no eres miembro.",
-                    hint="Tip: Únete al grupo/canal en tu app de Telegram y vuelve a intentarlo.",
-                )
+        # Mensajes Guardados ('me'): Siempre permitido
+        if self._is_self_chat(chat):
+            return AccessReport(
+                status=AccessStatus.READY,
+                chat=ChatMatch.from_chat(chat),
+                reason="Acceso verificado a Mensajes Guardados ('me').",
+            )
 
-            if not self.can_interact(chat):
-                logger.error(
-                    f"Permisos insuficientes: El usuario no puede enviar mensajes en {chat.title}"
-                )
+        # Rechazar chats privados ajenos o bots
+        if chat.type in (ChatType.PRIVATE, ChatType.BOT):
+            title = chat.first_name or chat.title or str(chat.id)
+            return AccessReport(
+                status=AccessStatus.UNSUPPORTED_TYPE,
+                chat=ChatMatch.from_chat(chat),
+                reason=f"'{title}' es un chat privado ajeno o bot.",
+                hint="Tip: toTelegram solo admite Canales de difusión o tu propio chat de Mensajes Guardados ('me').",
+            )
 
-                return AccessReport(
-                    status=AccessStatus.RESTRICTED,
-                    chat=ChatMatch.from_chat(chat),
-                    reason=f"Eres miembro de '{chat.title}', pero no tienes permiso para enviar archivos.",
-                    hint="Tip: Solicita a un administrador que te otorgue permisos de escritura.",
-                )
+        # Rechazar grupos y supergrupos
+        if chat.type in (ChatType.GROUP, ChatType.SUPERGROUP):
+            chat_kind = "Supergrupo" if chat.type == ChatType.SUPERGROUP else "Grupo"
+            return AccessReport(
+                status=AccessStatus.UNSUPPORTED_TYPE,
+                chat=ChatMatch.from_chat(chat),
+                reason=f"'{chat.title}' es un {chat_kind}. toTelegram no admite grupos para almacenamiento.",
+                hint="Tip: Los grupos no permiten edición cruzada de metadatos ni reorganización limpia. Crea un Canal privado y úsalo como destino.",
+            )
+
+        # En este punto garantizamos que es ChatType.CHANNEL
+        member = self._get_membership(chat)
+        if not member:
+            return AccessReport(
+                status=AccessStatus.NOT_MEMBER,
+                chat=ChatMatch.from_chat(chat),
+                reason=f"Encontré el canal '{chat.title}', pero no eres miembro.",
+                hint="Tip: Únete al canal en tu app de Telegram, hazte Administrador y vuelve a intentarlo.",
+            )
+
+        if not self._can_interact_channel(chat):
+            logger.error(
+                f"Permisos insuficientes: El usuario no puede publicar mensajes en el canal '{chat.title}'"
+            )
+            return AccessReport(
+                status=AccessStatus.RESTRICTED,
+                chat=ChatMatch.from_chat(chat),
+                reason=f"Eres miembro del canal '{chat.title}', pero careces de permisos de administrador para publicar mensajes.",
+                hint="Tip: Otorga a tu cuenta el permiso de administrador 'Publicar mensajes' (can_post_messages) en los ajustes del canal.",
+            )
 
         return AccessReport(
             status=AccessStatus.READY,
             chat=ChatMatch.from_chat(chat),
-            reason="Acceso verificado correctamente.",
+            reason="Acceso y permisos de canal verificados correctamente.",
         )
 
     def can_delete_messages(self, chat_or_id: "Chat | int | str") -> bool:
         """
         Determina si el usuario actual tiene permisos para eliminar mensajes en el chat.
-        - En chats privados: Siempre True.
-        - En canales y supergrupos: Solo Propietarios o Administradores
-        con el privilegio explícito 'can_delete_messages'.
-        - En grupos comunes como miembro regular: False (no puede borrar mensajes ajenos).
+        - En Mensajes Guardados ('me'): Siempre True.
+        - En canales: Solo Propietarios o Administradores con el privilegio 'can_delete_messages'.
+        - En cualquier otro tipo de chat: False.
         """
         from pyrogram.enums import ChatMemberStatus, ChatType
         from pyrogram.types import Chat
@@ -240,8 +213,12 @@ class ChatAccessService:
         if not chat:
             return False
 
-        if chat.type == ChatType.PRIVATE:
+        # En chats privados (incluido 'me') siempre se permite borrar
+        if self._is_self_chat(chat) or chat.type == ChatType.PRIVATE:
             return True
+
+        if chat.type != ChatType.CHANNEL:
+            return False
 
         member = self._get_membership(chat)
         if member is None:

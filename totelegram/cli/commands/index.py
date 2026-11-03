@@ -11,6 +11,7 @@ from totelegram.exceptions import (
     ConfigurationError,
     TargetAmbiguousError,
     TargetNotSetError,
+    UnsupportedTargetTypeError,
 )
 from totelegram.models import TelegramUser
 from totelegram.packaging.importer import SnapshotImporter
@@ -65,6 +66,12 @@ def index_tapes(
             resolved_chat_id = resolution.chat_id
         elif resolution.status == TargetResolutionStatus.AMBIGUOUS:
             raise TargetAmbiguousError(target, resolution.candidates)
+        elif resolution.status == TargetResolutionStatus.UNSUPPORTED_TYPE:
+            raise UnsupportedTargetTypeError(
+                chat_id=resolution.chat_id or target,
+                chat_title=resolution.title,
+                chat_type=resolution.match.type if resolution.match else None,
+            )
         else:
             raise ConfigurationError(
                 message=resolution.error_message

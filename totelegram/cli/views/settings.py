@@ -265,7 +265,7 @@ class DisplayTarget:
 
     @staticmethod
     def show_known_targets(chats: list[TelegramChat]) -> None:
-        """Renderiza la tabla de destinos conocidos en la base de datos local."""
+        """Renderiza la tabla de destinos conocidos en este equipo."""
         table = Table(
             title="Destinos conocidos en este equipo",
             show_header=True,
@@ -291,28 +291,35 @@ class DisplayTarget:
             if chat.id == 0:
                 continue
 
+            is_channel = chat.type == "channel"
             title = chat.title or (
                 f"@{chat.username}" if chat.username else f"Chat {chat.id}"
             )
-            identifier = (
-                f'"{chat.title}"'
-                if (chat.title and " " in chat.title)
-                else str(chat.id)
-            )
+
+            if is_channel:
+                identifier = (
+                    f'"{chat.title}"'
+                    if (chat.title and " " in chat.title)
+                    else str(chat.id)
+                )
+                type_display = "[magenta]Canal[/magenta]"
+            else:
+                identifier = "[dim red]Incompatible[/dim red]"
+                type_display = f"[dim red]{chat.type.capitalize()}[/dim red]"
 
             last_v = (
                 chat.last_verified.strftime("%Y-%m-%d %H:%M")
                 if chat.last_verified
                 else "[dim]Desconocida[/dim]"
             )
-            table.add_row(title, identifier, chat.type, str(last_v))
+            table.add_row(title, identifier, type_display, str(last_v))
 
         console.print(table)
         UI.tip(
             "Puedes usar cualquiera de estos nombres o IDs con la opción [bold]-t[/]:",
             commands=[
                 "totelegram send archivo.mp4 -t me",
-                'totelegram send archivo.mp4 -t "Nombre del Chat"',
+                'totelegram send archivo.mp4 -t "Nombre del Canal"',
             ],
             spacing="top",
         )

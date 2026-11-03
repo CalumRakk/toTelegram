@@ -1,4 +1,5 @@
 import hashlib
+import json
 import logging
 import os
 import shutil
@@ -20,7 +21,7 @@ from totelegram.database import DatabaseSession
 from totelegram.discovery import DiscoveryService
 from totelegram.engine.events import UploadObserver
 from totelegram.identity import Settings, SettingsManager
-from totelegram.models import TelegramUser
+from totelegram.models import TelegramChat, TelegramUser
 from totelegram.telegram.client import TelegramSession
 from totelegram.types import UploadSession
 
@@ -87,14 +88,6 @@ class RealTelegramTestCase(unittest.TestCase):
 
         cls.settings = cls.manager.get_settings(TEST_PROFILE_NAME)
 
-        # Comprobar si hay chat destino
-        if not cls.settings.chat_id or cls.settings.chat_id == "NOT-SET":
-            cls._skip_with_panel(
-                reason="No hay un chat_id de pruebas configurado.",
-                details="Se necesita un canal o grupo privado dedicado para verificar subidas.",
-                command="python3 tests_real/setup_test_env.py",
-            )
-
         # Iniciar cliente Pyrogram
         try:
             cls._tg_session_ctx = TelegramSession(
@@ -117,13 +110,56 @@ class RealTelegramTestCase(unittest.TestCase):
         )
         cls.db = cls.db_session.__enter__()
 
+        # Resolver chat de pruebas en orden de prioridad:
+        # 1. Archivo dedicado test_chat.json
+        # 2. Variable de entorno TOTELEGRAM_TEST_CHAT_ID o TOTELEGRAM_TARGET
+        # 3. Registro previo en la tabla TelegramChat de SQLite
+        test_chat_id = None
+        target_file = TEST_WORKSPACE / "test_chat.json"
+        if target_file.exists():
+            try:
+                data = json.loads(target_file.read_text(encoding="utf-8"))
+                test_chat_id = data.get("chat_id")
+            except Exception as e:
+                logger.debug(f"Aviso leyendo test_chat.json: {e}")
+
+        if not test_chat_id:
+            env_target = os.environ.get("TOTELEGRAM_TEST_CHAT_ID") or os.environ.get(
+                "TOTELEGRAM_TARGET"
+            )
+            if env_target:
+                try:
+                    test_chat_id = int(env_target)
+                except ValueError:
+                    pass
+
+        if not test_chat_id:
+            try:
+                assert TelegramChat.last_verified is not None
+                cached_chat = (
+                    TelegramChat.select()
+                    .where((TelegramChat.type == "channel") & (TelegramChat.id != 0))
+                    .order_by(TelegramChat.last_verified.desc())
+                    .first()
+                )
+                if cached_chat:
+                    test_chat_id = cached_chat.id
+            except Exception as e:
+                logger.debug(f"Aviso buscando chat en DB de pruebas: {e}")
+
+        if not test_chat_id:
+            cls.tearDownClass()
+            cls._skip_with_panel(
+                reason="No hay un chat_id de pruebas configurado.",
+                details="Se necesita un canal dedicado para verificar subidas.",
+                command="python3 tests_real/setup_test_env.py",
+            )
+
         # Obtener información del usuario y del chat de pruebas
         try:
-            cls.test_chat_id = int(cls.settings.chat_id)
+            cls.test_chat_id = int(test_chat_id)
             cls.tg_chat = cast(Chat, cls.client.get_chat(cls.test_chat_id))
-            time.sleep(
-                1
-            )  # La secuencia de obtener chats y obtener el get_me sin espera genera un FloodWait de más de 10 segundos.
+            time.sleep(1)
             me = cast(User, cls.client.get_me())
             cls.owner = TelegramUser.get_or_create_from_tg(me)
         except RPCError as e:
@@ -165,7 +201,6 @@ class RealTelegramTestCase(unittest.TestCase):
         # Eliminar mensajes subidos a Telegram
         if self.created_message_ids:
             try:
-                # Telegram permite borrar hasta 100 mensajes por llamada
                 unique_ids = list(set(self.created_message_ids))
                 for i in range(0, len(unique_ids), 100):
                     batch = unique_ids[i : i + 100]
@@ -231,7 +266,6 @@ class RealTelegramTestCase(unittest.TestCase):
         target_dir = parent_dir or self.create_temp_dir()
         file_path = target_dir / filename
 
-        # Generar bloques de datos con os.urandom
         chunk_size = 64 * 1024
         written = 0
         with open(file_path, "wb") as f:

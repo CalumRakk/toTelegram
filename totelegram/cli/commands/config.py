@@ -212,7 +212,7 @@ def check_config(ctx: typer.Context):
         UI.error("No hay un perfil activo o el perfil especificado no existe.")
         raise typer.Exit(1)
 
-    # 1. Verificación de integridad de archivos locales (.json y .session)
+    # Verificación de integridad de archivos locales (.json y .session)
     with UI.loading(
         f"Comprobando integridad local del perfil: [bold]{profile_name}[/]"
     ):
@@ -231,7 +231,7 @@ def check_config(ctx: typer.Context):
                 UI.info("Falta el archivo de sesión de Telegram (.session).")
             raise typer.Exit(1)
 
-    # 2. Verificación de la Base de Datos SQLite local y Esquema
+    # Verificación de la Base de Datos SQLite local y Esquema
     with UI.loading("Verificando conexión y esquema de base de datos..."):
         try:
             with DatabaseSession(manager.database_path, auto_init_schema=False) as db:
@@ -275,7 +275,7 @@ def check_config(ctx: typer.Context):
             UI.error(f"Error conectando a la base de datos: {e}")
             raise typer.Exit(1)
 
-    # 3. Verificación de Conexión activa con Telegram
+    # Verificación de Conexión activa con Telegram
     with state.get_telegram_session(profile_name) as client:
         with UI.loading("Verificando conexión y credenciales con Telegram..."):
             try:

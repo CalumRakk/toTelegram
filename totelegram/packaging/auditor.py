@@ -102,7 +102,7 @@ class LocalAuditService:
             else f"{canonical_base_str}{os.sep}"
         )
 
-        # 1. Precarga global para todo el árbol en un solo query
+        # Precarga global para todo el árbol en un solo query
         sources_query = Source.select().where(Source.path_str.startswith(prefix))
         jobs_query = Job.select()
         chats_query = TelegramChat.select()
@@ -229,7 +229,7 @@ class LocalAuditService:
             else f"{canonical_dir_str}{os.sep}"
         )
 
-        # 1. Precarga en lote de Sources y sus Jobs/Snapshots asociados
+        # Precarga en lote de Sources y sus Jobs/Snapshots asociados
         sources_query = Source.select().where(Source.path_str.startswith(prefix))
         jobs_query = Job.select()
         chats_query = TelegramChat.select()
@@ -252,7 +252,7 @@ class LocalAuditService:
         results: list[AuditItem] = []
         seen_paths: set[str] = set()
 
-        # 2. Exploración de primer nivel de elementos físicos en disco
+        # Exploración de primer nivel de elementos físicos en disco
         for child in sorted(dir_path.iterdir()):
             if cls._is_internal_ignored(child):
                 continue
@@ -285,7 +285,7 @@ class LocalAuditService:
                     )
                 )
 
-        # 3. Detectar elementos registrados en DB que ya fueron eliminados del disco (REMOTE_ONLY)
+        # Detectar elementos registrados en DB que ya fueron eliminados del disco (REMOTE_ONLY)
         # Solo se evalúan fuentes cuyo padre directo sea este directorio
         for s in direct_sources:
             if s.path_str not in seen_paths and s.type == SourceType.FILE:

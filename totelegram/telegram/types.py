@@ -12,6 +12,7 @@ class AccessStatus(str, Enum):
     NOT_FOUND = "not_found"  # PEER_ID_INVALID
     NOT_MEMBER = "not_member"
     RESTRICTED = "restricted"  # Sin permisos de escritura
+    UNSUPPORTED_TYPE = "unsupported_type"  # Tipo no admitido (grupos, supergrupos, bots o privados ajenos)
 
 
 class ChatMatch(BaseModel):
@@ -24,11 +25,20 @@ class ChatMatch(BaseModel):
 
     @staticmethod
     def from_chat(chat: "Chat") -> "ChatMatch":
+        raw_title = getattr(chat, "title", None) or getattr(chat, "first_name", None)
+        title = raw_title if isinstance(raw_title, str) else "Sin Titulo"
+
+        raw_username = getattr(chat, "username", None)
+        username = raw_username if isinstance(raw_username, str) else None
+
+        raw_type = getattr(chat, "type", "channel")
+        type_str = str(getattr(raw_type, "value", raw_type))
+
         return ChatMatch(
-            id=chat.id,
-            title=chat.title or chat.first_name or "Sin Titulo",
-            username=chat.username,
-            type=str(chat.type),
+            id=int(chat.id),
+            title=title,
+            username=username,
+            type=type_str,
         )
 
 
@@ -102,6 +112,7 @@ class TargetResolutionStatus(str, Enum):
     NO_PERMISSIONS = (
         "no_permissions"  # Encontrado, pero sin permisos o el usuario no es miembro
     )
+    UNSUPPORTED_TYPE = "unsupported_type"  # Destino resuelto pero no es Canal ni 'me'
     INVALID_INPUT = "invalid_input"  # Entrada vacía o sentinel NOT_SET
 
 

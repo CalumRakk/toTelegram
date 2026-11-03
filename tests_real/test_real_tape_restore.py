@@ -116,10 +116,11 @@ class TestRealTapeRestore(RealTelegramTestCase):
         # EXTRACCIÓN QUIRÚRGICA: doc1.txt (archivo pequeño al inicio de la cinta)
 
         surgical_dir = self.create_temp_dir()
+        rel_path_1 = f"{folder_dir.name}/doc1.txt"
 
         report_file1 = engine.restore_single_file(
             manifest=manifest,
-            relative_path="doc1.txt",
+            relative_path=rel_path_1,
             output_dir=surgical_dir,
             snapshot_path=Path(dl_res),
             force=True,
@@ -128,7 +129,7 @@ class TestRealTapeRestore(RealTelegramTestCase):
             report_file1.is_success, "La extracción quirúrgica de doc1.txt falló."
         )
 
-        restored_doc1 = surgical_dir / "doc1.txt"
+        restored_doc1 = surgical_dir / rel_path_1
         self.assertTrue(
             restored_doc1.exists(), f"El archivo quirúrgico no existe: {restored_doc1}"
         )
@@ -140,9 +141,11 @@ class TestRealTapeRestore(RealTelegramTestCase):
 
         # EXTRACCIÓN QUIRÚRGICA: sub/heavy_video.bin (archivo anidado pesado)
 
+        rel_path_2 = f"{folder_dir.name}/sub/heavy_video.bin"
+
         report_file2 = engine.restore_single_file(
             manifest=manifest,
-            relative_path="sub/heavy_video.bin",
+            relative_path=rel_path_2,
             output_dir=surgical_dir,
             snapshot_path=Path(dl_res),
             force=True,
@@ -152,7 +155,7 @@ class TestRealTapeRestore(RealTelegramTestCase):
             "La extracción quirúrgica de heavy_video.bin falló.",
         )
 
-        restored_heavy = surgical_dir / "sub" / "heavy_video.bin"
+        restored_heavy = surgical_dir / rel_path_2
         self.assertTrue(
             restored_heavy.exists(),
             f"El archivo quirúrgico no existe: {restored_heavy}",

@@ -23,6 +23,7 @@ from totelegram.exceptions import (
     InfrastructureError,
     TargetAmbiguousError,
     TargetNotSetError,
+    UnsupportedTargetTypeError,
 )
 from totelegram.identity import Settings
 from totelegram.models import Source, TelegramUser
@@ -331,6 +332,12 @@ def prepare_upload_session(
         logger.info(f"Destino resuelto: {resolution.title} ({resolved_chat_id})")
     elif resolution.status == TargetResolutionStatus.AMBIGUOUS:
         raise TargetAmbiguousError(target_override, resolution.candidates)
+    elif resolution.status == TargetResolutionStatus.UNSUPPORTED_TYPE:
+        raise UnsupportedTargetTypeError(
+            chat_id=resolution.chat_id or target_override,
+            chat_title=resolution.title,
+            chat_type=resolution.match.type if resolution.match else None,
+        )
     else:
         raise ConfigurationError(
             message=resolution.error_message

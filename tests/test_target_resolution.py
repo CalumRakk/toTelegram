@@ -2,11 +2,14 @@ import os
 import unittest
 from unittest.mock import MagicMock, patch
 
+from pyrogram.enums import ChatType
+
 from totelegram.cli.logic import prepare_upload_session
 from totelegram.cli.state import CLIState
 from totelegram.database import DatabaseSession
 from totelegram.exceptions import (
     TargetNotSetError,
+    UnsupportedTargetTypeError,
 )
 from totelegram.identity import Settings
 from totelegram.models import TelegramChat
@@ -218,6 +221,121 @@ class TestTargetResolutionAndMandatoryPolicy(unittest.TestCase):
             )
 
             self.assertIsNotNone(session)
+
+    def test_reject_supergroup_and_group(self):
+        # 1. Supergrupo
+        mock_sg = MagicMock()
+        mock_sg.id = -100999000
+        mock_sg.title = "Comunidad de Películas"
+        mock_sg.type = ChatType.SUPERGROUP
+        mock_sg.username = None
+        self.mock_client.get_chat.return_value = mock_sg
+
+        res = self.resolver.resolve("-100999000")
+        self.assertEqual(res.status, TargetResolutionStatus.UNSUPPORTED_TYPE)
+        self.assertIn("Supergrupo", res.error_message)
+
+        # 2. Grupo básico
+        mock_group = MagicMock()
+        mock_group.id = -123456
+        mock_group.title = "Amigos"
+        mock_group.type = ChatType.GROUP
+        mock_group.username = None
+        self.mock_client.get_chat.return_value = mock_group
+
+        res_group = self.resolver.resolve("-123456")
+        self.assertEqual(res_group.status, TargetResolutionStatus.UNSUPPORTED_TYPE)
+        self.assertIn("Grupo", res_group.error_message)
+
+    def test_reject_foreign_private_chat(self):
+        mock_private = MagicMock()
+        mock_private.id = 99887766
+        mock_private.title = None
+        mock_private.first_name = "Juan Pérez"
+        mock_private.type = ChatType.PRIVATE
+        mock_private.username = "juanperez"
+
+        self.mock_client.get_chat.return_value = mock_private
+        self.mock_client.get_me.return_value = MagicMock(id=12345)
+
+        res = self.resolver.resolve("99887766")
+        self.assertEqual(res.status, TargetResolutionStatus.UNSUPPORTED_TYPE)
+        self.assertIn("chat privado ajeno", res.error_message)
+
+    def test_channel_missing_post_permission_is_restricted(self):
+        """Si la cuenta es administradora pero carece de 'can_post_messages', debe ser restringida."""
+        mock_channel = MagicMock()
+        mock_channel.id = -100555666
+        mock_channel.title = "Canal Noticias"
+        mock_channel.type = ChatType.CHANNEL
+        mock_channel.username = None
+
+        self.mock_client.get_chat.return_value = mock_channel
+
+        # Simulamos que es miembro pero sin permisos de publicación
+        mock_member = MagicMock()
+        mock_member.status = MagicMock()
+        mock_member.status.value = "administrator"
+        mock_member.privileges = MagicMock(can_post_messages=False)
+        self.mock_client.get_chat_member.return_value = mock_member
+
+        res = self.resolver.resolve("-100555666")
+        self.assertEqual(res.status, TargetResolutionStatus.NO_PERMISSIONS)
+        self.assertIn("permisos de administrador para publicar", res.error_message)
+
+    def test_search_dialogs_strictly_ignores_groups(self):
+        """
+        Si existen un grupo y un canal con el mismo nombre ('Respaldos'),
+        el buscador debe ignorar el grupo por completo y resolver el canal sin ambigüedad.
+        """
+        # Diálogo 1: Grupo
+        d_group = MagicMock()
+        d_group.chat.id = -100111
+        d_group.chat.title = "Respaldos"
+        d_group.chat.type = ChatType.SUPERGROUP
+        d_group.chat.username = None
+
+        # Diálogo 2: Canal
+        d_channel = MagicMock()
+        d_channel.chat.id = -100222
+        d_channel.chat.title = "Respaldos"
+        d_channel.chat.type = ChatType.CHANNEL
+        d_channel.chat.username = None
+
+        self.mock_client.get_dialogs.return_value = [d_group, d_channel]
+
+        with patch.object(self.resolver.access_service, "verify_access") as mock_verify:
+            mock_verify.return_value = MagicMock(
+                is_ready=True,
+                chat=ChatMatch(id=-100222, title="Respaldos", type="channel"),
+            )
+            res = self.resolver.resolve("Respaldos")
+
+            self.assertEqual(res.status, TargetResolutionStatus.RESOLVED)
+            self.assertEqual(res.chat_id, -100222)
+
+    def test_prepare_upload_session_raises_unsupported_target_type(self):
+        mock_state = MagicMock(spec=CLIState)
+        mock_settings = Settings(profile_name="demo")
+
+        mock_group = MagicMock()
+        mock_group.id = -100999
+        mock_group.title = "Mi Grupo"
+        mock_group.type = ChatType.SUPERGROUP
+        mock_group.username = None
+        self.mock_client.get_chat.return_value = mock_group
+
+        with self.assertRaises(UnsupportedTargetTypeError) as ctx:
+            prepare_upload_session(
+                state=mock_state,
+                client=self.mock_client,
+                db=self.db,
+                settings=mock_settings,
+                target_override="-100999",
+            )
+
+        self.assertIn("Supergrupo", ctx.exception.message)
+        self.assertEqual(ctx.exception.chat_id, -100999)
 
 
 if __name__ == "__main__":

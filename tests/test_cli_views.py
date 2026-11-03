@@ -9,6 +9,7 @@ from totelegram.cli.views.settings import DisplayConfig, DisplayProfile, Display
 from totelegram.cli.views.snapshots import DisplaySnapshotPlan
 from totelegram.cli.views.upload import DisplayIndexer, DisplayUpload
 from totelegram.identity import Profile, Settings, SettingsManager
+from totelegram.models import TelegramChat
 from totelegram.packaging.auditor import AuditItem, AuditStatus
 from totelegram.packaging.importer import (
     DbMutations,
@@ -87,7 +88,7 @@ class TestCliViews(unittest.TestCase):
 
             profile = Profile(
                 name="test_user",
-                path_env=mgr.get_settings_path("test_user"),
+                path_env=mgr.get_settings_path("test_user"),  # type: ignore
                 path_session=mgr.get_session_path("test_user"),
             )
             DisplayProfile.render_profiles_table(
@@ -162,6 +163,24 @@ class TestCliViews(unittest.TestCase):
         DisplaySnapshotPlan.show_balance(plan)
         DisplaySnapshotPlan.show_action_table(plan)
         DisplaySnapshotPlan.show_fast_exit(total=5)
+
+    def test_display_target_known_targets_with_incompatible_chats(self):
+        """Verifica que la tabla de destinos conocidos renderice canales y marque grupos como incompatibles."""
+        channel_chat = TelegramChat(
+            id=-100111222,
+            title="Mi Canal de Respaldo",
+            type="channel",
+            username="canal_respaldo",
+        )
+        legacy_group = TelegramChat(
+            id=-100333444,
+            title="Grupo Antiguo",
+            type="supergroup",
+            username=None,
+        )
+
+        # No debe lanzar ninguna excepción
+        DisplayTarget.show_known_targets([channel_chat, legacy_group])
 
 
 if __name__ == "__main__":

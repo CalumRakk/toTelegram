@@ -7,6 +7,12 @@ from pyrogram.types import User
 from totelegram.cli.state import CLIState
 from totelegram.cli.ui import UI
 from totelegram.cli.views.settings import DisplayTarget
+from totelegram.exceptions import (
+    ConfigurationError,
+    TargetAmbiguousError,
+    TargetNotSetError,
+    UnsupportedTargetTypeError,
+)
 from totelegram.models import TelegramChat
 from totelegram.telegram.access import ChatAccessService
 from totelegram.telegram.resolver import TargetResolver
@@ -25,7 +31,7 @@ def manage_target(
         False,
         "--list",
         "-l",
-        help="Muestra todos los canales y grupos conocidos en tu base de datos local.",
+        help="Muestra todos los canales conocidos en tu base de datos local.",
     ),
     depth: int = typer.Option(
         100,
@@ -59,7 +65,7 @@ def manage_target(
         with UI.loading(f"Resolviendo e inspeccionando destino '[bold]{query}[/]'..."):
             resolution = resolver.resolve(query, depth=depth)
 
-        # 1. Resuelto con éxito
+        # Resuelto con éxito
         if resolution.status == TargetResolutionStatus.RESOLVED:
             assert resolution.chat_id is not None
             me = cast(User, client.get_me())
@@ -79,12 +85,20 @@ def manage_target(
             )
             raise typer.Exit(0)
 
-        # 2. Ambigüedad detectada (múltiples chats)
+        # Ambigüedad detectada (múltiples chats)
         if resolution.status == TargetResolutionStatus.AMBIGUOUS:
             DisplayTarget.show_ambiguous_targets(query, resolution.candidates)
             raise typer.Exit(1)
 
-        # 3. No encontrado o sin permisos
+        # Tipo no admitido (grupos, supergrupos, bots)
+        if resolution.status == TargetResolutionStatus.UNSUPPORTED_TYPE:
+            raise UnsupportedTargetTypeError(
+                chat_id=resolution.chat_id or query,
+                chat_title=resolution.title,
+                chat_type=resolution.match.type if resolution.match else None,
+            )
+
+        # No encontrado o sin permisos
         UI.error(
             resolution.error_message or f"No se pudo resolver el destino '{query}'."
         )

@@ -6,6 +6,7 @@ import typer
 from totelegram.cli.state import CLIState
 from totelegram.cli.ui import UI, console
 from totelegram.cli.views.ledger import DisplayLedger
+from totelegram.exceptions import UnsupportedTargetTypeError
 from totelegram.packaging.auditor import LocalAuditService
 from totelegram.telegram.resolver import TargetResolver
 from totelegram.telegram.types import TargetResolutionStatus
@@ -60,6 +61,12 @@ def prune_files(
             res = resolver.resolve(target)
             if res.status == TargetResolutionStatus.RESOLVED:
                 resolved_target_id = res.chat_id
+            elif res.status == TargetResolutionStatus.UNSUPPORTED_TYPE:
+                raise UnsupportedTargetTypeError(
+                    chat_id=res.chat_id or target,
+                    chat_title=res.title,
+                    chat_type=res.match.type if res.match else None,
+                )
             else:
                 UI.error(
                     res.error_message or f"No se pudo resolver el destino '{target}'."

@@ -74,7 +74,7 @@ class TargetResolver:
         return self._resolve_from_telegram_search(raw_query, depth=depth)
 
     def _resolve_direct(self, raw_query: str) -> TargetResolution:
-        """Resuelve identificadores directos validando acceso y permisos."""
+        """Resuelve identificadores directos validando acceso y compatibilidad de tipo."""
         try:
             normalized_id = normalize_chat_id(raw_query)
         except ValueError as e:
@@ -104,6 +104,17 @@ class TargetResolver:
                 hint=access_report.hint,
             )
 
+        if access_report.status == AccessStatus.UNSUPPORTED_TYPE:
+            return TargetResolution(
+                status=TargetResolutionStatus.UNSUPPORTED_TYPE,
+                query=raw_query,
+                chat_id=access_report.chat.id if access_report.chat else None,
+                title=access_report.chat.title if access_report.chat else None,
+                match=access_report.chat,
+                error_message=access_report.reason,
+                hint=access_report.hint,
+            )
+
         return TargetResolution(
             status=TargetResolutionStatus.NO_PERMISSIONS,
             query=raw_query,
@@ -115,7 +126,7 @@ class TargetResolver:
         )
 
     def _resolve_from_cache(self, query: str) -> TargetResolution | None:
-        """Busca en SQLite si el chat ya fue verificado anteriormente, tolerando mayúsculas y tildes."""
+        """Busca en SQLite si el canal ya fue verificado anteriormente, ignorando grupos legacy."""
         from totelegram.database import db_proxy
 
         active_db = self.db or (
@@ -129,8 +140,10 @@ class TargetResolver:
         norm_query = normalize_text_for_search(query)
 
         try:
-            # Traer chats conocidos de local para comparar con normalización de acentos en memoria
-            all_cached = list(TelegramChat.select())
+            # Traer solo canales conocidos en local (ignorar grupos heredados en BD)
+            all_cached = list(
+                TelegramChat.select().where(TelegramChat.type == "channel")
+            )
             exact_cached = [
                 c
                 for c in all_cached
@@ -138,7 +151,7 @@ class TargetResolver:
                 or (c.username and normalize_text_for_search(c.username) == norm_query)
             ]
 
-            # Si hay una única coincidencia exacta en caché, validamos que siga viva
+            # Si hay una única coincidencia exacta en caché, validamos que siga viva y accesible
             if len(exact_cached) == 1:
                 cached_chat = exact_cached[0]
                 access_report = self.access_service.verify_access(cached_chat.id)
@@ -151,12 +164,12 @@ class TargetResolver:
                         match=access_report.chat,
                     )
         except Exception as e:
-            logger.debug(f"Aviso consultando caché de chats en SQLite: {e}")
+            logger.debug(f"Aviso consultando caché de canales en SQLite: {e}")
 
         return None
 
     def _resolve_from_telegram_search(self, query: str, depth: int) -> TargetResolution:
-        """Busca en diálogos recientes aplicando la regla Exact Match Precedence."""
+        """Busca en diálogos recientes aplicando la regla Exact Match Precedence entre canales."""
         clean_query = query.strip()
         norm_query = normalize_text_for_search(clean_query)
 
@@ -169,11 +182,10 @@ class TargetResolver:
             return TargetResolution(
                 status=TargetResolutionStatus.NOT_FOUND,
                 query=query,
-                error_message=f"No se encontró ningún chat que coincida con '{query}'.",
-                hint="Tip: Envía un mensaje en el chat desde tu app de Telegram para que aparezca en diálogos recientes, o usa su ID numérico.",
+                error_message=f"No se encontró ningún canal que coincida con '{query}'.",
+                hint="Tip: Asegúrate de ser administrador del canal, o usa su ID numérico directo.",
             )
 
-        # Regla de Oro: Coincidencias Exactas (Normalizadas sin tildes/mayúsculas)
         exact_matches = [
             m
             for m in all_unique
@@ -181,37 +193,33 @@ class TargetResolver:
             or (m.username and normalize_text_for_search(m.username) == norm_query)
         ]
 
-        # 1. Si hay exactamente 1 coincidencia exacta, GANA automáticamente
         if len(exact_matches) == 1:
             return self._verify_and_build(exact_matches[0], query)
 
-        # 2. Si hay múltiples llamadas exactamente igual, es una ambigüedad real de Telegram
         if len(exact_matches) > 1:
             return TargetResolution(
                 status=TargetResolutionStatus.AMBIGUOUS,
                 query=query,
                 candidates=exact_matches,
-                error_message=f"Se encontraron múltiples chats llamados exactamente '{query}'.",
+                error_message=f"Se encontraron múltiples canales llamados exactamente '{query}'.",
                 hint="Especifica el ID directo (ej: -t -100xxxxxxxxxx) para desempatar.",
             )
 
-        # 3. Si no hubo coincidencia exacta pero solo hay 1 parcial, gana la parcial
         if len(all_unique) == 1:
             return self._verify_and_build(all_unique[0], query)
 
-        # 4. Múltiples parciales sin exacto -> Ambiguo
         return TargetResolution(
             status=TargetResolutionStatus.AMBIGUOUS,
             query=query,
             candidates=all_unique,
-            error_message=f"El nombre '{query}' es ambiguo ({len(all_unique)} coincidencias encontradas).",
+            error_message=f"El nombre '{query}' es ambiguo ({len(all_unique)} canales coincidentes).",
             hint="Especifica el ID directo de uno de los candidatos mostrados.",
         )
 
     def _verify_and_build(
         self, candidate: ChatMatch, original_query: str
     ) -> TargetResolution:
-        """Verifica permisos de escritura y construye el resultado resuelto."""
+        """Verifica permisos de publicación y construye el resultado de resolución."""
         access_report = self.access_service.verify_access(candidate.id)
 
         if access_report.is_ready and access_report.chat:
@@ -224,11 +232,12 @@ class TargetResolver:
                 match=access_report.chat,
             )
 
-        status = (
-            TargetResolutionStatus.NOT_FOUND
-            if access_report.status == AccessStatus.NOT_FOUND
-            else TargetResolutionStatus.NO_PERMISSIONS
-        )
+        if access_report.status == AccessStatus.UNSUPPORTED_TYPE:
+            status = TargetResolutionStatus.UNSUPPORTED_TYPE
+        elif access_report.status == AccessStatus.NOT_FOUND:
+            status = TargetResolutionStatus.NOT_FOUND
+        else:
+            status = TargetResolutionStatus.NO_PERMISSIONS
 
         return TargetResolution(
             status=status,

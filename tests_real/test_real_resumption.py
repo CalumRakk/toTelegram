@@ -5,6 +5,7 @@ del DiscoveryService:
 2. SEAL_HEALED: Auto-sellado de snapshots cuando las partes físicas ya están en Telegram.
 """
 
+import logging
 from pathlib import Path
 from typing import BinaryIO, cast
 
@@ -20,6 +21,8 @@ from totelegram.engine.planner import JobPlanner
 from totelegram.models import Payload, RemotePayload, RemoteSnapshot
 from totelegram.packaging.snapshot import SnapshotService
 from totelegram.schemas import ExecutionDecision
+
+logger = logging.getLogger(__name__)
 
 
 class TestRealResumption(RealTelegramTestCase):
@@ -109,7 +112,7 @@ class TestRealResumption(RealTelegramTestCase):
         self.assertTrue(result.is_completed, "El job debió completarse exitosamente.")
         self.assertTrue(result.snapshot_generated, "Se debió generar el snapshot.")
 
-        # VERIFICACIÓN CRÍTICA: Solo se debieron transferir 2 piezas (partes 2 y 3)
+        # VERIFICACIÓN: Solo se debieron transferir 2 piezas (partes 2 y 3)
         self.assertIsNotNone(result.strategy_result)
         assert result.strategy_result is not None
         self.assertEqual(
@@ -187,10 +190,18 @@ class TestRealResumption(RealTelegramTestCase):
             RemotePayload.select().where(RemotePayload.payload << job.payloads)
         )
         self.track_messages([r.message_id for r in chunk_remotes])
-        self.track_message(job.snapshot_message_id)
+        old_snap_id = job.snapshot_message_id
+        self.track_message(old_snap_id)
 
         # 3. SIMULAR PÉRDIDA DE SNAPSHOT:
-        # Borramos el RemoteSnapshot de la base de datos (simulando que nunca se selló)
+        # Borramos el RemoteSnapshot de la base de datos Y de Telegram
+        # (para evitar que la búsqueda JIT lo rehidrate como ALREADY_FULFILLED)
+        if old_snap_id:
+            try:
+                self.client.delete_messages(self.test_chat_id, old_snap_id)
+            except Exception as e:
+                logger.warning(f"Aviso limpiando snapshot previo en Telegram: {e}")
+
         with db_transaction(self.db):
             RemoteSnapshot.delete().where(RemoteSnapshot.job == job).execute()
 

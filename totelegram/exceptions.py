@@ -265,3 +265,48 @@ class PayloadClaimError(ConcurrencyError):
 
 class SystemSuspendedError(ConcurrencyError):
     """Lanzada cuando se detecta que el sistema entró en suspensión/hibernación."""
+
+
+class UnsupportedTargetTypeError(ConfigurationError):
+    """Lanzada cuando el destino resuelto no es un Canal de difusión ni Mensajes Guardados ('me')."""
+
+    def __init__(
+        self,
+        chat_id: int | str,
+        chat_title: str | None = None,
+        chat_type: str | None = None,
+    ):
+        self.chat_id = chat_id
+        self.chat_title = chat_title or str(chat_id)
+        self.chat_type = str(chat_type).lower() if chat_type else "desconocido"
+
+        type_labels = {
+            "group": "Grupo",
+            "supergroup": "Supergrupo",
+            "private": "Chat privado",
+            "bot": "Bot",
+        }
+        type_label = type_labels.get(self.chat_type, self.chat_type.capitalize())
+
+        commands = [
+            "# 1. Crea un canal privado en Telegram y añade tu cuenta como Administrador.",
+            "# 2. Asegúrate de conceder permisos de publicación y eliminación de mensajes.",
+            'totelegram target "Nombre de tu Canal"  # Para verificar sus permisos y acceso',
+            "totelegram send ... -t me              # Para enviar a tu chat de Mensajes Guardados",
+        ]
+
+        super().__init__(
+            message=(
+                f"El destino '[bold]{self.chat_title}[/]' es de tipo [bold magenta]{type_label}[/], "
+                "pero toTelegram solo admite [bold cyan]Canales de difusión[/] o [bold cyan]Mensajes Guardados ('me')[/]."
+            ),
+            title="Destino No Compatible",
+            hint=(
+                "Los canales operan como un almacén de objetos y evitan la mezcla visual "
+                "entre cuentas y permiten que cualquier cuenta edite o reorganice metadatos. "
+                "Los grupos de Telegram no soportan estas capacidades."
+            ),
+            suggested_commands=commands,
+            exit_code=1,
+            severity="error",
+        )

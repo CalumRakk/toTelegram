@@ -64,12 +64,13 @@ class ChatSearchService:
     def search_by_name(
         self, query: str, depth: int = 100, is_exact: bool = True
     ) -> ChatResolution:
+        from pyrogram.enums import ChatType
         from pyrogram.types import Dialog
 
         clean_query = query.strip()
         norm_query = normalize_text_for_search(clean_query)
 
-        logger.debug(f"Resolviendo chat {query=} {is_exact=} {depth=}")
+        logger.debug(f"Buscando canales coincidentes {query=} {is_exact=} {depth=}")
 
         result = ChatResolution(
             query=clean_query, search_depth=depth, is_exact_requested=is_exact
@@ -81,7 +82,17 @@ class ChatSearchService:
         dialogs: Generator[Dialog] = self.client.get_dialogs(limit=depth)  # type: ignore
 
         for dialog in dialogs:
-            title = dialog.chat.title or dialog.chat.first_name or ""
+            # Filtro temprano: solo considerar Canales de difusión
+            chat_type = dialog.chat.type
+            is_channel = (
+                chat_type == ChatType.CHANNEL
+                or getattr(chat_type, "value", None) == "channel"
+                or str(chat_type).lower() in ("chattype.channel", "channel")
+            )
+            if not is_channel:
+                continue
+
+            title = dialog.chat.title or ""
             norm_title = normalize_text_for_search(title)
             username = dialog.chat.username or ""
             norm_username = normalize_text_for_search(username)
@@ -106,12 +117,12 @@ class ChatSearchService:
 
         if len(candidates) == 1:
             result.winner = candidates[0]
-            logger.info(f"Chat resuelto exitosamente {query=} {result.winner.id=}")
+            logger.info(f"Canal resuelto exitosamente {query=} {result.winner.id=}")
 
         elif len(candidates) > 1:
             result.conflicts = candidates
             logger.info(
-                f"Resolución con múltiples candidatos {query=} conflictos={len(result.conflicts)}"
+                f"Resolución con múltiples canales candidatos {query=} conflictos={len(result.conflicts)}"
             )
 
         if not result.winner:
