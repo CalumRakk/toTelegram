@@ -1,3 +1,4 @@
+import hashlib
 import json
 import logging
 import math
@@ -8,14 +9,20 @@ from typing import TYPE_CHECKING, Callable, Generator, List, Optional, Tuple, ca
 
 import peewee
 import tartape
+from filelock import FileLock
 from tartape import calculate_file_slices
 from tartape.schemas import FileSlice
 
+from totelegram.common.files import (
+    create_md5sum_by_hashlib,
+    get_mimetype,
+    get_user_config_dir,
+)
 from totelegram.common.helpers import is_expired as helpers_is_expired
 from totelegram.database import db_transaction
 from totelegram.packaging.partitioner import StatelessPartitioner
 from totelegram.packaging.schemas import VirtualChunk
-from totelegram.schemas import ResourceType, SourceType
+from totelegram.schemas import APP_NAME, ResourceType, SourceType
 from totelegram.telegram.client import parse_message_json_data
 
 if TYPE_CHECKING:
@@ -23,7 +30,6 @@ if TYPE_CHECKING:
     from pyrogram.types import Message
 
 
-from totelegram.common.files import create_md5sum_by_hashlib, get_mimetype
 from totelegram.common.helpers import get_utc_now
 from totelegram.database import EnumField, PydanticJSONField, db_proxy
 from totelegram.schemas import TapeCatalog
@@ -213,43 +219,68 @@ class Source(BaseModel):
         current_mtime = stat.st_mtime
         canonical_path = str(path.resolve())
 
-        # Intenta resolver por caché rápido
+        # CHECK 1: Verificación rápida fuera del lock (Ruta Caliente)
+
         cached = Source.get_or_none(Source.path_str == canonical_path)
         if cached:
             size_matches = cached.size == current_size
             mtime_matches = Source._is_mtime_matching(cached.mtime, current_mtime)
-
             if size_matches and mtime_matches:
                 return cached
 
-        # Si no coincide estrictamente, se procede al hash completo seguro...
-        if on_hash_start:
-            on_hash_start(path.name, current_size)
+        # LOCK KERNEL: Exclusión mutua local por archivo
 
-        md5sum = create_md5sum_by_hashlib(path, on_progress=on_hash_progress)
+        locks_dir = get_user_config_dir(APP_NAME) / "locks"
+        locks_dir.mkdir(parents=True, exist_ok=True)
 
-        if on_hash_complete:
-            on_hash_complete(path.name, md5sum)
+        # Generamos un token determinista de la ruta para el nombre del lock
+        path_token = hashlib.sha256(canonical_path.encode("utf-8")).hexdigest()[:16]
+        file_lock = FileLock(locks_dir / f"hash_{path_token}.lock")
 
-        # Comprobar si existe el MD5
-        source = cast(Source | None, Source.get_or_none(Source.md5sum == md5sum))
-        if source:
-            source.update_if_needed(path)
-            return source
+        # timeout=-1 hace que el proceso espere dormido a nivel de SO sin consumir CPU
+        with file_lock:
+            # CHECK 2: Double-Check tras adquirir el lock
+            # Si otro proceso acaba de terminar de calcular el hash, ya estará en SQLite
 
-        try:
-            with db_proxy.atomic():
-                return Source.create(
-                    md5sum=md5sum,
-                    path_str=canonical_path,
-                    size=current_size,
-                    mtime=current_mtime,
-                    mimetype=get_mimetype(path),
-                )
-        except peewee.IntegrityError:
-            source = cast(Source, Source.get(Source.md5sum == md5sum))
-            source.update_if_needed(path)
-            return source
+            cached = Source.get_or_none(Source.path_str == canonical_path)
+            if cached:
+                size_matches = cached.size == current_size
+                mtime_matches = Source._is_mtime_matching(cached.mtime, current_mtime)
+                if size_matches and mtime_matches:
+                    logger.debug(
+                        f"Hash reutilizado tras lock para '{path.name}' (calculado por proceso concurrente)."
+                    )
+                    return cached
+
+            # Cómputo del Hash (solo el primer proceso llega aquí)
+
+            if on_hash_start:
+                on_hash_start(path.name, current_size)
+
+            md5sum = create_md5sum_by_hashlib(path, on_progress=on_hash_progress)
+
+            if on_hash_complete:
+                on_hash_complete(path.name, md5sum)
+
+            # Comprobar si el mismo contenido ya existía bajo otra ruta
+            source = cast(Source | None, Source.get_or_none(Source.md5sum == md5sum))
+            if source:
+                source.update_if_needed(path)
+                return source
+
+            try:
+                with db_proxy.atomic():
+                    return Source.create(
+                        md5sum=md5sum,
+                        path_str=canonical_path,
+                        size=current_size,
+                        mtime=current_mtime,
+                        mimetype=get_mimetype(path),
+                    )
+            except peewee.IntegrityError:
+                source = cast(Source, Source.get(Source.md5sum == md5sum))
+                source.update_if_needed(path)
+                return source
 
     @classmethod
     def get_or_create_from_tape(cls, tape: tartape.Tape) -> "Source":
