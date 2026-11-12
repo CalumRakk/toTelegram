@@ -622,6 +622,10 @@ class TelegramAccountLock:
                 logger.debug(f"Lock liberado exitosamente en 'me' (Msg {msg_id}).")
             except RPCError as e:
                 logger.warning(f"Aviso liberando lock en Telegram (Msg {msg_id}): {e}")
+            except Exception as e:
+                logger.debug(
+                    f"Fallo de red al intentar liberar el lock (Msg {msg_id}) (Ignorable): {e}"
+                )
 
     def __enter__(self) -> AccountLockPayload:
         return self.acquire()
