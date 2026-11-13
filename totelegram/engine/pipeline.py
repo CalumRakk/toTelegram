@@ -249,7 +249,6 @@ class JobPipeline:
         self.observer.on_job_start(job, total_pieces)
 
         if self._test_session is not None:
-            # Modo test unitario con sesión inyectada
             job_session = JobSession(
                 pipeline=self,
                 session=self._test_session,
@@ -258,7 +257,7 @@ class JobPipeline:
                 yes=yes,
                 confirm_cleanup=confirm_cleanup,
             )
-            with self._test_session.exclusive_lock():
+            with self._test_session.exclusive_lock(force=force):
                 yield job_session
             return
 
@@ -297,7 +296,7 @@ class JobPipeline:
                 confirm_cleanup=confirm_cleanup,
             )
 
-            with session.exclusive_lock():
+            with session.exclusive_lock(force=force):
                 yield job_session
 
     def apply_pause(

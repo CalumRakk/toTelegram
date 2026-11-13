@@ -269,11 +269,28 @@ class SettingsManager:
         self.inventories_dir = self.worktable / "inventories"
         self.database_path = self.worktable / f"{self.worktable.name}.sqlite"
 
-        self._worker_instance_id = f"{uuid.uuid4().hex[:8]}:{os.getpid()}"
+        self._machine_id: str | None = None
+
+    @property
+    def machine_id(self) -> str:
+        """Obtiene o genera de forma persistente el identificador único de esta máquina."""
+        if self._machine_id is None:
+            machine_id_file = self.worktable / "machine_id"
+            if machine_id_file.exists():
+                val = machine_id_file.read_text(encoding="utf-8").strip()
+                if val:
+                    self._machine_id = val
+                    return val
+            self.worktable.mkdir(parents=True, exist_ok=True)
+            val = uuid.uuid4().hex[:8]
+            machine_id_file.write_text(val, encoding="utf-8")
+            self._machine_id = val
+        return self._machine_id
 
     @property
     def node_id(self) -> str:
-        return self._worker_instance_id
+        """Identificador determinista en formato {machine_id}:{pid}."""
+        return f"{self.machine_id}:{os.getpid()}"
 
     def _get_all_profile_names(self) -> list[str]:
         """Busca todos los perfiles que tengan .json, .env (legado) o .session."""

@@ -1,6 +1,7 @@
 # pyright: reportUnusedCoroutine=false
 import atexit
 import logging
+import os
 import re
 import signal
 import sys
@@ -32,7 +33,34 @@ logger = logging.getLogger(__name__)
 
 # Constantes del protocolo de bloqueo distribuido
 LOCK_ROOT_TAG = "#totelegram_lock"
-DEFAULT_LOCK_TTL_SECONDS = 300  # 5 minutos
+DEFAULT_LOCK_TTL_SECONDS = 120  # 2 minutos
+
+
+def is_pid_running(pid: int) -> bool:
+    """Comprueba si un PID específico sigue activo en el sistema operativo."""
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+
+
+def parse_node_id(node_id: str) -> tuple[str, int | None]:
+    """Extrae el machine_id y el pid a partir de un node_id en formato 'machine_id:pid'."""
+    if ":" in node_id:
+        parts = node_id.split(":", 1)
+        machine_id = parts[0]
+        try:
+            pid = int(parts[1])
+        except ValueError:
+            pid = None
+        return machine_id, pid
+    return node_id, None
+
 
 # DTOs Y CONTROLADOR DE LATIDOS (HEARTBEAT)
 
@@ -206,7 +234,10 @@ class ConcurrencyCoordinator:
 
     @contextmanager
     def guard_account(
-        self, account_id: int | None, ttl_seconds: int = 300
+        self,
+        account_id: int | None,
+        ttl_seconds: int = DEFAULT_LOCK_TTL_SECONDS,
+        force: bool = False,
     ) -> Generator[str, None, None]:
         if not account_id:
             yield "account:anonymous"
@@ -218,7 +249,6 @@ class ConcurrencyCoordinator:
                 "Se requiere un cliente de Telegram activo para bloquear la cuenta."
             )
 
-        # Si ya fue adquirido por este mismo coordinador, reutilizamos de forma reentrante
         if (
             self._active_account_lock is not None
             and self._active_account_lock.is_acquired
@@ -232,7 +262,7 @@ class ConcurrencyCoordinator:
             node_id=self.node_id,
             ttl_seconds=ttl_seconds,
         )
-        tg_lock.acquire()
+        tg_lock.acquire(force=force)
         self._active_account_lock = tg_lock
         try:
             yield resource_id
@@ -384,6 +414,21 @@ class AccountLockPayload:
             message_id=message_id,
         )
 
+    @property
+    def machine_id(self) -> str:
+        return parse_node_id(self.node_id)[0]
+
+    @property
+    def pid(self) -> int | None:
+        return parse_node_id(self.node_id)[1]
+
+    def is_locally_held_and_dead(self, current_machine_id: str) -> bool:
+        """Determina si el bloqueo pertenecía a esta misma máquina y su proceso ya murió."""
+        m_id, pid = parse_node_id(self.node_id)
+        if m_id == current_machine_id and pid is not None:
+            return not is_pid_running(pid)
+        return False
+
     def is_expired(self, current_time: int) -> bool:
         """Determina si el bloqueo ha expirado contra un timestamp de referencia."""
         return current_time >= self.expires_at
@@ -403,8 +448,8 @@ class TelegramAccountLock:
     Garantiza que una cuenta solo procese una subida a la vez entre múltiples máquinas (PC, VPS).
     """
 
-    DEFAULT_TTL_SECONDS = 300  # 5 minutos de validez por defecto
-    RENEW_INTERVAL_SECONDS = 60  # Latido cada 60 segundos
+    DEFAULT_TTL_SECONDS = 120  # 2 minutos
+    RENEW_INTERVAL_SECONDS = 45  # Latido cada 45 segundos
 
     def __init__(
         self,
@@ -420,6 +465,9 @@ class TelegramAccountLock:
 
         self._active_payload: AccountLockPayload | None = None
         self._is_acquired = False
+        self._clock_drift: int = (
+            0  # Diferencia en segundos entre servidor y reloj local
+        )
 
     @property
     def is_acquired(self) -> bool:
@@ -455,39 +503,55 @@ class TelegramAccountLock:
 
         return sorted(found, key=lambda x: x.message_id or 0)
 
-    def acquire(self) -> AccountLockPayload:
+    def _server_now(self) -> int:
+        """Hora UTC sincronizada con el servidor de Telegram sin llamadas RPC extra."""
+        return int(time.time()) + self._clock_drift
+
+    def acquire(self, force: bool = False) -> AccountLockPayload:
         """
-        Intenta adquirir el lock con resolución de carreras Read-After-Write.
-        Lanza AccountBusyError si otro nodo mantiene un bloqueo activo.
+        Intenta adquirir el lock con resolución de carreras Read-After-Write y auto-sanación.
         """
         from pyrogram.types import Message
 
-        current_time = int(time.time())
+        current_time = self._server_now()
         existing_locks = self._find_locks_in_saved_messages()
+        my_machine_id, _ = parse_node_id(self.node_id)
 
         # Comprobar si hay un lock vigente ocupado por otro nodo
         for lock in existing_locks:
             if not lock.is_expired(current_time):
-                if not lock.is_held_by(self.node_id):
+                # Si el usuario usó --force, rompemos el lock existente
+                if force:
+                    logger.warning(
+                        f"Forzando adquisición de cuenta: invalidando lock de '{lock.node_id}'."
+                    )
+                # Si es el mismo proceso exacto (re-adquisición)
+                elif lock.is_held_by(self.node_id):
+                    self._active_payload = lock
+                    self._is_acquired = True
+                    return lock
+                # Si fue en esta misma máquina pero el proceso previo ya murió
+                elif lock.is_locally_held_and_dead(my_machine_id):
+                    logger.info(
+                        f"Lock huérfano detectado en esta máquina (PID {lock.pid} ya inactivo). "
+                        "Reclamando cuenta inmediatamente..."
+                    )
+                # Lock activo legítimo en otra máquina o proceso vivo
+                else:
                     logger.info(
                         f"Cuenta {self.account_id} ocupada por nodo '{lock.node_id}'. "
                         f"Expira en {lock.remaining_seconds(current_time)}s."
                     )
                     raise AccountBusyError(self.account_id, lock.node_id)
-                else:
-                    # El lock pertenece a este mismo nodo (re-adquisición o reanudación limpia)
-                    self._active_payload = lock
-                    self._is_acquired = True
-                    return lock
 
-            # Si está expirado, intentar limpiarlo silenciosamente
+            # Si expiró, era huérfano local o se forzó con --force, limpiarlo en Telegram
             if lock.message_id:
                 try:
                     self.client.delete_messages("me", lock.message_id)
                 except RPCError:
                     pass
 
-        # Enviar el mensaje provisional de reclamo
+        # Enviar mensaje provisional de reclamo
         provisional_payload = AccountLockPayload(
             account_id=self.account_id,
             node_id=self.node_id,
@@ -502,8 +566,10 @@ class TelegramAccountLock:
 
         assert isinstance(sent_msg, Message)
 
-        # Sincronizamos los timestamps con la hora real del servidor de Telegram
+        # Sincronización pasiva de reloj (cero peticiones extra)
         server_created_at = self._get_server_timestamp(sent_msg)
+        self._clock_drift = server_created_at - int(time.time())
+
         official_payload = AccountLockPayload(
             account_id=self.account_id,
             node_id=self.node_id,
@@ -512,7 +578,6 @@ class TelegramAccountLock:
             message_id=sent_msg.id,
         )
 
-        # Actualizamos el texto del mensaje con los timestamps exactos del servidor
         try:
             self.client.edit_message_text(
                 chat_id="me",
@@ -523,9 +588,9 @@ class TelegramAccountLock:
             pass
 
         # Consenso Anti-Carrera: Read-After-Write
-        # Pequeña pausa para permitir que mensajes concurrentes se asienten en el servidor
         time.sleep(0.4)
 
+        current_time = self._server_now()
         active_locks = [
             lock
             for lock in self._find_locks_in_saved_messages()
@@ -534,17 +599,25 @@ class TelegramAccountLock:
         if active_locks:
             winner = active_locks[0]
             if winner.message_id != sent_msg.id:
-                # Perdimos la carrera: otro nodo llegó antes
-                logger.warning(
-                    f"Conflicto de concurrencia: el nodo '{winner.node_id}' ganó el lock "
-                    f"(Msg {winner.message_id} < {sent_msg.id}). Liberando mensaje perdedor."
-                )
-                try:
-                    self.client.delete_messages("me", sent_msg.id)
-                except RPCError:
-                    pass
+                if force:
+                    logger.warning(
+                        f"Ignorando ganador concurrente '{winner.node_id}' debido a --force."
+                    )
+                elif winner.is_locally_held_and_dead(my_machine_id):
+                    logger.info(
+                        f"Ignorando lock muerto de PID {winner.pid} durante el consenso."
+                    )
+                else:
+                    logger.warning(
+                        f"Conflicto de concurrencia: el nodo '{winner.node_id}' ganó el lock "
+                        f"(Msg {winner.message_id} < {sent_msg.id}). Liberando mensaje perdedor."
+                    )
+                    try:
+                        self.client.delete_messages("me", sent_msg.id)
+                    except RPCError:
+                        pass
 
-                raise AccountBusyError(self.account_id, winner.node_id)
+                    raise AccountBusyError(self.account_id, winner.node_id)
 
         self._active_payload = official_payload
         self._is_acquired = True

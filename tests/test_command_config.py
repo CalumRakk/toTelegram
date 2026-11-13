@@ -136,6 +136,20 @@ class TestCliConfig(unittest.TestCase):
         self.assertNotIn("*.tmp", settings.exclude_files)  # type: ignore
         self.assertIn("*.bak", settings.exclude_files)  # type: ignore
 
+    def test_settings_manager_deterministic_machine_id(self):
+        """Verifica que el machine_id persista en disco y se comparta entre instancias."""
+        with TemporaryDirectory() as tmp_dir:
+            worktable = Path(tmp_dir)
+            mgr1 = SettingsManager(worktable)
+            id1 = mgr1.machine_id
+
+            mgr2 = SettingsManager(worktable)
+            id2 = mgr2.machine_id
+
+            self.assertEqual(id1, id2)
+            self.assertTrue((worktable / "machine_id").exists())
+            self.assertTrue(mgr1.node_id.startswith(f"{id1}:"))
+
 
 if __name__ == "__main__":
     unittest.main()

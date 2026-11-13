@@ -42,13 +42,15 @@ class UploadSession:
         return self.settings.telegram_account_id
 
     @contextmanager
-    def exclusive_lock(self, ttl_seconds: int = 300) -> Generator[str, None, None]:
+    def exclusive_lock(
+        self, ttl_seconds: int = 120, force: bool = False
+    ) -> Generator[str, None, None]:
         """
         Bloquea la cuenta de Telegram para uso exclusivo de este nodo durante la subida.
         Garantiza que ninguna otra terminal o VPS procese transferencias con la misma cuenta.
         """
         with self.coordinator.guard_account(
-            self.account_id, ttl_seconds=ttl_seconds
+            self.account_id, ttl_seconds=ttl_seconds, force=force
         ) as resource_id:
             yield resource_id
 
