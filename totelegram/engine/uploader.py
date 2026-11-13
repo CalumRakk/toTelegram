@@ -79,6 +79,7 @@ class CooperativeUploader:
                     source_path=job.path,
                     max_filename_len=session.settings.max_filename_length,
                     observer=obs,
+                    buffer_size_bytes=session.settings.upload_buffer_size_bytes,
                 ) as upload_stream:
                     stream_obj = ThrottledFile(
                         upload_stream.stream, speed_limit_bytes_per_s=limit_bytes

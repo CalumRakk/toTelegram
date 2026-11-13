@@ -5,10 +5,9 @@ from pathlib import Path
 from typing import Self, Tuple
 
 import tartape
+from tartape import ReadAheadStream
 
 from totelegram.engine.events import TarUploadObserverBridge, UploadObserver
-
-# from tartape.stream import FileSliceStream
 from totelegram.models import Payload
 from totelegram.schemas import SourceType
 from totelegram.stream import FileVolume
@@ -38,7 +37,6 @@ class UploadStream:
         # Salvaguarda: Si Pyrogram hizo un seek no lineal (reintento), computar bajo demanda
         if not val and hasattr(self.stream, "compute_checksum"):
             try:
-                # FIXME: io.BUfferedIOBase no implementa compute_checksum
                 val = self.stream.compute_checksum(algorithm="md5")  # type: ignore
             except Exception as e:
                 logger.warning(
@@ -60,7 +58,7 @@ class PayloadStreamFactory:
     """
     Fábrica transparente de flujos de datos.
     Traduce una pieza lógica (Payload en DB) a un flujo binario físico listo para subir,
-    utilizando el motor de streaming nativo de TarTape 3.0.
+    utilizando el motor de streaming nativo de TarTape 3.0.7 con soporte de buffer en RAM.
     """
 
     @staticmethod
@@ -91,6 +89,7 @@ class PayloadStreamFactory:
         source_path: Path,
         max_filename_len: int = 55,
         observer: UploadObserver | None = None,
+        buffer_size_bytes: int = 0,
     ) -> UploadStream:
         filename, caption = cls.resolve_naming(payload, max_filename_len)
         source_type = payload.job.source.type
@@ -117,8 +116,18 @@ class PayloadStreamFactory:
                 name=payload.filename,
             )
 
+        effective_stream: io.BufferedIOBase = raw_volume
+        if isinstance(buffer_size_bytes, int) and buffer_size_bytes > 0:
+            logger.debug(
+                f"Activando ReadAheadStream con buffer de {buffer_size_bytes // (1024 * 1024)} MB para {payload.filename}"
+            )
+            effective_stream = ReadAheadStream(
+                raw_volume,
+                buffer_size=buffer_size_bytes,
+            )
+
         return UploadStream(
-            stream=raw_volume,
+            stream=effective_stream,
             size=payload.size,
             filename=filename,
             caption=caption,

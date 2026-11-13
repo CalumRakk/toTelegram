@@ -138,6 +138,7 @@ class TestCooperativeUploader(unittest.TestCase):
         self.settings.max_filename_length = 55
         self.settings.upload_pause_range = [0, 0]
         self.settings.exclude_files = []
+        self.settings.upload_buffer_size_bytes = 0
 
         self.ctx = UploadContext(
             tg_chat=MagicMock(id=self.chat.id, title=self.chat.title),

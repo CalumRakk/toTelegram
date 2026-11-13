@@ -1,2 +1,2 @@
-__VERSION__ = "1.0.0"
+__VERSION__ = "1.1.0"
 __CURRENT_DB_VERSION__ = 8

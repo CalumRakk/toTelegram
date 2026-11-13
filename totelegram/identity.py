@@ -67,6 +67,12 @@ class Settings(BaseModel):
         json_schema_extra={"is_sensitive": False, "access": AccessLevel.EDITABLE},
     )
 
+    upload_buffer_size_mb: int = Field(
+        default=64,
+        description="Tamaño del buffer de lectura anticipada en RAM para subidas (MB). 0 = desactivado.",
+        json_schema_extra={"is_sensitive": False, "access": AccessLevel.EDITABLE},
+    )
+
     api_id: int = Field(
         default=DEFAULT_TG_API_ID,
         description="Telegram API ID",
@@ -132,6 +138,24 @@ class Settings(BaseModel):
     @property
     def profile_alias(self) -> str:
         return self.profile_name
+
+    @property
+    def upload_buffer_size_bytes(self) -> int:
+        """Retorna la capacidad del buffer expresada en bytes."""
+        return self.upload_buffer_size_mb * 1024 * 1024
+
+    @field_validator("upload_buffer_size_mb", mode="after")
+    @classmethod
+    def validate_buffer_size(cls, v: int) -> int:
+        if v < 0:
+            raise ValueError(
+                "El tamaño del buffer de subida en RAM no puede ser negativo."
+            )
+        if v > 2048:
+            raise ValueError(
+                "El tamaño del buffer de subida no puede exceder 2048 MB (2 GB)."
+            )
+        return v
 
     @field_validator("upload_pause_range", mode="after")
     @classmethod

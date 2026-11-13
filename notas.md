@@ -4,7 +4,7 @@
 - RemotePayload debe guardar de Message solo lo basico, no es necesario todo el JSON enorme.
 - verificar si se puede especificar otra ruta para la DB
 - ~~error de lock de cuenta al cerrarla forzosamente ¿nodo determinista es la solucion?~~
-- Un detector de velocidad de disco, una heuristica simple quizas nos salve de disco duro lentos.
+- ~~Un detector de velocidad de disco, una heuristica simple quizas nos salve de disco duro lentos.~~
 - hay que especificar mejor que "status ." se basa a un estado local. Existe el "riesgo" de marcar un archivo como no subido cuando en realidad ya esta en los server de tg.
 - filtro para send y evitar que suba miles de archivos pequeños.
 - desacoplar el comando status de las cuentas. Y verificar si otro ls pasa lo mismo
