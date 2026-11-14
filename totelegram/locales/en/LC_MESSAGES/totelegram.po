@@ -13,11 +13,11 @@ msgstr ""
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
 # Semillas de verificación de motor
-msgid "Hello World"
+msgid "Hola Mundo"
 msgstr "Hello World"
 
-msgid "{n} file"
-msgid_plural "{n} files"
+msgid "{n} archivo"
+msgid_plural "{n} archivos"
 msgstr[0] "{n} file"
 msgstr[1] "{n} files"
 
@@ -752,3 +752,673 @@ msgstr "  [bold red]X[/] [bold]{count}[/] corrupted or invalid format snapshot(s
 
 msgid "Error de parsing"
 msgstr "Parsing error"
+
+
+# auth.py
+msgid "Gestión de autenticación e identidades de Telegram."
+msgstr "Telegram authentication and identity management."
+
+msgid "No hay una sesión activa configurada."
+msgstr "No active session configured."
+
+msgid "Inicia sesión primero con: [bold]totelegram login[/]"
+msgstr "Log in first with: [bold]totelegram login[/]"
+
+msgid "[bold cyan]Inicio de Sesión en Telegram[/bold cyan]"
+msgstr "[bold cyan]Telegram Login[/bold cyan]"
+
+msgid "[dim]Presiona [bold]Enter[/bold] en cada paso para usar los valores predeterminados.[/dim]\n"
+msgstr "[dim]Press [bold]Enter[/bold] at each step to use default values.[/dim]\n"
+
+msgid "1. Telegram API ID (my.telegram.org) [Enter para default]"
+msgstr "1. Telegram API ID (my.telegram.org) [Enter for default]"
+
+msgid "El API ID debe ser un número entero."
+msgstr "API ID must be an integer."
+
+msgid "2. Telegram API HASH [Enter para default]"
+msgstr "2. Telegram API HASH [Enter for default]"
+
+msgid "[bold cyan]ℹ️ Aviso sobre el uso de api_id y api_hash compartidas[/bold cyan]\n\nEstás a punto de iniciar sesión utilizando credenciales compartidas con otros usuarios.\n\nPara los servidores de Telegram, existe una relación técnica entre las sesiones que utilizan las mismas credenciales. Si alguien realiza un uso abusivo con las mismas credenciales, Telegram podría aplicar límites de velocidad temporales ([bold]FloodWait[/bold]) sobre las cuentas relacionadas.\n\n[bold]¿Alguien puede acceder a mis archivos al utilizar api_id y api_hash compartidas?[/bold]\n\n[green]No, absolutamente nadie.[/green] Las credenciales son solo el identificador de la aplicación desde la que te conectas (exactamente igual que cuando usas un cliente de terceros). Tus archivos en chats privados siguen siendo exclusivos para ti y tu sesión no se comparte con nadie.\n\nPara pruebas y uso rápido está bien, pero si planeas utilizar toTelegram para respaldos masivos, es altamente recomendable registrar tu propia app gratuita en [bold cyan]https://my.telegram.org[/bold cyan]."
+msgstr "[bold cyan]ℹ️ Notice about shared api_id and api_hash[/bold cyan]\n\nYou are about to log in using credentials shared with other users.\n\nFor Telegram servers, there is a technical relationship between sessions using the same credentials. If someone abuses these shared credentials, Telegram may apply temporary rate limits ([bold]FloodWait[/bold]) on related accounts.\n\n[bold]Can anyone access my files using shared api_id and api_hash?[/bold]\n\n[green]No, absolutely not.[/green] Credentials are only the identifier of the application you connect from (just like when using third-party clients). Your files in private chats remain strictly exclusive to you and your session is never shared.\n\nIt is fine for testing and quick use, but if you plan to use toTelegram for massive backups, we strongly recommend registering your own free app at [bold cyan]https://my.telegram.org[/bold cyan]."
+
+msgid "\n¿Deseas continuar con estas credenciales?"
+msgstr "\nDo you want to continue with these credentials?"
+
+msgid "Operación cancelada. Crea tu propia app en https://my.telegram.org y vuelve a intentar."
+msgstr "Operation cancelled. Create your own app at https://my.telegram.org and try again."
+
+msgid "\n[dim]Conectando con Telegram...[/dim]"
+msgstr "\n[dim]Connecting to Telegram...[/dim]"
+
+msgid "Error durante el inicio de sesión: {error}"
+msgstr "Error during login: {error}"
+
+msgid "Conexión verificada con éxito como [bold]{first_name}[/]."
+msgstr "Connection successfully verified as [bold]{first_name}[/]."
+
+msgid "3. Alias o nombre para identificar esta cuenta en tu equipo"
+msgstr "3. Alias or name to identify this account on your machine"
+
+msgid "El alias '[bold]{alias}[/]' ya existe."
+msgstr "Alias '[bold]{alias}[/]' already exists."
+
+msgid "Se asignará automáticamente: [bold cyan]{alias}[/]"
+msgstr "Automatically assigned: [bold cyan]{alias}[/]"
+
+msgid "¡Sesión iniciada con éxito! Cuenta [bold green]{alias}[/] activada."
+msgstr "Login successful! Account [bold green]{alias}[/] activated."
+
+msgid "Próximo paso sugerido"
+msgstr "Suggested next step"
+
+msgid "Tu cuenta ya está lista para operar.\nPuedes enviar o respaldar archivos indicando el destino con [bold]-t[/]:"
+msgstr "Your account is ready to operate.\nYou can send or backup files by specifying target with [bold]-t[/]:"
+
+msgid "Enviar a tus Mensajes Guardados"
+msgstr "Send to your Saved Messages"
+
+msgid "Enviar a un canal de difusión"
+msgstr "Send to a broadcast channel"
+
+msgid "Respaldar carpeta completa"
+msgstr "Backup entire folder"
+
+msgid "Ruta a una carpeta o archivo para auditar su estado de respaldo local. Si se omite, muestra el estado de la cuenta activa."
+msgstr "Path to a folder or file to audit local backup status. If omitted, shows active account status."
+
+msgid "Filtrar auditoría por un destino de Telegram específico."
+msgstr "Filter audit by a specific Telegram destination."
+
+msgid "Auditar subdirectorios recursivamente mostrando rutas relativas."
+msgstr "Audit subdirectories recursively showing relative paths."
+
+msgid "Destino '{target}' inválido."
+msgstr "Invalid target '{target}'."
+
+msgid "La ruta '{path}' no existe."
+msgstr "Path '{path}' does not exist."
+
+msgid "No hay una cuenta activa configurada."
+msgstr "No active account configured."
+
+msgid "Inicia sesión ejecutando:"
+msgstr "Log in by running:"
+
+msgid "Consultando estado de cuenta en Telegram..."
+msgstr "Checking account status on Telegram..."
+
+msgid "Cuenta activa"
+msgstr "Active account"
+
+msgid "Usuario"
+msgstr "User"
+
+msgid "Account ID"
+msgstr "Account ID"
+
+msgid "Telegram"
+msgstr "Telegram"
+
+msgid "Credenciales"
+msgstr "Credentials"
+
+msgid "sin_alias"
+msgstr "no_alias"
+
+msgid "[bold cyan]Premium ★[/]"
+msgstr "[bold cyan]Premium ★[/]"
+
+msgid "[bold green]Propias (Custom App)[/]"
+msgstr "[bold green]Custom (Own App)[/]"
+
+msgid "[bold yellow]Públicas compartidas (Default)[/]"
+msgstr "[bold yellow]Public shared (Default)[/]"
+
+msgid "[bold cyan]Estado de toTelegram — {name}[/]"
+msgstr "[bold cyan]toTelegram Status — {name}[/]"
+
+msgid "Nombre de la cuenta a la cual cambiar. Si se omite, se muestra un selector interactivo."
+msgstr "Name of the account to switch to. If omitted, shows an interactive selector."
+
+msgid "No hay cuentas guardadas en el sistema."
+msgstr "No saved accounts in the system."
+
+msgid "Inicia sesión con:"
+msgstr "Log in with:"
+
+msgid "\n[bold cyan]Cuentas disponibles:[/bold cyan]"
+msgstr "\n[bold cyan]Available accounts:[/bold cyan]"
+
+msgid "\nSelecciona el número de cuenta (o '0' para cancelar)"
+msgstr "\nSelect account number (or '0' to cancel)"
+
+msgid "Operación cancelada."
+msgstr "Operation cancelled."
+
+msgid "[red]Opción inválida.[/]"
+msgstr "[red]Invalid option.[/]"
+
+msgid "La cuenta '[bold]{name}[/]' no existe o está incompleta."
+msgstr "Account '[bold]{name}[/]' does not exist or is incomplete."
+
+msgid "Cuenta activa cambiada a: [bold green]{name}[/]"
+msgstr "Active account changed to: [bold green]{name}[/]"
+
+msgid "Nombre de la cuenta a cerrar sesión (por defecto: la cuenta activa)."
+msgstr "Account name to log out (default: active account)."
+
+msgid "Confirma el cierre de sesión sin solicitar confirmación interactiva."
+msgstr "Confirms logout without interactive prompt."
+
+msgid "Elimina la sesión localmente sin revocar la clave en los servidores de Telegram."
+msgstr "Deletes session locally without revoking key on Telegram servers."
+
+msgid "No se encontró la cuenta '{account}'."
+msgstr "Account '{account}' was not found."
+
+msgid "eliminar localmente"
+msgstr "delete locally"
+
+msgid "cerrar sesión en Telegram y eliminar"
+msgstr "log out from Telegram and delete"
+
+msgid "¿Estás seguro de que deseas {action} la cuenta '[bold]{account}[/]?'"
+msgstr "Are you sure you want to {action} account '[bold]{account}[/]?'"
+
+msgid "Revocando sesión en los servidores de Telegram..."
+msgstr "Revoking session on Telegram servers..."
+
+msgid "Sesión remota invalidada exitosamente."
+msgstr "Remote session successfully invalidated."
+
+msgid "Cuenta '[bold]{account}[/]' eliminada del equipo."
+msgstr "Account '[bold]{account}[/]' removed from machine."
+
+msgid "  [dim]- Archivo eliminado: {name}[/]"
+msgstr "  [dim]- File removed: {name}[/]"
+
+msgid "Cuenta activa reasignada automáticamente a: [bold cyan]{name}[/]"
+msgstr "Active account automatically reassigned to: [bold cyan]{name}[/]"
+
+msgid "No quedan más cuentas activas configuradas."
+msgstr "No remaining active accounts configured."
+
+msgid "Muestra solo los nombres de cuentas"
+msgstr "Show account names only"
+
+
+# logic.py, send.py & backup.py
+msgid "carpeta"
+msgstr "folder"
+
+msgid "archivo"
+msgstr "file"
+
+msgid "carpetas"
+msgstr "folders"
+
+msgid "archivos"
+msgstr "files"
+
+msgid "Carpeta"
+msgstr "Folder"
+
+msgid "Archivo"
+msgstr "File"
+
+msgid "Existen [bold]{count}[/] partes previas en Telegram del archivo '[bold]{filename}[/]'.\nAl continuar con [bold]--force[/], se eliminarán de Telegram para reiniciar la subida desde cero."
+msgstr "There are [bold]{count}[/] previous parts on Telegram for file '[bold]{filename}[/]'.\nContinuing with [bold]--force[/] will delete them from Telegram to restart upload from scratch."
+
+msgid "¿Deseas eliminarlas y continuar?"
+msgstr "Do you want to delete them and continue?"
+
+msgid "Forzando la subida de {items} sin comprobar el estado previo."
+msgstr "Forcing upload of {items} without checking prior state."
+
+msgid "Analizando contenido..."
+msgstr "Analyzing content..."
+
+msgid "{label} [bold]{name}[/] ya está 100% completado en Telegram."
+msgstr "{label} [bold]{name}[/] is already 100% completed on Telegram."
+
+msgid "{label} [bold]{name}[/] procesado exitosamente."
+msgstr "{label} [bold]{name}[/] processed successfully."
+
+msgid "Procesamiento parcial de [bold]{name}[/]: {message}"
+msgstr "Partial processing of [bold]{name}[/]: {message}"
+
+msgid "[dim]Escaneando directorios...[/]"
+msgstr "[dim]Scanning directories...[/]"
+
+msgid "Auto-sanadas [bold]{count}[/] cintas no indexadas en segundo plano."
+msgstr "Auto-healed [bold]{count}[/] unindexed tapes in background."
+
+msgid "[dim]Escaneando {count} rutas...[/dim]"
+msgstr "[dim]Scanning {count} paths...[/dim]"
+
+msgid "Core Engine: Pyrogram Runtime Patches [FAILED]"
+msgstr "Core Engine: Pyrogram Runtime Patches [FAILED]"
+
+msgid "Conectado como [bold]{user}[/]"
+msgstr "Connected as [bold]{user}[/]"
+
+msgid "Cuenta en modo público compartido (my.telegram.org recomendado)."
+msgstr "Account in shared public mode (my.telegram.org recommended)."
+
+msgid "Destino: [bold cyan]{chat}[/] [dim](ID: {chat_id})[/]"
+msgstr "Destination: [bold cyan]{chat}[/] [dim](ID: {chat_id})[/]"
+
+msgid "Resolviendo destino '[bold]{target}[/]'..."
+msgstr "Resolving destination '[bold]{target}[/]'..."
+
+msgid "Sincronizando con Telegram..."
+msgstr "Synchronizing with Telegram..."
+
+msgid "Error de conexión con el chat destino ({chat_id}): {error}"
+msgstr "Connection error with destination chat ({chat_id}): {error}"
+
+msgid "Error de Conexión"
+msgstr "Connection Error"
+
+msgid "Lista de archivos o carpetas a enviar de forma individual."
+msgstr "List of files or folders to send individually."
+
+msgid "Destino en Telegram: ID, @username, 'me' o nombre del canal (o define TOTELEGRAM_TARGET)."
+msgstr "Telegram destination: ID, @username, 'me' or channel title (or define TOTELEGRAM_TARGET)."
+
+msgid "Fuerza ignorando el estado del archivo en el sistema"
+msgstr "Force ignoring file state in the system"
+
+msgid "Omite confirmaciones interactivas (ej. al purgar piezas previas con --force)."
+msgstr "Skip interactive confirmations (e.g. when purging previous parts with --force)."
+
+msgid "Lista de carpetas a archivar"
+msgstr "List of folders to archive"
+
+msgid "Activa o desactiva la truncación de nombres largos. Sobrescribe la configuración global."
+msgstr "Enable or disable truncation of long names. Overrides global settings."
+
+# prune.py
+msgid "Directorio local donde auditar y liberar espacio de archivos respaldados."
+msgstr "Local directory to audit and free space from backed up files."
+
+msgid "Solo liberar archivos que estén respaldados en este chat específico."
+msgstr "Only free files that are backed up to this specific chat."
+
+msgid "Auditar y limpiar subdirectorios recursivamente."
+msgstr "Audit and clean subdirectories recursively."
+
+msgid "Muestra qué archivos se eliminarían y cuánto espacio se liberaría sin tocar el disco."
+msgstr "Shows which files would be removed and space reclaimed without touching disk."
+
+msgid "Omite la confirmación interactiva antes de eliminar los archivos locales."
+msgstr "Skips interactive confirmation before deleting local files."
+
+msgid "No se pudo resolver el destino '{target}'."
+msgstr "Could not resolve destination '{target}'."
+
+msgid "[bold cyan]Auditando estado contra la base de datos local...[/]"
+msgstr "[bold cyan]Auditing state against local database...[/]"
+
+msgid "No hay archivos respaldados que puedan liberarse de forma segura en '{name}' para el destino '{target}'."
+msgstr "No backed up files can be safely freed in '{name}' for destination '{target}'."
+
+msgid "No hay archivos respaldados que puedan liberarse de forma segura en '{name}'."
+msgstr "No backed up files can be safely freed in '{name}'."
+
+msgid "Modo [bold]--dry-run[/] activo. No se eliminó ningún archivo de tu equipo."
+msgstr "[bold]--dry-run[/] mode active. No files were removed from your machine."
+
+msgid "¿Deseas eliminar estos {count} archivos del disco local para liberar espacio?"
+msgstr "Do you want to delete these {count} files from local disk to free space?"
+
+# download.py
+msgid "Ruta al archivo snapshot (.json.xz o .ttape)"
+msgstr "Path to snapshot file (.json.xz or .ttape)"
+
+msgid "Directorio donde se restaurará el contenido (por defecto: directorio del snapshot)."
+msgstr "Directory where content will be restored (default: snapshot directory)."
+
+msgid "Sobrescribir archivos o carpetas existentes en el destino."
+msgstr "Overwrite existing files or folders in destination."
+
+msgid "Conservar los segmentos descargados tras una restauración exitosa."
+msgstr "Keep downloaded segments after successful restore."
+
+msgid "Extracción quirúrgica: Ruta interna del archivo específico a restaurar (omite el resto del backup)."
+msgstr "Surgical extraction: Internal path of specific file to restore (skips the rest of backup)."
+
+msgid "Cargando snapshot: [bold]{name}[/]..."
+msgstr "Loading snapshot: [bold]{name}[/]..."
+
+msgid "Error al leer el snapshot: {error}"
+msgstr "Error reading snapshot: {error}"
+
+msgid "La opción '--file' solo se aplica a snapshots de carpetas archivadas (TAR)."
+msgstr "The '--file' option only applies to archived folder snapshots (TAR)."
+
+msgid "[dim](Contenedor .ttape)[/dim]"
+msgstr "[dim](.ttape Container)[/dim]"
+
+msgid "[dim](Snapshot v6.0)[/dim]"
+msgstr "[dim](Snapshot v6.0)[/dim]"
+
+msgid "Extrayendo archivo puntual: [bold cyan]{file}[/]"
+msgstr "Extracting single file: [bold cyan]{file}[/]"
+
+msgid "Desde backup: [bold]{name}[/] {badge} ({parts} partes totales en Telegram)"
+msgstr "From backup: [bold]{name}[/] {badge} ({parts} total parts on Telegram)"
+
+msgid "Destino: [bold green]{path}[/]"
+msgstr "Destination: [bold green]{path}[/]"
+
+msgid "Archivo [bold]{file}[/] extraído exitosamente."
+msgstr "File [bold]{file}[/] extracted successfully."
+
+msgid "Ubicación: [bold cyan]{path}[/]"
+msgstr "Location: [bold cyan]{path}[/]"
+
+msgid "Tráfico transferido: [dim]{mb:.2f} MB[/dim]"
+msgstr "Transferred traffic: [dim]{mb:.2f} MB[/dim]"
+
+msgid "Usa la opción [bold]--force[/] para sobrescribir."
+msgstr "Use [bold]--force[/] option to overwrite."
+
+msgid "Fallo de integridad: {error}"
+msgstr "Integrity failure: {error}"
+
+msgid "Archivo único"
+msgstr "Single file"
+
+msgid "Dividido en partes"
+msgstr "Split in parts"
+
+msgid "1 parte en Telegram"
+msgstr "1 part on Telegram"
+
+msgid "{count} partes en Telegram"
+msgstr "{count} parts on Telegram"
+
+msgid "Restaurando {item}: [bold cyan]{name}[/]"
+msgstr "Restoring {item}: [bold cyan]{name}[/]"
+
+msgid "Estructura: [bold]{desc}[/] ({count_str})"
+msgstr "Structure: [bold]{desc}[/] ({count_str})"
+
+msgid "Modo --force activo: Los archivos existentes en el destino serán sobrescritos."
+msgstr "--force mode active: Existing files in destination will be overwritten."
+
+msgid "{item} [bold]{name}[/] restaurado exitosamente."
+msgstr "{item} [bold]{name}[/] restored successfully."
+
+msgid "Archivos verificados: [bold]{count}[/]"
+msgstr "Verified files: [bold]{count}[/]"
+
+msgid "Total transferido: [dim]{mb:.2f} MB[/dim]"
+msgstr "Total transferred: [dim]{mb:.2f} MB[/dim]"
+
+msgid "Fallo de integridad durante la restauración: {error}"
+msgstr "Integrity failure during restore: {error}"
+
+msgid "Error inesperado durante la descarga: {error}"
+msgstr "Unexpected error during download: {error}"
+
+# forward.py
+msgid "Ruta al snapshot (.json.xz o .ttape) a replicar."
+msgstr "Path to snapshot (.json.xz or .ttape) to replicate."
+
+msgid "Destino en Telegram hacia donde replicar (o define TOTELEGRAM_TARGET)."
+msgstr "Telegram destination to replicate to (or define TOTELEGRAM_TARGET)."
+
+msgid "Omite confirmaciones interactivas."
+msgstr "Skips interactive confirmations."
+
+msgid "Replicando recurso: [bold cyan]{name}[/]"
+msgstr "Replicating resource: [bold cyan]{name}[/]"
+
+msgid "Origen: [dim]Chat ID {chat_id}[/] • Partes a replicar: [bold]{parts}[/]"
+msgstr "Origin: [dim]Chat ID {chat_id}[/] • Parts to replicate: [bold]{parts}[/]"
+
+msgid "El chat de origen y destino son idénticos. Nada por hacer."
+msgstr "Source and destination chats are identical. Nothing to do."
+
+msgid "¿Deseas replicar {count} partes hacia '{target}'?"
+msgstr "Do you want to replicate {count} parts to '{target}'?"
+
+msgid "Replicando"
+msgstr "Replicating"
+
+msgid "Replicación completada exitosamente hacia [bold green]{title}[/]."
+msgstr "Replication completed successfully to [bold green]{title}[/]."
+
+msgid "Partes replicadas: [bold]{count}[/] (0 bytes transferidos desde tu PC)."
+msgstr "Replicated parts: [bold]{count}[/] (0 bytes transferred from your PC)."
+
+msgid "Nuevo Snapshot publicado en Telegram [bold cyan](Msg ID: {msg_id})[/]"
+msgstr "New Snapshot published to Telegram [bold cyan](Msg ID: {msg_id})[/]"
+
+# index.py
+msgid "Chat o canal en Telegram donde buscar las cintas archivadas (o define TOTELEGRAM_TARGET)."
+msgstr "Telegram chat or channel to search for archived tapes (or define TOTELEGRAM_TARGET)."
+
+msgid "Fuerza la re-indexación de todas las cintas remotas, incluso las ya registradas."
+msgstr "Forces re-indexing of all remote tapes, including already registered ones."
+
+msgid "Aplica la indexación sin solicitar confirmación interactiva."
+msgstr "Applies indexing without requesting interactive confirmation."
+
+msgid "Buscando cintas archivadas (#type_tape) en '{title}'..."
+msgstr "Searching archived tapes (#type_tape) in '{title}'..."
+
+msgid "Error consultando Telegram: {error}"
+msgstr "Error querying Telegram: {error}"
+
+msgid "Todas las cintas archivadas ya están indexadas en tu base de datos local."
+msgstr "All archived tapes are already indexed in your local database."
+
+msgid "Total en Telegram: [bold]{count}[/] cintas."
+msgstr "Total on Telegram: [bold]{count}[/] tapes."
+
+msgid "Se encontraron [bold cyan]{pending}[/] cintas pendientes de indexar (de {total} totales en Telegram)."
+msgstr "Found [bold cyan]{pending}[/] tapes pending index (out of {total} total on Telegram)."
+
+msgid "¿Deseas descargar e indexar estas {count} cintas en SQLite?"
+msgstr "Do you want to download and index these {count} tapes into SQLite?"
+
+msgid "[bold green]Descargando e indexando cintas...[/]"
+msgstr "[bold green]Downloading and indexing tapes...[/]"
+
+msgid "[bold green]Indexando inventario ({cur}/{tot}):[/] {name}"
+msgstr "[bold green]Indexing inventory ({cur}/{tot}):[/] {name}"
+
+msgid "Indexación completada: [bold]{count}[/] cintas archivadas registradas con éxito."
+msgstr "Indexing completed: [bold]{count}[/] archived tapes registered successfully."
+
+msgid "Ahora puedes buscar archivos dentro de estas carpetas o extraerlos quirúrgicamente con 'download --file'."
+msgstr "You can now search files inside these folders or extract them selectively with 'download --file'."
+
+msgid "Se produjeron errores en [bold]{count}[/] cintas:"
+msgstr "Errors occurred on [bold]{count}[/] tapes:"
+
+# snapshot.py
+msgid "Herramientas para inspeccionar e importar snapshots v6.0."
+msgstr "Tools to inspect and import v6.0 snapshots."
+
+msgid "Rutas a archivos (.json.xz o .ttape) o carpetas que contengan snapshots v6.0."
+msgstr "Paths to snapshot files (.json.xz or .ttape) or folders containing v6.0 snapshots."
+
+msgid "Aplica el plan en la base de datos sin solicitar confirmación."
+msgstr "Applies plan to database without interactive prompt."
+
+msgid "Solo muestra el plan de importación sin realizar modificaciones."
+msgstr "Only shows the import plan without making modifications."
+
+msgid "[dim]Buscando archivos snapshot v6.0...[/]"
+msgstr "[dim]Searching v6.0 snapshot files...[/]"
+
+msgid "No se encontraron archivos snapshot v6.0 (.ttape o .json.xz) en las rutas proporcionadas."
+msgstr "No v6.0 snapshot files (.ttape or .json.xz) found in provided paths."
+
+msgid "[bold green]Analizando disponibilidad en la base de datos...[/]"
+msgstr "[bold green]Analyzing database availability...[/]"
+
+msgid "No hay acciones aplicables en la base de datos."
+msgstr "No applicable actions for the database."
+
+msgid " [yellow]({count} en conflicto serán ignorados)[/]"
+msgstr " [yellow]({count} in conflict will be skipped)[/]"
+
+msgid "¿Deseas aplicar estos cambios e importar [bold]{count}[/] snapshot(s) a la BD?{conflicts}"
+msgstr "Do you want to apply these changes and import [bold]{count}[/] snapshot(s) to DB?{conflicts}"
+
+msgid "[bold green]Aplicando cambios en la base de datos...[/]"
+msgstr "[bold green]Applying changes to database...[/]"
+
+msgid "[bold green]Importando ({current}/{total}):[/] {name}"
+msgstr "[bold green]Importing ({current}/{total}):[/] {name}"
+
+msgid "Importación completada: [bold]{count}[/] snapshot(s) aplicados exitosamente a la base de datos."
+msgstr "Import completed: [bold]{count}[/] snapshot(s) successfully applied to database."
+
+msgid "Se produjeron errores en [bold]{count}[/] snapshot(s):"
+msgstr "Errors occurred on [bold]{count}[/] snapshot(s):"
+
+
+# config.py
+msgid "Configuración del perfil actual."
+msgstr "Configuration of current profile."
+
+msgid "Verificando acceso y permisos en Telegram..."
+msgstr "Verifying access and permissions on Telegram..."
+
+msgid "Chat inválido: {reason}{hint}"
+msgstr "Invalid chat: {reason}{hint}"
+
+msgid "Mensajes Guardados"
+msgstr "Saved Messages"
+
+msgid "Destino confirmado: [bold cyan]{title}[/] [dim](ID: {chat_id})[/]"
+msgstr "Target confirmed: [bold cyan]{title}[/] [dim](ID: {chat_id})[/]"
+
+msgid "Configuración [bold]{key}[/] actualizada: {value}"
+msgstr "Configuration [bold]{key}[/] updated: {value}"
+
+msgid "Configuración [bold]{key}[/] no sufrió cambios."
+msgstr "Configuration [bold]{key}[/] was not changed."
+
+msgid "Puedes modificar cualquier configuración usando los siguientes comandos:"
+msgstr "You can modify any setting using the following commands:"
+
+msgid "No hay un perfil activo para mostrar valores de configuracion."
+msgstr "No active profile to display configuration values."
+
+msgid "Pares de CLAVE VALOR (ej: chat_id 12345 upload_limit_rate_kbps 500)"
+msgstr "KEY VALUE pairs (e.g. chat_id 12345 upload_limit_rate_kbps 500)"
+
+msgid "Fuerza el guardado sin verificar la conectividad de los endpoints de red (modo offline)."
+msgstr "Forces saving without verifying connectivity of network endpoints (offline mode)."
+
+msgid "Configuración [bold]{key}[/] actualizada con [bold]{value}[/]."
+msgstr "Configuration [bold]{key}[/] updated to [bold]{value}[/]."
+
+msgid "Configuración [bold]{key}[/] ya tiene ese valor."
+msgstr "Configuration [bold]{key}[/] already has that value."
+
+msgid "Clave a restaurar a su valor por defecto"
+msgstr "Key to restore to its default value"
+
+msgid "Restaurado [bold]{key}[/] al valor por defecto: {value}"
+msgstr "Restored [bold]{key}[/] to default value: {value}"
+
+msgid "No hay un perfil activo o el perfil especificado no existe."
+msgstr "There is no active profile or the specified profile does not exist."
+
+msgid "Comprobando integridad local del perfil: [bold]{name}[/]"
+msgstr "Checking local profile integrity: [bold]{name}[/]"
+
+msgid "Perfil '{name}' no encontrado."
+msgstr "Profile '{name}' not found."
+
+msgid "El perfil '{name}' está incompleto."
+msgstr "Profile '{name}' is incomplete."
+
+msgid "Falta el archivo de configuración (.json)."
+msgstr "Configuration file (.json) is missing."
+
+msgid "Falta el archivo de sesión de Telegram (.session)."
+msgstr "Telegram session file (.session) is missing."
+
+msgid "Verificando conexión y esquema de base de datos..."
+msgstr "Verifying database connection and schema..."
+
+msgid "Base de datos: [bold]SQLite[/] al día (v{version})."
+msgstr "Database: [bold]SQLite[/] up to date (v{version})."
+
+msgid "Base de datos en versión anterior detectada (v{version})."
+msgstr "Previous database version detected (v{version})."
+
+msgid "Al ejecutar subidas, se archivará automáticamente como '{archive_name}' y se iniciará una base de datos limpia v{target_version}."
+msgstr "When uploading, it will be automatically archived as '{archive_name}' and a clean database v{target_version} will be started."
+
+msgid "Base de datos: [bold]SQLite[/] nueva (se inicializará en v{version})."
+msgstr "Database: [bold]SQLite[/] fresh (will be initialized at v{version})."
+
+msgid "Base de datos incompatible: versión v{current} en base de datos, pero el cliente solo soporta hasta v{target}."
+msgstr "Incompatible database: v{current} in database, but client only supports up to v{target}."
+
+msgid "Acción requerida: Actualiza toTelegram (`pip install --upgrade totelegram`)."
+msgstr "Action required: Update toTelegram (`pip install --upgrade totelegram`)."
+
+msgid "Base de datos corrupta o inconsistente: {details}"
+msgstr "Corrupted or inconsistent database: {details}"
+
+msgid "Error conectando a la base de datos: {error}"
+msgstr "Error connecting to database: {error}"
+
+msgid "Verificando conexión y credenciales con Telegram..."
+msgstr "Verifying connection and credentials with Telegram..."
+
+msgid "No se pudo obtener la información de la cuenta en Telegram."
+msgstr "Could not retrieve account information from Telegram."
+
+msgid "Error de conexión con los servidores de Telegram: {error}"
+msgstr "Connection error with Telegram servers: {error}"
+
+msgid "Usuario"
+msgstr "User"
+
+msgid "Conexión con Telegram exitosa: [bold]{user}[/] ({tier})"
+msgstr "Telegram connection successful: [bold]{user}[/] ({tier})"
+
+msgid "Perfil '[bold green]{name}[/]' verificado y listo para operar."
+msgstr "Profile '[bold green]{name}[/]' verified and ready to operate."
+
+msgid "[dim]Nota: Para subir o respaldar archivos recuerda indicar el destino con [bold]-t / --target[/].[/dim]"
+msgstr "[dim]Note: To upload or backup files remember to specify the target with [bold]-t / --target[/].[/dim]"
+
+# target.py
+msgid "Nombre, @username, link o ID del chat a inspeccionar. Déjalo vacío para listar destinos conocidos."
+msgstr "Name, @username, link or ID of chat to inspect. Leave empty to list known targets."
+
+msgid "Muestra todos los canales conocidos en tu base de datos local."
+msgstr "Shows all known channels in your local database."
+
+msgid "Profundidad de escaneo en diálogos recientes si buscas por nombre."
+msgstr "Scan depth in recent dialogs when searching by name."
+
+msgid "Resolviendo e inspeccionando destino '[bold]{target}[/]'..."
+msgstr "Resolving and inspecting target '[bold]{target}[/]'..."
+
+# __main__.py
+msgid "Herramienta para subir archivos a Telegram sin límite de tamaño."
+msgstr "Tool for uploading files to Telegram without size limits."
+
+msgid "Perfil a utilizar para esta operación (ignora el perfil activo)."
+msgstr "Profile to use for this operation (overrides active profile)."
+
+msgid "Muestra la versión de la aplicación."
+msgstr "Show application version."
+
+msgid "Activa el modo de depuración detallado."
+msgstr "Enable verbose debug mode."

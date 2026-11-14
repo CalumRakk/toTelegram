@@ -8,6 +8,7 @@ from totelegram.cli.observer import RichDownloadObserver
 from totelegram.cli.state import CLIState
 from totelegram.cli.ui import UI
 from totelegram.engine.downloader import DownloadEngine, DownloadIntegrityError
+from totelegram.i18n import _
 from totelegram.packaging.schemas import TTAPE_EXTENSION
 from totelegram.packaging.snapshot import SnapshotService
 from totelegram.schemas import SourceType
@@ -24,30 +25,34 @@ def download_snapshot(
         file_okay=True,
         dir_okay=False,
         readable=True,
-        help="Ruta al archivo snapshot (.json.xz o .ttape)",
+        help=_("Ruta al archivo snapshot (.json.xz o .ttape)"),
     ),
     output_dir: Path | None = typer.Option(
         None,
         "--output-dir",
         "-o",
-        help="Directorio donde se restaurará el contenido (por defecto: directorio del snapshot).",
+        help=_(
+            "Directorio donde se restaurará el contenido (por defecto: directorio del snapshot)."
+        ),
     ),
     force: bool = typer.Option(
         False,
         "--force",
         "-f",
-        help="Sobrescribir archivos o carpetas existentes en el destino.",
+        help=_("Sobrescribir archivos o carpetas existentes en el destino."),
     ),
     keep_cache: bool = typer.Option(
         False,
         "--keep-cache",
         "-k",
-        help="Conservar los segmentos descargados tras una restauración exitosa.",
+        help=_("Conservar los segmentos descargados tras una restauración exitosa."),
     ),
     file_path: str | None = typer.Option(
         None,
         "--file",
-        help="Extracción quirúrgica: Ruta interna del archivo específico a restaurar (omite el resto del backup).",
+        help=_(
+            "Extracción quirúrgica: Ruta interna del archivo específico a restaurar (omite el resto del backup)."
+        ),
     ),
 ):
     """Descarga y restaura un archivo o carpeta archivada a partir de su Snapshot (.json.xz o .ttape).
@@ -58,11 +63,13 @@ def download_snapshot(
     profile_name, _ = _get_config_tools(ctx)
 
     # Cargar y deserializar el Snapshot de forma polimórfica (.ttape o .json.xz)
-    with UI.loading(f"Cargando snapshot: [bold]{snapshot_path.name}[/]..."):
+    with UI.loading(
+        _("Cargando snapshot: [bold]{name}[/]...").format(name=snapshot_path.name)
+    ):
         try:
             manifest = SnapshotService.load_snapshot(snapshot_path)
         except Exception as e:
-            UI.error(f"Error al leer el snapshot: {e}")
+            UI.error(_("Error al leer el snapshot: {error}").format(error=e))
             raise typer.Exit(1)
 
     target_output_dir = (
@@ -81,21 +88,32 @@ def download_snapshot(
     if file_path:
         if not is_folder:
             UI.error(
-                "La opción '--file' solo se aplica a snapshots de carpetas archivadas (TAR)."
+                _(
+                    "La opción '--file' solo se aplica a snapshots de carpetas archivadas (TAR)."
+                )
             )
             raise typer.Exit(1)
 
         format_badge = (
-            "[dim](Contenedor .ttape)[/dim]"
+            _("[dim](Contenedor .ttape)[/dim]")
             if is_ttape
-            else "[dim](Snapshot v6.0)[/dim]"
+            else _("[dim](Snapshot v6.0)[/dim]")
         )
-        UI.print(f"Extrayendo archivo puntual: [bold cyan]{file_path}[/]")
+        UI.print(
+            _("Extrayendo archivo puntual: [bold cyan]{file}[/]").format(file=file_path)
+        )
         UI.info(
-            f"Desde backup: [bold]{source.filename}[/] {format_badge} "
-            f"({len(manifest.parts)} partes totales en Telegram)"
+            _(
+                "Desde backup: [bold]{name}[/] {badge} ({parts} partes totales en Telegram)"
+            ).format(
+                name=source.filename, badge=format_badge, parts=len(manifest.parts)
+            )
         )
-        UI.info(f"Destino: [bold green]{target_output_dir / file_path}[/]")
+        UI.info(
+            _("Destino: [bold green]{path}[/]").format(
+                path=target_output_dir / file_path
+            )
+        )
 
         with state.get_telegram_session(profile_name) as client:
             observer = RichDownloadObserver()
@@ -112,10 +130,18 @@ def download_snapshot(
                 )
 
                 UI.separator()
-                UI.success(f"Archivo [bold]{file_path}[/] extraído exitosamente.")
-                UI.info(f"Ubicación: [bold cyan]{report.output_path}[/]")
+                UI.success(
+                    _("Archivo [bold]{file}[/] extraído exitosamente.").format(
+                        file=file_path
+                    )
+                )
                 UI.info(
-                    f"Tráfico transferido: [dim]{report.total_bytes_downloaded / (1024 * 1024):.2f} MB[/dim]"
+                    _("Ubicación: [bold cyan]{path}[/]").format(path=report.output_path)
+                )
+                UI.info(
+                    _("Tráfico transferido: [dim]{mb:.2f} MB[/dim]").format(
+                        mb=report.total_bytes_downloaded / (1024 * 1024)
+                    )
                 )
                 return
 
@@ -124,26 +150,42 @@ def download_snapshot(
                 raise typer.Exit(1)
             except FileExistsError as e:
                 UI.error(str(e))
-                UI.tip("Usa la opción [bold]--force[/] para sobrescribir.")
+                UI.tip(_("Usa la opción [bold]--force[/] para sobrescribir."))
                 raise typer.Exit(1)
             except DownloadIntegrityError as e:
-                UI.error(f"Fallo de integridad: {e}")
+                UI.error(_("Fallo de integridad: {error}").format(error=e))
                 raise typer.Exit(1)
 
     # MODO B: Restauración completa estándar
-    item_desc = "Carpeta" if is_folder else "Archivo"
+    item_desc = _("Carpeta") if is_folder else _("Archivo")
     total_parts = len(manifest.parts)
-    parts_desc = "Archivo único" if total_parts == 1 else "Dividido en partes"
-
-    UI.print(f"Restaurando {item_desc}: [bold cyan]{source.filename}[/]")
-    UI.info(
-        f"Estructura: [bold]{parts_desc}[/] "
-        f"({total_parts} {'parte' if total_parts == 1 else 'partes'} en Telegram)"
+    parts_desc = _("Archivo único") if total_parts == 1 else _("Dividido en partes")
+    parts_count_str = (
+        _("1 parte en Telegram")
+        if total_parts == 1
+        else _("{count} partes en Telegram").format(count=total_parts)
     )
-    UI.info(f"Destino: [bold green]{target_output_dir / source.filename}[/]")
+
+    UI.print(
+        _("Restaurando {item}: [bold cyan]{name}[/]").format(
+            item=item_desc, name=source.filename
+        )
+    )
+    UI.info(
+        _("Estructura: [bold]{desc}[/] ({count_str})").format(
+            desc=parts_desc, count_str=parts_count_str
+        )
+    )
+    UI.info(
+        _("Destino: [bold green]{path}[/]").format(
+            path=target_output_dir / source.filename
+        )
+    )
     if force:
         UI.warn(
-            "Modo --force activo: Los archivos existentes en el destino serán sobrescritos."
+            _(
+                "Modo --force activo: Los archivos existentes en el destino serán sobrescritos."
+            )
         )
 
     UI.separator()
@@ -163,23 +205,37 @@ def download_snapshot(
 
             UI.separator()
             UI.success(
-                f"{item_desc} [bold]{source.filename}[/] restaurado exitosamente."
+                _("{item} [bold]{name}[/] restaurado exitosamente.").format(
+                    item=item_desc, name=source.filename
+                )
             )
-            UI.info(f"Ubicación: [bold cyan]{report.output_path}[/]")
-            if is_folder:
-                UI.info(f"Archivos verificados: [bold]{report.files_extracted}[/]")
             UI.info(
-                f"Total transferido: [dim]{report.total_bytes_downloaded / (1024 * 1024):.2f} MB[/dim]"
+                _("Ubicación: [bold cyan]{path}[/]").format(path=report.output_path)
+            )
+            if is_folder:
+                UI.info(
+                    _("Archivos verificados: [bold]{count}[/]").format(
+                        count=report.files_extracted
+                    )
+                )
+            UI.info(
+                _("Total transferido: [dim]{mb:.2f} MB[/dim]").format(
+                    mb=report.total_bytes_downloaded / (1024 * 1024)
+                )
             )
 
         except FileExistsError as e:
             UI.error(str(e))
-            UI.tip("Usa la opción [bold]--force[/] para sobrescribir.")
+            UI.tip(_("Usa la opción [bold]--force[/] para sobrescribir."))
             raise typer.Exit(1)
         except DownloadIntegrityError as e:
-            UI.error(f"Fallo de integridad durante la restauración: {e}")
+            UI.error(
+                _("Fallo de integridad durante la restauración: {error}").format(
+                    error=e
+                )
+            )
             raise typer.Exit(1)
         except Exception as e:
-            UI.error(f"Error inesperado durante la descarga: {e}")
+            UI.error(_("Error inesperado durante la descarga: {error}").format(error=e))
             logger.exception("Error crítico en comando download")
             raise typer.Exit(1)

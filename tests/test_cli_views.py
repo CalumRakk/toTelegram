@@ -220,27 +220,26 @@ class TestCliViews(unittest.TestCase):
                     self.assertIn("ACTIONS TO PERFORM", output)
 
     def test_rich_markup_tags_balance_in_catalogs(self):
-        """Valida que ninguna traducción en los archivos .po rompa corchetes de marcado Rich."""
+        """Valida que ninguna traducción en el catálogo .po rompa corchetes de marcado Rich."""
         _tag_pattern = re.compile(r"\[/?([a-zA-Z0-9_# =]+)\]")
         msgstr_pattern = re.compile(r'msgstr(?:\[\d+\])?\s+"(.*)"')
 
-        for lang in ("es", "en"):
-            po_path = LOCALES_DIR / lang / "LC_MESSAGES" / "totelegram.po"
-            self.assertTrue(po_path.exists(), f"El archivo {po_path} no existe.")
+        po_path = LOCALES_DIR / "en" / "LC_MESSAGES" / "totelegram.po"
+        self.assertTrue(po_path.exists(), f"El archivo {po_path} no existe.")
 
-            content = po_path.read_text(encoding="utf-8")
-            matches = msgstr_pattern.findall(content)
+        content = po_path.read_text(encoding="utf-8")
+        matches = msgstr_pattern.findall(content)
 
-            for line in matches:
-                if not line:
-                    continue
-                open_brackets = line.count("[")
-                close_brackets = line.count("]")
-                self.assertEqual(
-                    open_brackets,
-                    close_brackets,
-                    f"Desbalance de corchetes Rich en [{lang}]: {line}",
-                )
+        for line in matches:
+            if not line:
+                continue
+            open_brackets = line.count("[")
+            close_brackets = line.count("]")
+            self.assertEqual(
+                open_brackets,
+                close_brackets,
+                f"Desbalance de corchetes Rich en [en]: {line}",
+            )
 
 
 if __name__ == "__main__":

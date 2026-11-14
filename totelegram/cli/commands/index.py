@@ -13,6 +13,7 @@ from totelegram.exceptions import (
     TargetNotSetError,
     UnsupportedTargetTypeError,
 )
+from totelegram.i18n import _
 from totelegram.models import TelegramUser
 from totelegram.packaging.importer import SnapshotImporter
 from totelegram.packaging.indexer import TapeIndexService
@@ -29,19 +30,23 @@ def index_tapes(
         "--target",
         "-t",
         envvar="TOTELEGRAM_TARGET",
-        help="Chat o canal en Telegram donde buscar las cintas archivadas (o define TOTELEGRAM_TARGET).",
+        help=_(
+            "Chat o canal en Telegram donde buscar las cintas archivadas (o define TOTELEGRAM_TARGET)."
+        ),
     ),
     force: bool = typer.Option(
         False,
         "--force",
         "-f",
-        help="Fuerza la re-indexación de todas las cintas remotas, incluso las ya registradas.",
+        help=_(
+            "Fuerza la re-indexación de todas las cintas remotas, incluso las ya registradas."
+        ),
     ),
     yes: bool = typer.Option(
         False,
         "--yes",
         "-y",
-        help="Aplica la indexación sin solicitar confirmación interactiva.",
+        help=_("Aplica la indexación sin solicitar confirmación interactiva."),
     ),
 ):
     """
@@ -58,7 +63,9 @@ def index_tapes(
     with state.scope() as (client, db):
         resolver = TargetResolver(client, db)
 
-        with UI.loading(f"Resolviendo destino '[bold]{target}[/]'..."):
+        with UI.loading(
+            _("Resolviendo destino '[bold]{target}[/]'...").format(target=target)
+        ):
             resolution = resolver.resolve(target)
 
         if resolution.status == TargetResolutionStatus.RESOLVED:
@@ -75,7 +82,9 @@ def index_tapes(
         else:
             raise ConfigurationError(
                 message=resolution.error_message
-                or f"No se pudo resolver el destino '{target}'.",
+                or _("No se pudo resolver el destino '{target}'.").format(
+                    target=target
+                ),
                 hint=resolution.hint,
                 exit_code=1,
             )
@@ -83,7 +92,9 @@ def index_tapes(
         indexer = TapeIndexService(client, db)
 
         with UI.loading(
-            f"Buscando cintas archivadas (#type_tape) en '{resolution.title}'..."
+            _("Buscando cintas archivadas (#type_tape) en '{title}'...").format(
+                title=resolution.title
+            )
         ):
             report = indexer.check_unindexed_tapes(resolved_chat_id)
 
@@ -101,15 +112,19 @@ def index_tapes(
                     ),
                 )
             except Exception as e:
-                UI.error(f"Error consultando Telegram: {e}")
+                UI.error(_("Error consultando Telegram: {error}").format(error=e))
                 raise typer.Exit(1)
         else:
             if report.unindexed_count == 0:
                 UI.success(
-                    "Todas las cintas archivadas ya están indexadas en tu base de datos local."
+                    _(
+                        "Todas las cintas archivadas ya están indexadas en tu base de datos local."
+                    )
                 )
                 UI.info(
-                    f"Total en Telegram: [bold]{report.total_remote_tapes}[/] cintas."
+                    _("Total en Telegram: [bold]{count}[/] cintas.").format(
+                        count=report.total_remote_tapes
+                    )
                 )
                 raise typer.Exit(0)
 
@@ -117,18 +132,21 @@ def index_tapes(
 
         total_targets = len(messages_to_process)
         UI.info(
-            f"Se encontraron [bold cyan]{total_targets}[/] cintas pendientes de indexar "
-            f"(de {report.total_remote_tapes} totales en Telegram)."
+            _(
+                "Se encontraron [bold cyan]{pending}[/] cintas pendientes de indexar (de {total} totales en Telegram)."
+            ).format(pending=total_targets, total=report.total_remote_tapes)
         )
 
         if not yes:
             console.print()
             confirmed = typer.confirm(
-                f"¿Deseas descargar e indexar estas {total_targets} cintas en SQLite?",
+                _("¿Deseas descargar e indexar estas {count} cintas en SQLite?").format(
+                    count=total_targets
+                ),
                 default=True,
             )
             if not confirmed:
-                UI.info("Operación cancelada por el usuario.")
+                UI.info(_("Operación cancelada por el usuario."))
                 raise typer.Exit(0)
 
         owner = None
@@ -141,12 +159,14 @@ def index_tapes(
 
         console.print()
         with console.status(
-            "[bold green]Descargando e indexando cintas...[/]"
+            _("[bold green]Descargando e indexando cintas...[/]")
         ) as status:
 
             def on_progress(cur: int, tot: int, name: str):
                 status.update(
-                    f"[bold green]Indexando inventario ({cur}/{tot}):[/] {name}"
+                    _(
+                        "[bold green]Indexando inventario ({cur}/{tot}):[/] {name}"
+                    ).format(cur=cur, tot=tot, name=name)
                 )
 
             result = SnapshotImporter.rehydrate_from_messages(
@@ -163,14 +183,22 @@ def index_tapes(
         UI.separator()
         if succeeded > 0:
             UI.success(
-                f"Indexación completada: [bold]{succeeded}[/] cintas archivadas registradas con éxito."
+                _(
+                    "Indexación completada: [bold]{count}[/] cintas archivadas registradas con éxito."
+                ).format(count=succeeded)
             )
             UI.info(
-                "Ahora puedes buscar archivos dentro de estas carpetas o extraerlos quirúrgicamente con 'download --file'."
+                _(
+                    "Ahora puedes buscar archivos dentro de estas carpetas o extraerlos quirúrgicamente con 'download --file'."
+                )
             )
 
         if total_errors:
-            UI.error(f"Se produjeron errores en [bold]{len(total_errors)}[/] cintas:")
+            UI.error(
+                _("Se produjeron errores en [bold]{count}[/] cintas:").format(
+                    count=len(total_errors)
+                )
+            )
             for fname, err in total_errors:
                 console.print(f"  [red]• {fname}:[/] [dim]{err}[/]")
             raise typer.Exit(1)

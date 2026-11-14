@@ -5,12 +5,12 @@
 - verificar si se puede especificar otra ruta para la DB
 - ~~error de lock de cuenta al cerrarla forzosamente ¿nodo determinista es la solucion?~~
 - ~~Un detector de velocidad de disco, una heuristica simple quizas nos salve de disco duro lentos.~~
-- hay que especificar mejor que "status ." se basa a un estado local. Existe el "riesgo" de marcar un archivo como no subido cuando en realidad ya esta en los server de tg.
+- ~~hay que especificar mejor que "status ." se basa a un estado local. Existe el "riesgo" de marcar un archivo como no subido cuando en realidad ya esta en los server de tg.~~
 - filtro para send y evitar que suba miles de archivos pequeños.
 - desacoplar el comando status de las cuentas. Y verificar si otro ls pasa lo mismo
 - ~~dos cuentas genera el md5sum al mismo archivo.~~
 - Al importar snapshots se deberia actualizar el caption de cada chunk
-- ~~Estandarizar que solo se utilice CANAL o grupo privado? ~~
+- ~~Estandarizar que solo se utilice CANAL o grupo privado?~~
     - el estandar abre la duda ¿forward permitiria enviar archivos a cualquier tipo de chat? No, forward es una replica. Es mejor introducir un comando para compartir que cumpla el objetivo a ciega de la logica de totelegram. **por debatir**
 - ~~la logica recibo puede que se haya roto a modificar  assimilate_legacy_snapshot, verificar que ocurre con snapshots legacy~~
 - ~~Una cuenta no premiun no debe denunciar por chunk_size, si el siguiente payload es interior a tg_max puede subirlo sin problema, sino que pase al siguiente archivo.~~

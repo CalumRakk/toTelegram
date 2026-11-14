@@ -21,19 +21,13 @@ class TestI18nCore(unittest.TestCase):
     """Pruebas unitarias para el motor central de internacionalización (Capa 1)."""
 
     def test_compiled_mo_files_exist(self):
-        """Verifica que los archivos binarios .mo existan en el paquete."""
-        es_mo = LOCALES_DIR / "es" / "LC_MESSAGES" / "totelegram.mo"
+        """Verifica que el archivo binario compilado .mo exista para inglés."""
         en_mo = LOCALES_DIR / "en" / "LC_MESSAGES" / "totelegram.mo"
 
-        self.assertTrue(
-            es_mo.exists(),
-            "Falta compilar totelegram/locales/es/LC_MESSAGES/totelegram.mo",
-        )
         self.assertTrue(
             en_mo.exists(),
             "Falta compilar totelegram/locales/en/LC_MESSAGES/totelegram.mo",
         )
-        self.assertGreater(es_mo.stat().st_size, 0)
         self.assertGreater(en_mo.stat().st_size, 0)
 
     def test_detect_system_language_spanish(self):
@@ -60,21 +54,27 @@ class TestI18nCore(unittest.TestCase):
         """Verifica la conmutación entre catálogos y cadenas traducidas."""
         setup_i18n("es")
         self.assertEqual(get_current_language(), "es")
-        self.assertEqual(_("Hello World"), "Hola Mundo")
+        self.assertEqual(_("Hola Mundo"), "Hola Mundo")
 
         setup_i18n("en")
         self.assertEqual(get_current_language(), "en")
-        self.assertEqual(_("Hello World"), "Hello World")
+        self.assertEqual(_("Hola Mundo"), "Hello World")
 
     def test_pluralization(self):
         """Verifica las reglas gramaticales de pluralización con _n()."""
         with override_locale("es"):
-            self.assertEqual(_n("{n} file", "{n} files", 1).format(n=1), "1 archivo")
-            self.assertEqual(_n("{n} file", "{n} files", 5).format(n=5), "5 archivos")
+            self.assertEqual(
+                _n("{n} archivo", "{n} archivos", 1).format(n=1), "1 archivo"
+            )
+            self.assertEqual(
+                _n("{n} archivo", "{n} archivos", 5).format(n=5), "5 archivos"
+            )
 
         with override_locale("en"):
-            self.assertEqual(_n("{n} file", "{n} files", 1).format(n=1), "1 file")
-            self.assertEqual(_n("{n} file", "{n} files", 5).format(n=5), "5 files")
+            self.assertEqual(_n("{n} archivo", "{n} archivos", 1).format(n=1), "1 file")
+            self.assertEqual(
+                _n("{n} archivo", "{n} archivos", 5).format(n=5), "5 files"
+            )
 
     def test_override_locale_context_manager(self):
         """Comprueba que override_locale restaure el idioma original al salir."""
@@ -83,10 +83,10 @@ class TestI18nCore(unittest.TestCase):
 
         with override_locale("en"):
             self.assertEqual(get_current_language(), "en")
-            self.assertEqual(_("Hello World"), "Hello World")
+            self.assertEqual(_("Hola Mundo"), "Hello World")
 
         self.assertEqual(get_current_language(), "es")
-        self.assertEqual(_("Hello World"), "Hola Mundo")
+        self.assertEqual(_("Hola Mundo"), "Hola Mundo")
 
     def test_settings_language_validation(self):
         """Valida que Settings solo admita 'auto', 'es' o 'en'."""

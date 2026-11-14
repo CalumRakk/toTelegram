@@ -4,6 +4,7 @@ import typer
 
 from totelegram.cli.commands.config import handle_config_errors
 from totelegram.cli.logic import run_upload_flow
+from totelegram.i18n import _
 
 
 @handle_config_errors
@@ -12,31 +13,37 @@ def backup_folders(
     paths: list[Path] = typer.Argument(
         ...,
         exists=True,
-        help="Lista de carpetas a archivar",
+        help=_("Lista de carpetas a archivar"),
     ),
     target: str | None = typer.Option(
         None,
         "--target",
         "-t",
         envvar="TOTELEGRAM_TARGET",
-        help="Destino en Telegram: ID, @username, 'me' o nombre del canal (o define TOTELEGRAM_TARGET).",
+        help=_(
+            "Destino en Telegram: ID, @username, 'me' o nombre del canal (o define TOTELEGRAM_TARGET)."
+        ),
     ),
     force: bool = typer.Option(
         False,
         "--force",
         "-f",
-        help="Fuerza ignorando el estado del archivo en el sistema",
+        help=_("Fuerza ignorando el estado del archivo en el sistema"),
     ),
     auto_truncate: bool | None = typer.Option(
         None,
         "--auto-truncate/--no-auto-truncate",
-        help="Activa o desactiva la truncación de nombres largos. Sobrescribe la configuración global.",
+        help=_(
+            "Activa o desactiva la truncación de nombres largos. Sobrescribe la configuración global."
+        ),
     ),
     yes: bool = typer.Option(
         False,
         "--yes",
         "-y",
-        help="Omite confirmaciones interactivas (ej. al purgar piezas previas con --force).",
+        help=_(
+            "Omite confirmaciones interactivas (ej. al purgar piezas previas con --force)."
+        ),
     ),
 ):
     """

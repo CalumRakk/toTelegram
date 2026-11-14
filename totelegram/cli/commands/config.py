@@ -9,6 +9,7 @@ from totelegram.cli.state import CLIState
 from totelegram.cli.ui import UI
 from totelegram.cli.views.settings import DisplayConfig
 from totelegram.database import DatabaseSession
+from totelegram.i18n import _
 from totelegram.identity import ConfigService
 from totelegram.migration import DatabaseState, inspect_database
 from totelegram.models import TelegramChat
@@ -22,7 +23,7 @@ from totelegram.utils import (
     validate_item,
 )
 
-app = typer.Typer(help="Configuración del perfil actual.")
+app = typer.Typer(help=_("Configuración del perfil actual."))
 
 
 def handle_config_errors(func):
@@ -47,13 +48,17 @@ def _validate_live_chat_id(
         return VALUE_NOT_SET, ""
 
     with state.get_telegram_session(profile_name) as client:
-        with UI.loading("Verificando acceso y permisos en Telegram..."):
+        with UI.loading(_("Verificando acceso y permisos en Telegram...")):
             access_service = ChatAccessService(client)
             report = access_service.verify_access(normalized_id)
 
         if not report.is_ready or not report.chat:
             hint = f"\n[dim]{report.hint}[/dim]" if report.hint else ""
-            raise ValueError(f"Chat inválido: {report.reason}{hint}")
+            raise ValueError(
+                _("Chat inválido: {reason}{hint}").format(
+                    reason=report.reason, hint=hint
+                )
+            )
 
         # Guardar / Actualizar en la base de datos local para que el nombre quede en caché
         try:
@@ -63,9 +68,11 @@ def _validate_live_chat_id(
         except Exception:  # noqa: S110
             pass  # Si la DB aún no está inicializada, no bloqueamos la configuración
 
-        title = report.chat.title or "Mensajes Guardados"
+        title = report.chat.title or _("Mensajes Guardados")
         UI.success(
-            f"Destino confirmado: [bold cyan]{title}[/] [dim](ID: {report.chat.id})[/]"
+            _(
+                "Destino confirmado: [bold cyan]{title}[/] [dim](ID: {chat_id})[/]"
+            ).format(title=title, chat_id=report.chat.id)
         )
         return report.chat.id, title
 
@@ -91,16 +98,20 @@ def _command_modify_list(
     if is_suspected_glob_expansion(
         values
     ) and not DisplayConfig.confirm_expanded_pattern(verb, key, values):
-        UI.info("Operación cancelada.")
+        UI.info(_("Operación cancelada."))
         raise typer.Exit()
 
     changed, final_val = service.modify_list_setting(
         settings_name, key, values, action=action
     )
     if changed:
-        UI.success(f"Configuración [bold]{key}[/] actualizada: {json.dumps(final_val)}")
+        UI.success(
+            _("Configuración [bold]{key}[/] actualizada: {value}").format(
+                key=key, value=json.dumps(final_val)
+            )
+        )
     else:
-        UI.info(f"Configuración [bold]{key}[/] no sufrió cambios.")
+        UI.info(_("Configuración [bold]{key}[/] no sufrió cambios.").format(key=key))
 
 
 @app.callback(invoke_without_command=True)
@@ -121,12 +132,14 @@ def main(ctx: typer.Context):
             f"{Commands.CONFIG_EDIT_LIST} <KEY> <VALUE1>",
         ]
         UI.tip(
-            "Puedes modificar cualquier configuración usando los siguientes comandos:",
+            _(
+                "Puedes modificar cualquier configuración usando los siguientes comandos:"
+            ),
             commands=commands,
             spacing="top",
         )
     else:
-        UI.warn("No hay un perfil activo para mostrar valores de configuracion.")
+        UI.warn(_("No hay un perfil activo para mostrar valores de configuracion."))
 
 
 @app.command(name="set")
@@ -134,13 +147,16 @@ def main(ctx: typer.Context):
 def set_configs(
     ctx: typer.Context,
     args: list[str] = typer.Argument(
-        ..., help="Pares de CLAVE VALOR (ej: chat_id 12345 upload_limit_rate_kbps 500)"
+        ...,
+        help=_("Pares de CLAVE VALOR (ej: chat_id 12345 upload_limit_rate_kbps 500)"),
     ),
     force: bool = typer.Option(
         False,
         "--force",
         "-f",
-        help="Fuerza el guardado sin verificar la conectividad de los endpoints de red (modo offline).",
+        help=_(
+            "Fuerza el guardado sin verificar la conectividad de los endpoints de red (modo offline)."
+        ),
     ),
 ):
     """
@@ -155,23 +171,31 @@ def set_configs(
         changed, final_val = service.apply_set(settings_name, key, val)
         if changed:
             UI.success(
-                f"Configuración [bold]{key}[/] actualizada con [bold]{final_val}[/]."
+                _(
+                    "Configuración [bold]{key}[/] actualizada con [bold]{value}[/]."
+                ).format(key=key, value=final_val)
             )
         else:
-            UI.info(f"Configuración [bold]{key}[/] ya tiene ese valor.")
+            UI.info(
+                _("Configuración [bold]{key}[/] ya tiene ese valor.").format(key=key)
+            )
 
 
 @app.command("unset")
 @handle_config_errors
 def unset_config(
     ctx: typer.Context,
-    key: str = typer.Argument(..., help="Clave a restaurar a su valor por defecto"),
+    key: str = typer.Argument(..., help=_("Clave a restaurar a su valor por defecto")),
 ):
     """Quita una configuración personalizada para usar el valor por defecto."""
 
     settings_name, service = _get_config_tools(ctx)
     default_val = service.restore_default(settings_name, key)
-    UI.success(f"Restaurado [bold]{key}[/] al valor por defecto: {default_val}")
+    UI.success(
+        _("Restaurado [bold]{key}[/] al valor por defecto: {value}").format(
+            key=key, value=default_val
+        )
+    )
 
 
 @app.command("add")
@@ -209,100 +233,132 @@ def check_config(ctx: typer.Context):
 
     profile_name = state.get_profile_name(strict=False)
     if not profile_name:
-        UI.error("No hay un perfil activo o el perfil especificado no existe.")
+        UI.error(_("No hay un perfil activo o el perfil especificado no existe."))
         raise typer.Exit(1)
 
     # Verificación de integridad de archivos locales (.json y .session)
     with UI.loading(
-        f"Comprobando integridad local del perfil: [bold]{profile_name}[/]"
+        _("Comprobando integridad local del perfil: [bold]{name}[/]").format(
+            name=profile_name
+        )
     ):
         time.sleep(0.2)
         profile = manager.get_profile(profile_name)
 
         if not profile:
-            UI.error(f"Perfil '{profile_name}' no encontrado.")
+            UI.error(_("Perfil '{name}' no encontrado.").format(name=profile_name))
             raise typer.Exit(1)
 
         if not profile.is_trinity:
-            UI.error(f"El perfil '{profile_name}' está incompleto.")
+            UI.error(_("El perfil '{name}' está incompleto.").format(name=profile_name))
             if not profile.has_config:
-                UI.info("Falta el archivo de configuración (.json).")
+                UI.info(_("Falta el archivo de configuración (.json)."))
             if not profile.has_session:
-                UI.info("Falta el archivo de sesión de Telegram (.session).")
+                UI.info(_("Falta el archivo de sesión de Telegram (.session)."))
             raise typer.Exit(1)
 
     # Verificación de la Base de Datos SQLite local y Esquema
-    with UI.loading("Verificando conexión y esquema de base de datos..."):
+    with UI.loading(_("Verificando conexión y esquema de base de datos...")):
         try:
             with DatabaseSession(manager.database_path, auto_init_schema=False) as db:
                 report = inspect_database(db)
 
                 if report.state == DatabaseState.UP_TO_DATE:
                     UI.success(
-                        f"Base de datos: [bold]SQLite[/] al día (v{report.current_version})."
+                        _("Base de datos: [bold]SQLite[/] al día (v{version}).").format(
+                            version=report.current_version
+                        )
                     )
                 elif report.state == DatabaseState.OUTDATED:
                     UI.warn(
-                        f"Base de datos en versión anterior detectada (v{report.current_version})."
+                        _(
+                            "Base de datos en versión anterior detectada (v{version})."
+                        ).format(version=report.current_version)
                     )
+                    legacy_name = f"{manager.database_path.stem}.legacy_v{report.current_version}.sqlite"
                     UI.info(
-                        f"Al ejecutar subidas, se archivará automáticamente como "
-                        f"'{manager.database_path.stem}.legacy_v{report.current_version}.sqlite' "
-                        f"y se iniciará una base de datos limpia v{report.target_version}."
+                        _(
+                            "Al ejecutar subidas, se archivará automáticamente como "
+                            "'{archive_name}' y se iniciará una base de datos limpia v{target_version}."
+                        ).format(
+                            archive_name=legacy_name,
+                            target_version=report.target_version,
+                        )
                     )
                 elif report.state == DatabaseState.FRESH:
                     UI.info(
-                        f"Base de datos: [bold]SQLite[/] nueva (se inicializará en v{report.target_version})."
+                        _(
+                            "Base de datos: [bold]SQLite[/] nueva (se inicializará en v{version})."
+                        ).format(version=report.target_version)
                     )
                 elif report.state == DatabaseState.AHEAD:
                     UI.error(
-                        f"Base de datos incompatible: versión v{report.current_version} en base de datos, "
-                        f"pero el cliente solo soporta hasta v{report.target_version}."
+                        _(
+                            "Base de datos incompatible: versión v{current} en base de datos, "
+                            "pero el cliente solo soporta hasta v{target}."
+                        ).format(
+                            current=report.current_version,
+                            target=report.target_version,
+                        )
                     )
                     UI.info(
-                        "Acción requerida: Actualiza toTelegram (`pip install --upgrade totelegram`)."
+                        _(
+                            "Acción requerida: Actualiza toTelegram (`pip install --upgrade totelegram`)."
+                        )
                     )
                     raise typer.Exit(1)
                 elif report.state == DatabaseState.CORRUPTED:
                     UI.error(
-                        f"Base de datos corrupta o inconsistente: {report.details}"
+                        _("Base de datos corrupta o inconsistente: {details}").format(
+                            details=report.details
+                        )
                     )
                     raise typer.Exit(1)
 
         except typer.Exit:
             raise
         except Exception as e:
-            UI.error(f"Error conectando a la base de datos: {e}")
+            UI.error(_("Error conectando a la base de datos: {error}").format(error=e))
             raise typer.Exit(1)
 
     # Verificación de Conexión activa con Telegram
     with state.get_telegram_session(profile_name) as client:
-        with UI.loading("Verificando conexión y credenciales con Telegram..."):
+        with UI.loading(_("Verificando conexión y credenciales con Telegram...")):
             try:
                 me = client.get_me()
                 if not me:
                     UI.error(
-                        "No se pudo obtener la información de la cuenta en Telegram."
+                        _("No se pudo obtener la información de la cuenta en Telegram.")
                     )
                     raise typer.Exit(1)
             except Exception as e:
-                UI.error(f"Error de conexión con los servidores de Telegram: {e}")
+                UI.error(
+                    _(
+                        "Error de conexión con los servidores de Telegram: {error}"
+                    ).format(error=e)
+                )
                 raise typer.Exit(1)
 
         tier_badge = (
             "[bold cyan]Premium ★[/]"
             if getattr(me, "is_premium", False)
-            else "Estándar"
+            else _("Estándar")
         )
-        user_name = me.first_name or me.username or "Usuario"
+        user_name = me.first_name or me.username or _("Usuario")
 
         UI.success(
-            f"Conexión con Telegram exitosa: [bold]{user_name}[/] ({tier_badge})"
+            _("Conexión con Telegram exitosa: [bold]{user}[/] ({tier})").format(
+                user=user_name, tier=tier_badge
+            )
         )
         UI.success(
-            f"Perfil '[bold green]{profile_name}[/]' verificado y listo para operar."
+            _("Perfil '[bold green]{name}[/]' verificado y listo para operar.").format(
+                name=profile_name
+            )
         )
         UI.print(
-            "[dim]Nota: Para subir o respaldar archivos recuerda indicar el destino con [bold]-t / --target[/].[/dim]",
+            _(
+                "[dim]Nota: Para subir o respaldar archivos recuerda indicar el destino con [bold]-t / --target[/].[/dim]"
+            ),
             spacing="top",
         )

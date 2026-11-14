@@ -13,6 +13,7 @@ from totelegram.exceptions import (
     TargetNotSetError,
     UnsupportedTargetTypeError,
 )
+from totelegram.i18n import _
 from totelegram.models import TelegramChat, TelegramUser
 from totelegram.packaging.snapshot import SnapshotService
 from totelegram.telegram.resolver import TargetResolver
@@ -29,20 +30,22 @@ def forward_snapshot(
         file_okay=True,
         dir_okay=False,
         readable=True,
-        help="Ruta al snapshot (.json.xz o .ttape) a replicar.",
+        help=_("Ruta al snapshot (.json.xz o .ttape) a replicar."),
     ),
     target: str | None = typer.Option(
         None,
         "--target",
         "-t",
         envvar="TOTELEGRAM_TARGET",
-        help="Destino en Telegram hacia donde replicar (o define TOTELEGRAM_TARGET).",
+        help=_(
+            "Destino en Telegram hacia donde replicar (o define TOTELEGRAM_TARGET)."
+        ),
     ),
     yes: bool = typer.Option(
         False,
         "--yes",
         "-y",
-        help="Omite confirmaciones interactivas.",
+        help=_("Omite confirmaciones interactivas."),
     ),
 ):
     """
@@ -55,27 +58,34 @@ def forward_snapshot(
         raise TargetNotSetError()
 
     # Cargar y validar el snapshot original
-    with UI.loading(f"Cargando snapshot: [bold]{snapshot_path.name}[/]..."):
+    with UI.loading(
+        _("Cargando snapshot: [bold]{name}[/]...").format(name=snapshot_path.name)
+    ):
         try:
             manifest = SnapshotService.load_snapshot(snapshot_path)
         except Exception as e:
-            UI.error(f"Error al leer el snapshot: {e}")
+            UI.error(_("Error al leer el snapshot: {error}").format(error=e))
             raise typer.Exit(1)
 
     UI.separator()
     UI.print(
-        f"Replicando recurso: [bold cyan]{manifest.source.filename}[/]",
+        _("Replicando recurso: [bold cyan]{name}[/]").format(
+            name=manifest.source.filename
+        ),
         indent=False,
     )
     UI.info(
-        f"Origen: [dim]Chat ID {manifest.chat_id}[/] • "
-        f"Partes a replicar: [bold]{len(manifest.parts)}[/]"
+        _(
+            "Origen: [dim]Chat ID {chat_id}[/] • Partes a replicar: [bold]{parts}[/]"
+        ).format(chat_id=manifest.chat_id, parts=len(manifest.parts))
     )
 
     with state.scope() as (client, db):
         resolver = TargetResolver(client, db)
 
-        with UI.loading(f"Resolviendo destino '[bold]{target}[/]'..."):
+        with UI.loading(
+            _("Resolviendo destino '[bold]{target}[/]'...").format(target=target)
+        ):
             resolution = resolver.resolve(target)
 
         if resolution.status == TargetResolutionStatus.RESOLVED:
@@ -92,7 +102,9 @@ def forward_snapshot(
         else:
             raise ConfigurationError(
                 message=resolution.error_message
-                or f"No se pudo resolver el destino '{target}'.",
+                or _("No se pudo resolver el destino '{target}'.").format(
+                    target=target
+                ),
                 hint=resolution.hint,
                 exit_code=1,
             )
@@ -100,29 +112,39 @@ def forward_snapshot(
         # Pre-flight de destino
         try:
             tg_chat = client.get_chat(resolved_chat_id)
-            target_chat_db, _ = TelegramChat.get_or_create_from_chat(tg_chat)
+            target_chat_db, __ = TelegramChat.get_or_create_from_chat(tg_chat)
             me = client.get_me()
             owner = TelegramUser.get_or_create_from_tg(me)
         except Exception as e:
-            UI.error(f"Error de acceso al chat destino ({resolved_chat_id}): {e}")
+            UI.error(
+                _("Error de acceso al chat destino ({chat_id}): {error}").format(
+                    chat_id=resolved_chat_id, error=e
+                )
+            )
             raise typer.Exit(1)
 
         target_title = tg_chat.title or tg_chat.username or str(tg_chat.id)
-        UI.info(f"Destino: [bold green]{target_title}[/] [dim]({target_chat_db.id})[/]")
+        UI.info(
+            _("Destino: [bold green]{title}[/] [dim]({chat_id})[/]").format(
+                title=target_title, chat_id=target_chat_db.id
+            )
+        )
 
         if manifest.chat_id == target_chat_db.id:
-            UI.warn("El chat de origen y destino son idénticos. Nada por hacer.")
+            UI.warn(_("El chat de origen y destino son idénticos. Nada por hacer."))
             raise typer.Exit(0)
 
         # Confirmación interactiva
         if not yes:
             console.print()
             confirmed = typer.confirm(
-                f"¿Deseas replicar {len(manifest.parts)} partes hacia '{target_title}'?",
+                _("¿Deseas replicar {count} partes hacia '{target}'?").format(
+                    count=len(manifest.parts), target=target_title
+                ),
                 default=True,
             )
             if not confirmed:
-                UI.info("Operación cancelada por el usuario.")
+                UI.info(_("Operación cancelada por el usuario."))
                 raise typer.Exit(0)
 
         forwarder = SnapshotForwarder(client)
@@ -137,7 +159,7 @@ def forward_snapshot(
             task_id = progress.add_task(
                 "forwarding",
                 total=len(manifest.parts),
-                label="Replicando",
+                label=_("Replicando"),
                 filename="",
             )
 
@@ -162,11 +184,17 @@ def forward_snapshot(
 
         UI.separator()
         UI.success(
-            f"Replicación completada exitosamente hacia [bold green]{target_title}[/]."
+            _(
+                "Replicación completada exitosamente hacia [bold green]{title}[/]."
+            ).format(title=target_title)
         )
         UI.info(
-            f"Partes replicadas: [bold]{report.total_parts}[/] (0 bytes transferidos desde tu PC)."
+            _(
+                "Partes replicadas: [bold]{count}[/] (0 bytes transferidos desde tu PC)."
+            ).format(count=report.total_parts)
         )
         UI.info(
-            f"Nuevo Snapshot publicado en Telegram [bold cyan](Msg ID: {report.new_snapshot_message_id})[/]"
+            _(
+                "Nuevo Snapshot publicado en Telegram [bold cyan](Msg ID: {msg_id})[/]"
+            ).format(msg_id=report.new_snapshot_message_id)
         )

@@ -21,7 +21,7 @@ from totelegram.cli.commands import (
 from totelegram.cli.state import CLIState
 from totelegram.cli.ui import console
 from totelegram.common.files import get_user_config_dir
-from totelegram.i18n import setup_i18n
+from totelegram.i18n import _, setup_i18n
 from totelegram.identity import SettingsManager
 from totelegram.logging_config import setup_logging
 from totelegram.schemas import APP_NAME
@@ -31,7 +31,7 @@ logging.getLogger("dotenv").setLevel(logging.CRITICAL)
 logger = logging.getLogger(__name__)
 
 app = typer.Typer(
-    help="Herramienta para subir archivos a Telegram sin límite de tamaño.#",
+    help=_("Herramienta para subir archivos a Telegram sin límite de tamaño."),
     add_completion=False,
     no_args_is_help=True,
 )
@@ -69,7 +69,7 @@ def main(
         None,
         "--use",
         "-u",
-        help="Perfil a utilizar para esta operación (ignora el perfil activo).",
+        help=_("Perfil a utilizar para esta operación (ignora el perfil activo)."),
         is_eager=True,
     ),
     version: bool | None = typer.Option(
@@ -78,11 +78,12 @@ def main(
         "-V",
         callback=version_callback,
         is_eager=True,
-        help="Muestra la versión de la aplicación.",
+        help=_("Muestra la versión de la aplicación."),
     ),
     debug: bool = typer.Option(
         False,
         "--debug",
+        help=_("Activa el modo de depuración detallado."),
     ),
 ):
     """
@@ -121,7 +122,6 @@ def main(
 
 def run_script():
     # Buscamos argumentos que sean exactamente números negativos (IDs de Telegram)
-    # "-1001309586477" -> "ID:-1001309586477"
     regex = re.compile(r"^-\d+$")
     if len(sys.argv) > 1:
         sys.argv = [f"ID:{arg}" if regex.match(arg) else arg for arg in sys.argv]
@@ -131,7 +131,7 @@ def run_script():
 
         app()
     except SystemExit:
-        pass  # Salidas limpias (ej. sys.exit(0) o sys.exit(1) invocados explícitamente)
+        pass  # Salidas limpias
     except Exception as e:
         import typer
 

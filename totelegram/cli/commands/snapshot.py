@@ -6,6 +6,7 @@ import typer
 from totelegram.cli.state import CLIState
 from totelegram.cli.ui import UI, console
 from totelegram.cli.views.snapshots import DisplaySnapshotPlan
+from totelegram.i18n import _
 from totelegram.packaging.importer import (
     SnapshotImportPlanner,
     SnapshotInspector,
@@ -13,7 +14,7 @@ from totelegram.packaging.importer import (
 
 logger = logging.getLogger(__name__)
 
-app = typer.Typer(help="Herramientas para inspeccionar e importar snapshots v6.0.")
+app = typer.Typer(help=_("Herramientas para inspeccionar e importar snapshots v6.0."))
 
 
 @app.command("import")
@@ -22,18 +23,20 @@ def import_snapshots(
     paths: list[Path] = typer.Argument(
         ...,
         exists=True,
-        help="Rutas a archivos (.json.xz o .ttape) o carpetas que contengan snapshots v6.0.",
+        help=_(
+            "Rutas a archivos (.json.xz o .ttape) o carpetas que contengan snapshots v6.0."
+        ),
     ),
     yes: bool = typer.Option(
         False,
         "--yes",
         "-y",
-        help="Aplica el plan en la base de datos sin solicitar confirmación.",
+        help=_("Aplica el plan en la base de datos sin solicitar confirmación."),
     ),
     dry_run: bool = typer.Option(
         False,
         "--dry-run",
-        help="Solo muestra el plan de importación sin realizar modificaciones.",
+        help=_("Solo muestra el plan de importación sin realizar modificaciones."),
     ),
 ):
     """Inspecciona e importa snapshots v6.0 a la base de datos de manera incremental y segura.
@@ -43,12 +46,14 @@ def import_snapshots(
     state: CLIState = ctx.obj
 
     UI.separator()
-    with console.status("[dim]Buscando archivos snapshot v6.0...[/]"):
+    with console.status(_("[dim]Buscando archivos snapshot v6.0...[/]")):
         candidates = SnapshotInspector.find_all_candidates(paths)
 
     if not candidates:
         UI.warn(
-            "No se encontraron archivos snapshot v6.0 (.ttape o .json.xz) en las rutas proporcionadas."
+            _(
+                "No se encontraron archivos snapshot v6.0 (.ttape o .json.xz) en las rutas proporcionadas."
+            )
         )
         raise typer.Exit(0)
 
@@ -56,7 +61,7 @@ def import_snapshots(
 
     with state.scope() as (client, db):  # type: ignore
         with console.status(
-            "[bold green]Analizando disponibilidad en la base de datos...[/]"
+            _("[bold green]Analizando disponibilidad en la base de datos...[/]")
         ):
             plan = SnapshotImportPlanner.plan(inspections)
 
@@ -78,28 +83,31 @@ def import_snapshots(
 
         if not plan.actionable_items:
             console.print()
-            UI.info("No hay acciones aplicables en la base de datos.")
+            UI.info(_("No hay acciones aplicables en la base de datos."))
             raise typer.Exit(0)
 
         if dry_run:
             console.print()
-            UI.info("Modo [bold]--dry-run[/] activo. No se aplicaron modificaciones.")
+            UI.info(
+                _("Modo [bold]--dry-run[/] activo. No se aplicaron modificaciones.")
+            )
             raise typer.Exit(0)
 
         if not yes:
             console.print()
             conflict_warning = (
-                f" [yellow]({len(plan.conflicts)} en conflicto serán ignorados)[/]"
+                _(" [yellow]({count} en conflicto serán ignorados)[/]").format(
+                    count=len(plan.conflicts)
+                )
                 if plan.conflicts
                 else ""
             )
-            prompt_msg = (
-                f"¿Deseas aplicar estos cambios e importar [bold]{len(plan.actionable_items)}[/] snapshot(s) a la BD?"
-                f"{conflict_warning}"
-            )
+            prompt_msg = _(
+                "¿Deseas aplicar estos cambios e importar [bold]{count}[/] snapshot(s) a la BD?{conflicts}"
+            ).format(count=len(plan.actionable_items), conflicts=conflict_warning)
             confirmed = typer.confirm(prompt_msg, default=True)
             if not confirmed:
-                UI.info("Operación cancelada por el usuario.")
+                UI.info(_("Operación cancelada por el usuario."))
                 raise typer.Exit(0)
 
         from totelegram.models import TelegramUser
@@ -116,12 +124,14 @@ def import_snapshots(
 
         console.print()
         with console.status(
-            "[bold green]Aplicando cambios en la base de datos...[/]"
+            _("[bold green]Aplicando cambios en la base de datos...[/]")
         ) as status:
 
             def on_progress(current: int, total: int, filename: str):
                 status.update(
-                    f"[bold green]Importando ({current}/{total}):[/] {filename}"
+                    _("[bold green]Importando ({current}/{total}):[/] {name}").format(
+                        current=current, total=total, name=filename
+                    )
                 )
 
             succeeded, errors = SnapshotImporter.apply_plan(
@@ -135,11 +145,17 @@ def import_snapshots(
         UI.separator()
         if succeeded > 0:
             UI.success(
-                f"Importación completada: [bold]{succeeded}[/] snapshot(s) aplicados exitosamente a la base de datos."
+                _(
+                    "Importación completada: [bold]{count}[/] snapshot(s) aplicados exitosamente a la base de datos."
+                ).format(count=succeeded)
             )
 
         if errors:
-            UI.error(f"Se produjeron errores en [bold]{len(errors)}[/] snapshot(s):")
+            UI.error(
+                _("Se produjeron errores en [bold]{count}[/] snapshot(s):").format(
+                    count=len(errors)
+                )
+            )
             for fname, err in errors:
                 console.print(f"  [red]• {fname}:[/] [dim]{err}[/]")
             raise typer.Exit(1)

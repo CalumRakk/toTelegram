@@ -6,7 +6,9 @@ import typer
 from totelegram.cli.state import CLIState
 from totelegram.cli.ui import UI, console
 from totelegram.cli.views.ledger import DisplayLedger
+from totelegram.database import DatabaseSession
 from totelegram.exceptions import UnsupportedTargetTypeError
+from totelegram.i18n import _
 from totelegram.packaging.auditor import LocalAuditService
 from totelegram.telegram.resolver import TargetResolver
 from totelegram.telegram.types import TargetResolutionStatus
@@ -21,30 +23,36 @@ def prune_files(
         exists=True,
         file_okay=False,
         dir_okay=True,
-        help="Directorio local donde auditar y liberar espacio de archivos respaldados.",
+        help=_(
+            "Directorio local donde auditar y liberar espacio de archivos respaldados."
+        ),
     ),
     target: str | None = typer.Option(
         None,
         "--target",
         "-t",
-        help="Solo liberar archivos que estén respaldados en este chat específico.",
+        help=_("Solo liberar archivos que estén respaldados en este chat específico."),
     ),
     recursive: bool = typer.Option(
         False,
         "--recursive",
         "-r",
-        help="Auditar y limpiar subdirectorios recursivamente.",
+        help=_("Auditar y limpiar subdirectorios recursivamente."),
     ),
     dry_run: bool = typer.Option(
         False,
         "--dry-run",
-        help="Muestra qué archivos se eliminarían y cuánto espacio se liberaría sin tocar el disco.",
+        help=_(
+            "Muestra qué archivos se eliminarían y cuánto espacio se liberaría sin tocar el disco."
+        ),
     ),
     yes: bool = typer.Option(
         False,
         "--yes",
         "-y",
-        help="Omite la confirmación interactiva antes de eliminar los archivos locales.",
+        help=_(
+            "Omite la confirmación interactiva antes de eliminar los archivos locales."
+        ),
     ),
 ):
     """
@@ -69,16 +77,19 @@ def prune_files(
                 )
             else:
                 UI.error(
-                    res.error_message or f"No se pudo resolver el destino '{target}'."
+                    res.error_message
+                    or _("No se pudo resolver el destino '{target}'.").format(
+                        target=target
+                    )
                 )
                 raise typer.Exit(1)
 
     target_dir = path.resolve()
 
     with (
-        state.scope() as (_client, _db),
+        DatabaseSession(state.manager.database_path, auto_init_schema=True),
         console.status(
-            "[bold cyan]Auditando estado contra la base de datos local...[/]"
+            _("[bold cyan]Auditando estado contra la base de datos local...[/]")
         ),
     ):
         audit_list = LocalAuditService.audit_path(
@@ -87,10 +98,18 @@ def prune_files(
         candidates = [item for item in audit_list if item.is_safe_to_prune]
 
     if not candidates:
-        target_info = f" para el destino '{target}'" if target else ""
-        UI.info(
-            f"No hay archivos respaldados que puedan liberarse de forma segura en '{target_dir.name}'{target_info}."
-        )
+        if target:
+            UI.info(
+                _(
+                    "No hay archivos respaldados que puedan liberarse de forma segura en '{name}' para el destino '{target}'."
+                ).format(name=target_dir.name, target=target)
+            )
+        else:
+            UI.info(
+                _(
+                    "No hay archivos respaldados que puedan liberarse de forma segura en '{name}'."
+                ).format(name=target_dir.name)
+            )
         raise typer.Exit(0)
 
     total_bytes = sum(c.size for c in candidates)
@@ -101,18 +120,22 @@ def prune_files(
     if dry_run:
         console.print()
         UI.info(
-            "Modo [bold]--dry-run[/] activo. No se eliminó ningún archivo de tu equipo."
+            _(
+                "Modo [bold]--dry-run[/] activo. No se eliminó ningún archivo de tu equipo."
+            )
         )
         raise typer.Exit(0)
 
     if not yes:
         console.print()
         confirmed = typer.confirm(
-            f"¿Deseas eliminar estos {len(candidates)} archivos del disco local para liberar espacio?",
+            _(
+                "¿Deseas eliminar estos {count} archivos del disco local para liberar espacio?"
+            ).format(count=len(candidates)),
             default=False,
         )
         if not confirmed:
-            UI.info("Operación cancelada por el usuario.")
+            UI.info(_("Operación cancelada por el usuario."))
             raise typer.Exit(0)
 
     # Eliminación física segura: solo del disco, SQLite queda intacto

@@ -4,6 +4,7 @@ import typer
 
 from totelegram.cli.commands.config import handle_config_errors
 from totelegram.cli.logic import run_upload_flow
+from totelegram.i18n import _
 
 
 @handle_config_errors
@@ -12,26 +13,30 @@ def send_files(
     paths: list[Path] = typer.Argument(
         ...,
         exists=True,
-        help="Lista de archivos o carpetas a enviar de forma individual.",
+        help=_("Lista de archivos o carpetas a enviar de forma individual."),
     ),
     target: str | None = typer.Option(
         None,
         "--target",
         "-t",
         envvar="TOTELEGRAM_TARGET",
-        help="Destino en Telegram: ID, @username, 'me' o nombre del canal (o define TOTELEGRAM_TARGET).",
+        help=_(
+            "Destino en Telegram: ID, @username, 'me' o nombre del canal (o define TOTELEGRAM_TARGET)."
+        ),
     ),
     force: bool = typer.Option(
         False,
         "--force",
         "-f",
-        help="Fuerza ignorando el estado del archivo en el sistema",
+        help=_("Fuerza ignorando el estado del archivo en el sistema"),
     ),
     yes: bool = typer.Option(
         False,
         "--yes",
         "-y",
-        help="Omite confirmaciones interactivas (ej. al purgar piezas previas con --force).",
+        help=_(
+            "Omite confirmaciones interactivas (ej. al purgar piezas previas con --force)."
+        ),
     ),
 ):
     """

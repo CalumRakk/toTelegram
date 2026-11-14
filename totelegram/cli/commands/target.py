@@ -8,11 +8,9 @@ from totelegram.cli.state import CLIState
 from totelegram.cli.ui import UI
 from totelegram.cli.views.settings import DisplayTarget
 from totelegram.exceptions import (
-    ConfigurationError,
-    TargetAmbiguousError,
-    TargetNotSetError,
     UnsupportedTargetTypeError,
 )
+from totelegram.i18n import _
 from totelegram.models import TelegramChat
 from totelegram.telegram.access import ChatAccessService
 from totelegram.telegram.resolver import TargetResolver
@@ -25,19 +23,21 @@ def manage_target(
     ctx: typer.Context,
     query: str | None = typer.Argument(
         None,
-        help="Nombre, @username, link o ID del chat a inspeccionar. Déjalo vacío para listar destinos conocidos.",
+        help=_(
+            "Nombre, @username, link o ID del chat a inspeccionar. Déjalo vacío para listar destinos conocidos."
+        ),
     ),
     list_all: bool = typer.Option(
         False,
         "--list",
         "-l",
-        help="Muestra todos los canales conocidos en tu base de datos local.",
+        help=_("Muestra todos los canales conocidos en tu base de datos local."),
     ),
     depth: int = typer.Option(
         100,
         "--depth",
         "-d",
-        help="Profundidad de escaneo en diálogos recientes si buscas por nombre.",
+        help=_("Profundidad de escaneo en diálogos recientes si buscas por nombre."),
     ),
 ):
     """
@@ -62,7 +62,11 @@ def manage_target(
         resolver = TargetResolver(client, db)
         access_service = ChatAccessService(client)
 
-        with UI.loading(f"Resolviendo e inspeccionando destino '[bold]{query}[/]'..."):
+        with UI.loading(
+            _("Resolviendo e inspeccionando destino '[bold]{target}[/]'...").format(
+                target=query
+            )
+        ):
             resolution = resolver.resolve(query, depth=depth)
 
         # Resuelto con éxito
@@ -100,7 +104,8 @@ def manage_target(
 
         # No encontrado o sin permisos
         UI.error(
-            resolution.error_message or f"No se pudo resolver el destino '{query}'."
+            resolution.error_message
+            or _("No se pudo resolver el destino '{target}'.").format(target=query)
         )
         if resolution.hint:
             UI.tip(resolution.hint)

@@ -14,6 +14,7 @@ DOMAIN = "totelegram"
 
 _current_language: LanguageCode = "es"
 _current_translation: gettext.NullTranslations = gettext.NullTranslations()
+_is_overridden: bool = False
 
 
 def detect_system_language() -> LanguageCode:
@@ -47,35 +48,37 @@ def detect_system_language() -> LanguageCode:
     return "en"
 
 
-def setup_i18n(lang: LanguageSetting | str | None = None) -> LanguageCode:
-    """Inicializa y conmuta el catálogo de traducción activo en el runtime.
-
-    Args:
-        lang: 'auto' (detecta el SO), 'es', 'en' o None.
-
-    Returns:
-        LanguageCode: El idioma que quedó efectivamente activo ('es' o 'en').
-    """
+def setup_i18n(
+    lang: LanguageSetting | str | None = None, force: bool = False
+) -> LanguageCode:
+    """Inicializa y conmuta el catálogo de traducción activo en el runtime."""
     global _current_language, _current_translation
 
-    if not lang or lang == "auto":
-        resolved_lang: LanguageCode = detect_system_language()
-    elif lang in ("es", "en"):
-        resolved_lang = lang  # type: ignore
-    else:
-        resolved_lang = detect_system_language()
+    # Si hay un override activo (ej. en tests), no permitir que setup_i18n("auto") lo sobreescriba
+    if _is_overridden and not force:
+        return _current_language
 
+    resolved_lang = detect_system_language() if not lang or lang == "auto" else lang
+
+    # Si es español, no cargamos catálogo: el código fuente YA es español
+    if resolved_lang == "es":
+        _current_translation = gettext.NullTranslations()
+        _current_language = "es"
+        return "es"
+
+    # Si es inglés, cargamos el catálogo compilado .mo
     try:
         _current_translation = gettext.translation(
             domain=DOMAIN,
             localedir=str(LOCALES_DIR),
-            languages=[resolved_lang],
+            languages=["en"],
             fallback=True,
         )
+        _current_language = "en"
     except Exception:
         _current_translation = gettext.NullTranslations()
+        _current_language = "es"
 
-    _current_language = resolved_lang
     return _current_language
 
 
@@ -97,12 +100,16 @@ def _n(singular: str, plural: str, n: int) -> str:
 @contextmanager
 def override_locale(lang: LanguageCode) -> Generator[LanguageCode, None, None]:
     """Context manager para forzar temporalmente un idioma (aislamiento en tests)."""
+    global _is_overridden
     previous_lang = _current_language
+    previous_overridden = _is_overridden
+    _is_overridden = True
     try:
-        setup_i18n(lang)
+        setup_i18n(lang, force=True)
         yield lang
     finally:
-        setup_i18n(previous_lang)
+        _is_overridden = previous_overridden
+        setup_i18n(previous_lang, force=True)
 
 
 # Inicialización estática defensiva en la importación

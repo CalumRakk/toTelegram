@@ -25,7 +25,7 @@ from totelegram.exceptions import (
     TargetNotSetError,
     UnsupportedTargetTypeError,
 )
-from totelegram.i18n import _, _n
+from totelegram.i18n import _
 from totelegram.identity import Settings
 from totelegram.models import Source, TelegramUser
 from totelegram.packaging.indexer import TapeIndexService
@@ -141,7 +141,7 @@ class UploadRequest:
                 ).format(items=self.item_plural_label)
             )
 
-        with self.state.scope() as (client, _):
+        with self.state.scope() as (client, __):
             session = prepare_upload_session(
                 state=self.state,
                 client=client,
@@ -205,11 +205,15 @@ class CandidateItem:
         """Emite el reporte de cierre del elemento según el resultado obtenido."""
         if result.is_completed:
             UI.success(
-                f"{self.label} [bold]{self.path.name}[/] procesado exitosamente."
+                _("{label} [bold]{name}[/] procesado exitosamente.").format(
+                    label=self.label, name=self.path.name
+                )
             )
         else:
             UI.info(
-                f"Procesamiento parcial de [bold]{self.path.name}[/]: {result.message}"
+                _("Procesamiento parcial de [bold]{name}[/]: {message}").format(
+                    name=self.path.name, message=result.message
+                )
             )
 
 
