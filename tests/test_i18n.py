@@ -24,6 +24,24 @@ class TestI18nCore(unittest.TestCase):
         """Verifica que el archivo binario compilado .mo exista para inglés."""
         en_mo = LOCALES_DIR / "en" / "LC_MESSAGES" / "totelegram.mo"
 
+        # Si no existe, compilar automáticamente para que el desarrollador no sufra
+        if not en_mo.exists():
+            import subprocess
+
+            subprocess.run(
+                [
+                    "python",
+                    "-m",
+                    "babel.messages.frontend",
+                    "compile",
+                    "-d",
+                    str(LOCALES_DIR),
+                    "-D",
+                    "totelegram",
+                ],
+                check=True,
+            )
+
         self.assertTrue(
             en_mo.exists(),
             "Falta compilar totelegram/locales/en/LC_MESSAGES/totelegram.mo",

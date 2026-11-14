@@ -41,12 +41,11 @@ def _resolve_target_account(state: CLIState, name: str | None) -> str:
     return active
 
 
-@app.command("login")
+@app.command(
+    "login",
+    help=_("Inicia sesión con tu cuenta de Telegram de forma guiada e interactiva."),
+)
 def login_command(ctx: typer.Context):
-    """
-    Inicia sesión con tu cuenta de Telegram de forma guiada e interactiva.
-    Configura y activa automáticamente la sesión para su uso inmediato.
-    """
     state: CLIState = ctx.obj
     manager = state.manager
 
@@ -207,7 +206,12 @@ def login_command(ctx: typer.Context):
     )
 
 
-@app.command("status")
+@app.command(
+    "status",
+    help=_(
+        "Muestra el estado de la cuenta activa o audita los archivos respaldados de una carpeta local."
+    ),
+)
 def status_command(
     ctx: typer.Context,
     path: Path | None = typer.Argument(
@@ -326,7 +330,10 @@ def status_command(
     console.print(panel)
 
 
-@app.command("switch")
+@app.command(
+    "switch",
+    help=_("Cambia la cuenta activa del sistema entre las cuentas guardadas."),
+)
 def switch_command(
     ctx: typer.Context,
     name: str | None = typer.Argument(
@@ -336,9 +343,6 @@ def switch_command(
         ),
     ),
 ):
-    """
-    Cambia la cuenta activa del sistema entre las cuentas guardadas.
-    """
     state: CLIState = ctx.obj
     manager = state.manager
 
@@ -391,7 +395,10 @@ def switch_command(
     )
 
 
-@app.command("logout")
+@app.command(
+    "logout",
+    help=_("Cierra la sesión y elimina los archivos de credenciales del perfil."),
+)
 def logout_command(
     ctx: typer.Context,
     name: str | None = typer.Argument(
@@ -482,16 +489,16 @@ def logout_command(
             UI.info(_("No quedan más cuentas activas configuradas."))
 
 
-@app.command("list")
+@app.command(
+    "list",
+    help=_("Lista todas las cuentas registradas en este equipo."),
+)
 def list_accounts(
     ctx: typer.Context,
     quiet: bool = typer.Option(
         False, "--quiet", "-q", help=_("Muestra solo los nombres de cuentas")
     ),
 ):
-    """
-    Lista todas las cuentas registradas en este equipo.
-    """
     from totelegram.cli.views.settings import DisplayProfile
 
     state: CLIState = ctx.obj

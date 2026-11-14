@@ -39,10 +39,7 @@ def send_files(
         ),
     ),
 ):
-    """
-    Envía archivos a Telegram. Si recibe una carpeta, envía su contenido (recursivo)
-    como archivos individuales.
-    """
+
     run_upload_flow(
         ctx=ctx,
         paths=paths,

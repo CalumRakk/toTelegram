@@ -36,6 +36,7 @@ prompt.md
 docs/debate
 docs/snapshot-hibrido-cintas-datos.md
 docs/Adquisición con Read-After-Write.md
+docs/compilar-traduccion.md
 docs/directrices
 *.backup
 # .github/

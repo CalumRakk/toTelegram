@@ -1422,3 +1422,66 @@ msgstr "Show application version."
 
 msgid "Activa el modo de depuración detallado."
 msgstr "Enable verbose debug mode."
+
+
+# Metadatos de Comandos y CLI Help
+
+msgid "Envía archivos a Telegram. Si recibe una carpeta, envía su contenido (recursivo) como archivos individuales."
+msgstr "Send files to Telegram. If a folder is passed, sends its contents (recursive) as individual files."
+
+msgid "Convierte una carpeta en una Cinta de Datos (TAR) y la distribuye en volúmenes."
+msgstr "Convert a folder into a Data Tape (TAR) and distribute it across volumes."
+
+msgid "Descarga y restaura un archivo o carpeta archivada a partir de su Snapshot (.json.xz o .ttape)."
+msgstr "Download and restore a file or archived folder from its Snapshot (.json.xz or .ttape)."
+
+msgid "Sincroniza e indexa en la base de datos local los archivos contenidos en cintas (.ttape) de Telegram."
+msgstr "Synchronize and index files contained in Telegram (.ttape) tapes into the local database."
+
+msgid "Inspecciona y diagnostica destinos de Telegram. Verifica permisos de subida, capacidades de tamaño y resuelve nombres ambiguos."
+msgstr "Inspect and diagnose Telegram destinations. Verify upload permissions, size limits, and resolve ambiguous names."
+
+msgid "Reenvía/replica un archivo o carpeta ya respaldada hacia otro chat de Telegram de forma instantánea y sin consumir ancho de banda de subida (0 bytes transferidos desde tu PC)."
+msgstr "Instantly forward/replicate a backed up file or folder to another Telegram chat without consuming upload bandwidth (0 bytes transferred from your PC)."
+
+msgid "Libera espacio en disco eliminando de forma segura los archivos locales que ya han sido respaldados por completo en Telegram, conservando el registro en la base de datos local."
+msgstr "Safely reclaim disk space by deleting local files that are already fully backed up to Telegram, keeping local database records."
+
+msgid "Inicia sesión con tu cuenta de Telegram de forma guiada e interactiva. Configura y activa automáticamente la sesión para su uso inmediato."
+msgstr "Log in to your Telegram account via an interactive guided setup. Automatically configures and activates the session for immediate use."
+
+msgid "Inicia sesión con tu cuenta de Telegram de forma guiada e interactiva."
+msgstr "Log in to your Telegram account via an interactive guided setup."
+
+msgid "Cierra la sesión y elimina los archivos de credenciales del perfil. Por defecto, revoca la sesión remota en Telegram."
+msgstr "Log out and delete profile credential files. By default, revokes the remote session on Telegram."
+
+msgid "Cierra la sesión y elimina los archivos de credenciales del perfil."
+msgstr "Log out and delete profile credential files."
+
+msgid "Muestra el estado de la cuenta activa o audita los archivos respaldados de una carpeta local."
+msgstr "Show active account status or audit backed up files of a local folder."
+
+msgid "Cambia la cuenta activa del sistema entre las cuentas guardadas."
+msgstr "Switch active account among saved accounts."
+
+msgid "Lista todas las cuentas registradas en este equipo."
+msgstr "List all accounts registered on this machine."
+
+msgid "Modifica una o varias configuraciones. Valida automáticamente endpoints de red en tiempo real a menos que se use --force."
+msgstr "Modify one or more settings. Automatically validates network endpoints in real time unless --force is used."
+
+msgid "Quita una configuración personalizada para usar el valor por defecto."
+msgstr "Remove a custom setting to use its default value."
+
+msgid "Agrega valores a una lista (ej. exclude_files)."
+msgstr "Add values to a list (e.g. exclude_files)."
+
+msgid "Quita valores a una lista (ej. exclude_files)."
+msgstr "Remove values from a list (e.g. exclude_files)."
+
+msgid "Verifica que el perfil actual esté listo para operar."
+msgstr "Verify that current profile is ready to operate."
+
+msgid "Inspecciona e importa snapshots v6.0 a la base de datos de manera incremental y segura."
+msgstr "Inspect and import v6.0 snapshots into the database incrementally and safely."

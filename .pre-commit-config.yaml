@@ -7,10 +7,15 @@ repos:
       - id: end-of-file-fixer
       - id: check-yaml
       - id: check-added-large-files
-
-  # Tests Unitarios linux
   - repo: local
     hooks:
+      - id: compile-locales
+        name: Compilar catálogos i18n
+        entry: .venv/bin/python -m babel.messages.frontend compile -d totelegram/locales -D totelegram
+        language: system
+        pass_filenames: false
+        always_run: true
+
       - id: run-tests
         name: Ejecutar Tests Unitarios
         entry: .venv/bin/python -m unittest discover tests

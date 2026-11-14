@@ -17,7 +17,12 @@ logger = logging.getLogger(__name__)
 app = typer.Typer(help=_("Herramientas para inspeccionar e importar snapshots v6.0."))
 
 
-@app.command("import")
+@app.command(
+    "import",
+    help=_(
+        "Inspecciona e importa snapshots v6.0 a la base de datos de manera incremental y segura."
+    ),
+)
 def import_snapshots(
     ctx: typer.Context,
     paths: list[Path] = typer.Argument(
@@ -39,10 +44,6 @@ def import_snapshots(
         help=_("Solo muestra el plan de importación sin realizar modificaciones."),
     ),
 ):
-    """Inspecciona e importa snapshots v6.0 a la base de datos de manera incremental y segura.
-
-    Calcula un plan de ejecución determinista y solo aplica cambios confirmados.
-    """
     state: CLIState = ctx.obj
 
     UI.separator()

@@ -1,23 +1,26 @@
+[Leer en español](README.es.md)
+
 # toTelegram
 
-`toTelegram` convierte a Telegram en un sistema de almacenamiento en la nube privado, ordenado y sin límites de tamaño.
+`toTelegram` turns Telegram into a private, clean, and unlimited cloud storage system.
 
-Está diseñado para que puedas subir archivos gigantescos o carpetas completas, y tener la certeza de qué cosas ya están respaldadas y recuperar exactamente lo que necesitas en cualquier momento.
+It is designed to let you upload massive files or entire directories, keep track of what is already backed up, and restore exactly what you need at any time.
 
 ---
 
-## ¿Por qué toTelegram?
+## Why toTelegram?
 
-* **Sube cualquier archivo, sin importar su peso:** Olvídate del límite de 2 GB o 4 GB por archivo de Telegram. Puedes subir vídeos de 20 GB, imágenes de disco o proyectos pesados; cuando los descargues, los recuperarás intactos.
-* **Carpetas completas con descarga selectiva:** Respalda carpetas enteras conservando su estructura original. Si en el futuro solo necesitas un documento o una foto específica de esa carpeta, puedes descargarlo de inmediato sin tener que bajar los gigabytes del respaldo completo.
-* **Ahorro de tiempo y conexión:** Si se corta internet o cancelas el proceso, la subida se reanuda exactamente donde se quedó. Además, reconoce automáticamente lo que ya has subido para no transferir el mismo archivo dos veces.
-* **Duplicación instantánea entre canales:** Si quieres tener una copia de tus respaldos en otro canal o compartirla, se clona en segundos directamente en Telegram, sin gastar los datos de tu conexión ni volver a subir nada.
-* **Recupera espacio en tu disco con tranquilidad:** Te ayuda a identificar qué archivos locales ya están 100% seguros en Telegram para que puedas eliminarlos de tu ordenador con la certeza de que podrás descargarlos cuando los vuelvas a necesitar.
+* **Upload any file, regardless of its size:** Forget about Telegram's 2 GB or 4 GB per-file limit. You can upload 20 GB videos, disk images, or heavy projects; when downloaded, they will be restored intact.
+* **Full directories with selective download:** Back up entire folders while preserving their original structure. If you ever need just a specific photo or document from that folder later on, you can download it immediately without fetching gigabytes of the entire backup.
+* **Save time and bandwidth:** If your internet connection drops or you cancel the process, uploads resume right where they left off. It also automatically identifies previously uploaded files so you never upload the same data twice.
+* **Instant duplication between channels:** Need a copy of your backups in another channel or want to share them? Clone them in seconds directly within Telegram—zero bandwidth usage from your machine and no re-uploading required.
+* **Safely reclaim disk space:** Easily identify which local files are 100% backed up to Telegram so you can delete them from your computer with total confidence that you can restore them whenever needed.
+
 ---
 
-## Instalación
+## Installation
 
-Requiere **Python 3.11** o superior.
+Requires **Python 3.10** or higher.
 
 ```bash
 pip install totelegram
@@ -25,23 +28,23 @@ pip install totelegram
 
 ---
 
-## Primeros pasos
+## Getting Started
 
-### 1. Iniciar sesión
+### 1. Log in
 
-Ejecuta el asistente guiado para conectar tu cuenta de Telegram:
+Run the interactive guided assistant to connect your Telegram account:
 
 ```bash
 totelegram login
 ```
 
-El programa te pedirá tu número de teléfono y el código de verificación que recibirás en Telegram.
+The program will prompt you for your phone number and the verification code sent to your Telegram app.
 
-*(Opcional: Si cuentas con tus propias credenciales `API_ID` y `API_HASH` de [my.telegram.org](https://my.telegram.org), puedes ingresarlas durante el proceso).*
+*(Optional: If you have your own `API_ID` and `API_HASH` credentials from [my.telegram.org](https://my.telegram.org), you can provide them during the setup).*
 
-### 2. Comprobar la conexión
+### 2. Check connection
 
-Puedes verificar en cualquier momento con qué cuenta estás conectado:
+You can verify which account is currently active at any time:
 
 ```bash
 totelegram status
@@ -49,122 +52,123 @@ totelegram status
 
 ---
 
-## Uso habitual
+## Common Usage
 
-En todas las operaciones de envío o respaldo, debes indicar el destino con el parámetro `-t` o `--target`. Puedes usar:
-* `me` para enviarlo a tus **Mensajes Guardados** (ideal para envíos rápidos y personales).
-* El nombre o @alias de un **Canal** (ej. `-t "Mis Respaldos"` o `-t @mi_canal`).
-* El identificador numérico del canal (ej. `-t -100123456789`).
+For all sending or backup operations, specify the destination using the `-t` or `--target` flag. You can use:
+* `me` to send to your **Saved Messages** (ideal for quick, personal storage).
+* The title or `@username` of a **Channel** (e.g., `-t "My Backups"` or `-t @my_channel`).
+* The numeric ID of the channel (e.g., `-t -100123456789`).
 
 ---
 
-### ¿`send` o `backup`? Cuándo usar cada uno
+### `send` vs `backup`: When to use each
 
-| Comando | Ideal para... | Cómo se publica en Telegram |
+| Command | Best for... | How it appears on Telegram |
 | :--- | :--- | :--- |
-| **`send`** | **Archivos sueltos** (películas, instaladores, PDFs, vídeos grandes). | Cada archivo se publica como un elemento independiente en el chat. |
-| **`backup`** | **Carpetas completas** (proyectos, fotos familiares, colecciones de documentos). | Se empaqueta todo en un único respaldo ordenado, sin saturar el canal de mensajes y preservando la jerarquía de carpetas. |
+| **`send`** | **Standalone files** (movies, installers, PDFs, large videos). | Each file is posted as an independent message in the chat. |
+| **`backup`** | **Entire directories** (projects, photo albums, document archives). | Everything is packaged into a single organized backup without cluttering the chat, preserving folder hierarchies. |
 
 ---
 
-### Enviar archivos individuales (`send`)
+### Sending individual files (`send`)
 
-Sube uno o varios archivos a Telegram. Si el archivo es muy pesado, se dividirá de forma automática para que no tengas problemas con el límite de tamaño.
+Upload one or more files to Telegram. If a file exceeds Telegram limits, it will be automatically split without losing integrity.
 
 ```bash
-# Enviar un archivo grande a tus Mensajes Guardados
-totelegram send pelicula.mkv -t me
+# Send a large file to your Saved Messages
+totelegram send movie.mkv -t me
 
-# Enviar varios archivos a un canal
-totelegram send video.mp4 instalador.iso manual.pdf -t "Mi Nube"
+# Send multiple files to a channel
+totelegram send video.mp4 installer.iso manual.pdf -t "My Cloud"
 
-# Envia todos los archivos de una carpeta
-totelegram send peliculas_1080p/ -t "Mi Nube"
+# Send all files from a directory
+totelegram send movies_1080p/ -t "My Cloud"
 ```
 
-> ⚠️ **Atención con las carpetas en `send`:**
-> Si le pasas una carpeta a `send`, enviará cada archivo interno por separado. **No uses `send` para carpetas con cientos o miles de archivos pequeños** (como fotos o código), ya que publicará miles de mensajes individuales en tu canal. Para carpetas, usa siempre `backup`.
+> ⚠️ **Caution with directories in `send`:**
+> Passing a directory to `send` will upload every internal file as a separate message. **Do not use `send` for directories containing hundreds or thousands of small files** (such as source code or photos), as it will flood your channel with thousands of individual messages. For directories, always use `backup`.
 
 ---
 
-### Respaldar carpetas completas (`backup`)
+### Backing up entire directories (`backup`)
 
-Diseñado específicamente para carpetas. Convierte toda la estructura en un único paquete optimizado, conservando los nombres, subcarpetas y fechas originales.
+Designed specifically for directories. Packages the entire hierarchy into an optimized data container while preserving original file names, subdirectories, and timestamps.
 
 ```bash
-# Respaldar una carpeta completa en un canal
-totelegram backup ./mis_fotos -t "Respaldo Familiar"
+# Back up an entire folder to a channel
+totelegram backup ./my_photos -t "Family Backup"
 ```
 
-* **Canal limpio:** Aunque tu carpeta contenga 50.000 archivos, no inundará el chat de mensajes; genera solo unos pocos bloques limpios y compactos.
-* **Extracción selectiva:** Al respaldar con `backup`, ganas la capacidad de descargar un archivo específico de la carpeta en el futuro sin tener que bajarla toda.
----
-
-### Descargar y restaurar (`download`)
-
-Para recuperar un respaldo, solo necesitas el archivo de manifiesto (`.ttape` o `.json.xz`):
-
-```bash
-# Restaurar una carpeta o archivo completo
-totelegram download respaldo.ttape -o ./recuperado
-
-# Extracción quirúrgica: descargar solo un archivo dentro de una carpeta respaldada
-totelegram download respaldo.ttape --file "fotos/viaje/playa.jpg" -o ./destino
-```
+* **Clean channel:** Even if your folder contains 50,000 files, it will not flood the chat; it generates only a few compact, clean chunks.
+* **Selective extraction:** Backing up with `backup` allows you to download a single file from the folder in the future without downloading the entire archive.
 
 ---
 
-### Comprobar el estado local (`status`)
+### Downloading and restoring (`download`)
 
-Si quieres saber qué archivos de una carpeta ya están respaldados en Telegram y cuáles están pendientes:
-
-```bash
-totelegram status ./mis_documentos
-```
-
-Muestra una lista con el estado de cada archivo: si ya está en Telegram, si fue modificado localmente o si está pendiente de subida.
-
----
-
-### Replicar a otro canal (`forward`)
-
-Si ya respaldaste un archivo o carpeta en un canal y quieres tener una copia en otro, puedes clonarlo sin transferir datos desde tu ordenador:
+To restore a backup, you only need the manifest file (`.ttape` or `.json.xz`):
 
 ```bash
-totelegram forward respaldo.ttape -t "Canal Secundario"
+# Restore an entire folder or file
+totelegram download backup.ttape -o ./restored
+
+# Surgical extraction: download a single file from a backed-up folder
+totelegram download backup.ttape --file "photos/trip/beach.jpg" -o ./destination
 ```
 
 ---
 
-### Liberar espacio en disco (`prune`)
+### Checking local status (`status`)
 
-Elimina de tu equipo aquellos archivos que ya han sido confirmados y respaldados al 100% en Telegram, manteniendo intacto el registro para poder descargarlos cuando los necesites:
+To check which files in a directory are already backed up to Telegram and which are still pending:
 
 ```bash
-# Ver qué se eliminaría sin borrar nada
-totelegram prune ./mis_videos --dry-run
+totelegram status ./my_documents
+```
 
-# Liberar espacio confirmando la eliminación
-totelegram prune ./mis_videos
+Displays a breakdown of each file's status: backed up, locally modified, or pending upload.
+
+---
+
+### Replicating to another channel (`forward`)
+
+If you have already backed up a file or folder to one channel and want a copy in another, clone it server-side without transferring data from your computer:
+
+```bash
+totelegram forward backup.ttape -t "Secondary Channel"
 ```
 
 ---
 
-## Opciones útiles
+### Reclaiming disk space (`prune`)
 
-* **Reanudar o forzar subida (`--force`):**
-  Si una subida quedó a medias o deseas reiniciar el proceso ignorando el estado previo:
+Safely delete local files that are already 100% confirmed and backed up to Telegram, keeping the local index intact so you can download them whenever needed:
+
+```bash
+# Preview what would be deleted without touching disk
+totelegram prune ./my_videos --dry-run
+
+# Reclaim space by confirming deletion
+totelegram prune ./my_videos
+```
+
+---
+
+## Useful Options
+
+* **Resume or force upload (`--force`):**
+  If an upload was interrupted or you want to restart while ignoring previous states:
   ```bash
-  totelegram send archivo.zip -t me --force
+  totelegram send file.zip -t me --force
   ```
-* **Destino predeterminado por entorno:**
-  Puedes definir la variable de entorno `TOTELEGRAM_TARGET` para no tener que escribir `-t` en cada comando:
+* **Default target via environment variable:**
+  Set `TOTELEGRAM_TARGET` so you don't have to specify `-t` on every command:
   ```bash
-  export TOTELEGRAM_TARGET="Mis Respaldos"
-  totelegram send archivo.iso
+  export TOTELEGRAM_TARGET="My Backups"
+  totelegram send file.iso
   ```
-* **Manejo de múltiples cuentas:**
-  Puedes cambiar de cuenta activa en cualquier momento:
+* **Multi-account management:**
+  Switch between saved Telegram accounts at any time:
   ```bash
   totelegram switch
   ```

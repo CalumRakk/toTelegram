@@ -142,7 +142,12 @@ def main(ctx: typer.Context):
         UI.warn(_("No hay un perfil activo para mostrar valores de configuracion."))
 
 
-@app.command(name="set")
+@app.command(
+    name="set",
+    help=_(
+        "Modifica una o varias configuraciones. Valida automáticamente endpoints de red en tiempo real a menos que se use --force."
+    ),
+)
 @handle_config_errors
 def set_configs(
     ctx: typer.Context,
@@ -159,11 +164,6 @@ def set_configs(
         ),
     ),
 ):
-    """
-    Modifica una o varias configuraciones. Valida automáticamente endpoints de red
-    (chat_id) en tiempo real a menos que se use --force.
-    """
-
     settings_name, service = _get_config_tools(ctx)
     updates = service.prepare_updates(args)
 
@@ -181,14 +181,15 @@ def set_configs(
             )
 
 
-@app.command("unset")
+@app.command(
+    "unset",
+    help=_("Quita una configuración personalizada para usar el valor por defecto."),
+)
 @handle_config_errors
 def unset_config(
     ctx: typer.Context,
     key: str = typer.Argument(..., help=_("Clave a restaurar a su valor por defecto")),
 ):
-    """Quita una configuración personalizada para usar el valor por defecto."""
-
     settings_name, service = _get_config_tools(ctx)
     default_val = service.restore_default(settings_name, key)
     UI.success(
@@ -198,7 +199,10 @@ def unset_config(
     )
 
 
-@app.command("add")
+@app.command(
+    "add",
+    help=_("Agrega valores a una lista (ej. exclude_files)."),
+)
 def add_config(
     ctx: typer.Context,
     key: str,
@@ -206,12 +210,14 @@ def add_config(
         ..., min=1, callback=lambda x: [validate_item(i) for i in x]
     ),
 ):
-    """Agrega valores a una lista (ej. exclude_files)."""
     settings_name, service = _get_config_tools(ctx)
     _command_modify_list(settings_name, service, key, values, "add")
 
 
-@app.command("remove")
+@app.command(
+    "remove",
+    help=_("Quita valores a una lista (ej. exclude_files)."),
+)
 def remove_config(
     ctx: typer.Context,
     key: str,
@@ -219,15 +225,16 @@ def remove_config(
         ..., min=1, callback=lambda x: [validate_item(i) for i in x]
     ),
 ):
-    """Quita valores a una lista (ej. exclude_files)."""
     settings_name, service = _get_config_tools(ctx)
     _command_modify_list(settings_name, service, key, values, "remove")
 
 
-@app.command("check")
+@app.command(
+    "check",
+    help=_("Verifica que el perfil actual esté listo para operar."),
+)
 @handle_config_errors
 def check_config(ctx: typer.Context):
-    """Verifica que el perfil actual esté listo para operar."""
     state: CLIState = ctx.obj
     manager = state.manager
 
