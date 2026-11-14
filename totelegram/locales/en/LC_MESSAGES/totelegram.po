@@ -21,7 +21,7 @@ msgid_plural "{n} files"
 msgstr[0] "{n} file"
 msgstr[1] "{n} files"
 
-# Capa 2: Excepciones
+# Excepciones
 
 msgid "No se encontraron carpetas pendientes para subir para el destino '{destination}'."
 msgstr "No pending folders found to upload for destination '{destination}'."
@@ -154,3 +154,601 @@ msgstr "Unsupported Target"
 
 msgid "Los canales operan como un almacén de objetos y evitan la mezcla visual entre cuentas y permiten que cualquier cuenta edite o reorganice metadatos. Los grupos de Telegram no soportan estas capacidades."
 msgstr "Channels operate as an object store, prevent visual clutter across accounts, and allow any account to edit or reorganize metadata. Telegram groups do not support these capabilities."
+
+
+# ui.py & observer.py
+msgid "Mensajes Guardados (me)"
+msgstr "Saved Messages (me)"
+
+msgid "[yellow]Pendiente[/]"
+msgstr "[yellow]Pending[/]"
+
+msgid "Iniciando pausa ({minutes} min)..."
+msgstr "Starting pause ({minutes} min)..."
+
+msgid "Pausa activa..."
+msgstr "Active pause..."
+
+msgid "[bold blue]Pausa activa: Siguiente parte en {mins}m {secs}s..."
+msgstr "[bold blue]Active pause: Next part in {mins}m {secs}s..."
+
+msgid "Pausa finalizada. Reanudando subida."
+msgstr "Pause finished. Resuming upload."
+
+msgid "Reorganizando [bold]{count}[/] piezas previas al fondo del canal [dim cyan](Anti-Waste TOC: 0 bytes transferidos)[/]..."
+msgstr "Reorganizing [bold]{count}[/] previous parts to channel bottom [dim cyan](Anti-Waste TOC: 0 bytes transferred)[/]..."
+
+msgid "[yellow]Se detectaron archivos con nombres similares en el chat de destino:[/yellow]"
+msgstr "[yellow]Files with similar names were detected in destination chat:[/yellow]"
+
+msgid "[dim]Continuando con la subida... [italic](Presiona Ctrl+C si prefieres cancelar)[/italic][/dim]"
+msgstr "[dim]Continuing upload... [italic](Press Ctrl+C if you prefer to cancel)[/italic][/dim]"
+
+msgid "[bold yellow]Posible duplicado en Telegram[/bold yellow]"
+msgstr "[bold yellow]Possible duplicate in Telegram[/bold yellow]"
+
+msgid "[Indexando MD5]"
+msgstr "[Indexing MD5]"
+
+msgid "Huella digital verificada: [bold dim]{hash}[/bold dim]"
+msgstr "Fingerprint verified: [bold dim]{hash}[/bold dim]"
+
+msgid "Pieza [bold]{filename}[/] subida y verificada."
+msgstr "Part [bold]{filename}[/] uploaded and verified."
+
+msgid "Iniciando pausa de seguridad ({duration}) [{reason}]..."
+msgstr "Starting safety pause ({duration}) [{reason}]..."
+
+msgid "  [italic blue] Pausa activa: Siguiente operación en {time}... [dim](Lease renovado)[/][/]"
+msgstr "  [italic blue] Active pause: Next operation in {time}... [dim](Lease renewed)[/][/]"
+
+msgid "Pausa finalizada. Reanudando operaciones."
+msgstr "Pause finished. Resuming operations."
+
+msgid "Smart Forward exitoso: [bold]{count}[/] piezas vinculadas instantáneamente (0 bytes transferidos)."
+msgstr "Smart Forward successful: [bold]{count}[/] parts linked instantly (0 bytes transferred)."
+
+msgid "Snapshot publicado en Telegram [bold cyan](Msg ID: {msg_id})[/]"
+msgstr "Snapshot published to Telegram [bold cyan](Msg ID: {msg_id})[/]"
+
+msgid "Snapshot local generado e indexado."
+msgstr "Local snapshot generated and indexed."
+
+msgid "{label} Pieza [bold]{filename}[/] ya en disco y verificada [dim](Reutilizada)[/dim]."
+msgstr "{label} Part [bold]{filename}[/] already on disk and verified [dim](Reused)[/dim]."
+
+msgid "Pieza [bold]{filename}[/] descargada y verificada (MD5 OK)."
+msgstr "Part [bold]{filename}[/] downloaded and verified (MD5 OK)."
+
+msgid "Iniciando extracción y verificación de [bold]{n}[/] archivo..."
+msgid_plural "Iniciando extracción y verificación de [bold]{n}[/] archivos..."
+msgstr[0] "Starting extraction and verification of [bold]{n}[/] file..."
+msgstr[1] "Starting extraction and verification of [bold]{n}[/] files..."
+
+msgid "Extrayendo:"
+msgstr "Extracting:"
+
+msgid "Iniciando..."
+msgstr "Starting..."
+
+msgid "Extracción completada: [bold]{n}[/] archivo validado al 100%."
+msgid_plural "Extracción completada: [bold]{n}[/] archivos validados al 100%."
+msgstr[0] "Extraction completed: [bold]{n}[/] file 100% verified."
+msgstr[1] "Extraction completed: [bold]{n}[/] files 100% verified."
+
+
+# upload.py & logic.py
+msgid "Archivando: [bold cyan]{name}[/]"
+msgstr "Archiving: [bold cyan]{name}[/]"
+
+msgid "Sin archivos omitidos."
+msgstr "No files skipped."
+
+msgid "Omitido (Ilegible/Error): {name}"
+msgstr "Skipped (Unreadable/Error): {name}"
+
+msgid "Omitido (Integridad): {name}"
+msgstr "Skipped (Integrity): {name}"
+
+msgid "[bright_black]Omitido (Ya tiene Snapshot):[/] {name}"
+msgstr "[bright_black]Skipped (Already has Snapshot):[/] {name}"
+
+msgid "[bright_black]Omitido (Excede peso máximo):[/] {name}"
+msgstr "[bright_black]Skipped (Exceeds max size):[/] {name}"
+
+msgid "[bright_black]Omitido (Patrón de exclusión):[/] {name}"
+msgstr "[bright_black]Skipped (Exclusion pattern):[/] {name}"
+
+msgid "[bright_black]Omitida (Carpeta vacía):[/] {name}"
+msgstr "[bright_black]Skipped (Empty folder):[/] {name}"
+
+msgid "Se excluyó [bold]{n}[/] archivo por:"
+msgid_plural "Se excluyeron [bold]{n}[/] archivos por:"
+msgstr[0] "Excluded [bold]{n}[/] file due to:"
+msgstr[1] "Excluded [bold]{n}[/] files due to:"
+
+msgid "Se excluyó [bold]{n}[/] carpeta por:"
+msgid_plural "Se excluyeron [bold]{n}[/] carpetas por:"
+msgstr[0] "Excluded [bold]{n}[/] folder due to:"
+msgstr[1] "Excluded [bold]{n}[/] folders due to:"
+
+msgid "Errores de integridad/lectura"
+msgstr "Integrity/read errors"
+
+msgid "Ya tienen Snapshot"
+msgstr "Already have Snapshot"
+
+msgid "Exceden peso máximo"
+msgstr "Exceed maximum size"
+
+msgid "Patrón de exclusión"
+msgstr "Exclusion pattern"
+
+msgid "Carpetas sin contenido"
+msgstr "Empty folders"
+
+msgid "Integridad"
+msgstr "Integrity"
+
+msgid "... y {n} más."
+msgstr "... and {n} more."
+
+msgid "La carpeta [bold]'{name}'[/] ha cambiado desde el último escaneo."
+msgstr "Folder [bold]'{name}'[/] has changed since last scan."
+
+msgid "Se detectaron [bold]{count}[/] carpetas con cambios recientes en su contenido."
+msgstr "Detected [bold]{count}[/] folders with recent changes in content."
+
+msgid "esta carpeta"
+msgstr "this folder"
+
+msgid "estas carpetas"
+msgstr "these folders"
+
+msgid "[dim]El backup de {subject} no es confiable en este momento porque su índice local está desincronizado con el disco.[/]"
+msgstr "[dim]The backup of {subject} is not reliable right now because its local index is out of sync with disk.[/]"
+
+msgid " para '[bold]{name}[/]'"
+msgstr " for '[bold]{name}[/]'"
+
+msgid "Omitiendo subida{file_desc}: la siguiente parte pendiente mide [bold]{part_mb} MB[/].\nLa cuenta activa actual es [bold]{account_type}[/] y solo puede transferir bloques de hasta [bold]{acc_mb} MB[/].\n\n"
+msgstr "Skipping upload{file_desc}: next pending part is [bold]{part_mb} MB[/].\nCurrent active account is [bold]{account_type}[/] and can only transfer blocks up to [bold]{acc_mb} MB[/].\n\n"
+
+msgid "Se requiere limpiar o reorganizar mensajes antiguos en el chat [bold]{chat_id}[/], pero la cuenta activa carece del permiso de administrador [bold red]'Eliminar mensajes'[/] (can_delete_messages).\n\n[dim]toTelegram se detiene aquí para proteger la higiene del canal y no dejar trozos huérfanos abandonados.[/dim]"
+msgstr "Cleaning or reorganizing old messages in chat [bold]{chat_id}[/] is required, but the active account lacks the administrator permission [bold red]'Delete messages'[/] (can_delete_messages).\n\n[dim]toTelegram halts here to protect channel hygiene and prevent leaving orphaned chunks abandoned.[/dim]"
+
+msgid "cinta archivada"
+msgid_plural "cintas archivadas"
+msgstr[0] "archived tape"
+msgstr[1] "archived tapes"
+
+msgid "Detectadas [bold yellow]{count}[/] {items} en Telegram que aún no están indexadas localmente.\nPara habilitar la búsqueda quirúrgica de sus archivos internos, ejecuta:"
+msgstr "Detected [bold yellow]{count}[/] {items} on Telegram not indexed locally yet.\nTo enable selective search of internal files, run:"
+
+msgid "Catálogo desincronizado"
+msgstr "Unsynchronized catalog"
+
+msgid "carpeta"
+msgstr "folder"
+
+msgid "archivo"
+msgstr "file"
+
+msgid "carpetas"
+msgstr "folders"
+
+msgid "archivos"
+msgstr "files"
+
+msgid "Carpeta"
+msgstr "Folder"
+
+msgid "Archivo"
+msgstr "File"
+
+msgid "Existen [bold]{count}[/] partes previas en Telegram del archivo '[bold]{filename}[/]'.\nAl continuar con [bold]--force[/], se eliminarán de Telegram para reiniciar la subida desde cero."
+msgstr "There are [bold]{count}[/] previous parts on Telegram for file '[bold]{filename}[/]'.\nContinuing with [bold]--force[/] will delete them from Telegram to restart upload from scratch."
+
+msgid "¿Deseas eliminarlas y continuar?"
+msgstr "Do you want to delete them and continue?"
+
+msgid "Forzando la subida de {items} sin comprobar el estado previo."
+msgstr "Forcing upload of {items} without checking prior state."
+
+msgid "Analizando contenido..."
+msgstr "Analyzing content..."
+
+msgid "{label} [bold]{name}[/] ya está 100% completado en Telegram."
+msgstr "{label} [bold]{name}[/] is already 100% completed on Telegram."
+
+msgid "{label} [bold]{name}[/] procesado exitosamente."
+msgstr "{label} [bold]{name}[/] processed successfully."
+
+msgid "Procesamiento parcial de [bold]{name}[/]: {message}"
+msgstr "Partial processing of [bold]{name}[/]: {message}"
+
+msgid "[dim]Escaneando directorios...[/]"
+msgstr "[dim]Scanning directories...[/]"
+
+msgid "Auto-sanadas [bold]{count}[/] cintas no indexadas en segundo plano."
+msgstr "Auto-healed [bold]{count}[/] unindexed tapes in background."
+
+msgid "[dim]Escaneando {count} rutas...[/dim]"
+msgstr "[dim]Scanning {count} paths...[/dim]"
+
+msgid "Core Engine: Pyrogram Runtime Patches [FAILED]"
+msgstr "Core Engine: Pyrogram Runtime Patches [FAILED]"
+
+msgid "Conectado como [bold]{user}[/]"
+msgstr "Connected as [bold]{user}[/]"
+
+msgid "Cuenta en modo público compartido (my.telegram.org recomendado)."
+msgstr "Account in shared public mode (my.telegram.org recommended)."
+
+msgid "Destino: [bold cyan]{chat}[/] [dim](ID: {chat_id})[/]"
+msgstr "Destination: [bold cyan]{chat}[/] [dim](ID: {chat_id})[/]"
+
+msgid "Resolviendo destino '[bold]{target}[/]'..."
+msgstr "Resolving destination '[bold]{target}[/]'..."
+
+msgid "Sincronizando con Telegram..."
+msgstr "Synchronizing with Telegram..."
+
+msgid "Error de conexión con el chat destino ({chat_id}): {error}"
+msgstr "Connection error with destination chat ({chat_id}): {error}"
+
+msgid "Error de Conexión"
+msgstr "Connection Error"
+
+
+# ledger.py
+msgid "El directorio '[bold]{name}[/]' no contiene elementos para auditar."
+msgstr "Directory '[bold]{name}[/]' does not contain items to audit."
+
+msgid "Estado de Respaldo Local — {name}"
+msgstr "Local Backup Status — {name}"
+
+msgid "Elemento"
+msgstr "Item"
+
+msgid "Tamaño"
+msgstr "Size"
+
+msgid "Destinos en Telegram"
+msgstr "Telegram Destinations"
+
+msgid "Estado"
+msgstr "Status"
+
+msgid "[dim]Directorio[/dim]"
+msgstr "[dim]Directory[/dim]"
+
+msgid "[bold green]✓ Cinta TAR[/bold green]"
+msgstr "[bold green]✓ TAR Tape[/bold green]"
+
+msgid "[cyan]✓ Respaldado (Snapshot local)[/cyan]"
+msgstr "[cyan]✓ Backed up (Local snapshot)[/cyan]"
+
+msgid "[dim red]☁ Solo en Telegram[/dim red]"
+msgstr "[dim red]☁ Telegram only[/dim red]"
+
+msgid "[bold yellow]! Modificado localmente[/bold yellow]"
+msgstr "[bold yellow]! Modified locally[/bold yellow]"
+
+msgid "[bold green]✓ Respaldado[/bold green]"
+msgstr "[bold green]✓ Backed up[/bold green]"
+
+msgid "[dim]Pendiente de subida[/dim]"
+msgstr "[dim]Pending upload[/dim]"
+
+msgid "Archivos Respaldados Listos para Liberar Espacio"
+msgstr "Backed up Files Ready for Space Cleanup"
+
+msgid "Archivo a eliminar"
+msgstr "File to remove"
+
+msgid "Verificado en Telegram"
+msgstr "Verified on Telegram"
+
+msgid "Total de espacio a recuperar: [bold cyan]{size}[/] en [bold]{n}[/] archivo."
+msgid_plural "Total de espacio a recuperar: [bold cyan]{size}[/] en [bold]{n}[/] archivos."
+msgstr[0] "Total space to reclaim: [bold cyan]{size}[/] across [bold]{n}[/] file."
+msgstr[1] "Total space to reclaim: [bold cyan]{size}[/] across [bold]{n}[/] files."
+
+msgid "Liberación completada: Se eliminó [bold]{n}[/] archivo local recuperando [bold cyan]{size}[/] de espacio en disco."
+msgid_plural "Liberación completada: Se eliminaron [bold]{n}[/] archivos locales recuperando [bold cyan]{size}[/] de espacio en disco."
+msgstr[0] "Cleanup completed: Removed [bold]{n}[/] local file reclaiming [bold cyan]{size}[/] of disk space."
+msgstr[1] "Cleanup completed: Removed [bold]{n}[/] local files reclaiming [bold cyan]{size}[/] of disk space."
+
+msgid "El registro se conserva en la base de datos local ('☁ Solo en Telegram'). Puedes restaurar cualquiera de estos archivos cuando lo necesites usando 'totelegram download'."
+msgstr "The record is kept in the local database ('☁ Telegram only'). You can restore any of these files whenever needed using 'totelegram download'."
+
+
+
+# settings.py
+msgid "agregar"
+msgstr "add"
+
+msgid "eliminar"
+msgstr "remove"
+
+msgid "No se detectó un patrón comodin (*), pero el valor coincide con el archivo existente: {name}"
+msgstr "No wildcard pattern (*) was detected, but the value matches existing file: {name}"
+
+msgid "No se detectó un patrón, pero se detectaron {count} archivos existentes."
+msgstr "No pattern detected, but {count} existing files were found."
+
+msgid "[i]Esto sugiere que tu terminal expandió un comodín antes de que el programa lo recibiera.[/]"
+msgstr "[i]This suggests your shell expanded a wildcard before the program received it.[/]"
+
+msgid "Para {action} un patrón que aplique a archivos futuros, usa comillas simples:"
+msgstr "To {action} a pattern applying to future files, use single quotes:"
+
+msgid "el archivo '{name}'"
+msgstr "file '{name}'"
+
+msgid "estos {count} archivos"
+msgstr "these {count} files"
+
+msgid "\n¿Deseas {action} {indicative} literalmente en la configuración?"
+msgstr "\nDo you want to {action} {indicative} literally in configuration?"
+
+msgid "Configuración del perfil: {name}"
+msgstr "Profile Configuration: {name}"
+
+msgid "Opción (Key)"
+msgstr "Option (Key)"
+
+msgid "Tipo"
+msgstr "Type"
+
+msgid "Valor Actual"
+msgstr "Current Value"
+
+msgid "Descripción"
+msgstr "Description"
+
+msgid "Perfiles disponibles:"
+msgstr "Available profiles:"
+
+msgid "Perfiles disponibles"
+msgstr "Available profiles"
+
+msgid "Perfil"
+msgstr "Profile"
+
+msgid "Sesión (.session)"
+msgstr "Session (.session)"
+
+msgid "Configuración (.json)"
+msgstr "Configuration (.json)"
+
+msgid "[bold green]OK[/]"
+msgstr "[bold green]OK[/]"
+
+msgid "[bold red]FALTA[/]"
+msgstr "[bold red]MISSING[/]"
+
+msgid "Se detectó al menos un perfil huérfano o incompleto."
+msgstr "At least one orphaned or incomplete profile was detected."
+
+msgid "Usa 'totelegram logout <PERFIL>' para limpiarlo."
+msgstr "Use 'totelegram logout <PROFILE>' to clean it up."
+
+msgid "Perfil Actual: [bold]{name}[/]"
+msgstr "Active Profile: [bold]{name}[/]"
+
+msgid "Título"
+msgstr "Title"
+
+msgid "ID del chat"
+msgstr "Chat ID"
+
+msgid "Tipo de chat"
+msgstr "Chat Type"
+
+msgid "Alias"
+msgstr "Username / Alias"
+
+msgid "Capacidad"
+msgstr "Capacity"
+
+msgid "Premium (4 GB)"
+msgstr "Premium (4 GB)"
+
+msgid "Estándar (2 GB)"
+msgstr "Standard (2 GB)"
+
+msgid "Borrar msgs"
+msgstr "Delete msgs"
+
+msgid "[bold green]Sí[/] [dim](permite reorganización limpia)[/]"
+msgstr "[bold green]Yes[/] [dim](allows clean reorganization)[/]"
+
+msgid "[yellow]No[/] [dim](solo subidas continuas sin limpieza)[/]"
+msgstr "[yellow]No[/] [dim](continuous uploads only without cleanup)[/]"
+
+msgid "[bold green]✓ Destino verificado y listo para operar[/bold green]"
+msgstr "[bold green]✓ Target verified and ready to operate[/bold green]"
+
+msgid "Cómo usar este destino"
+msgstr "How to use this target"
+
+msgid "Usa la opción [bold]-t / --target[/] en tus operaciones:"
+msgstr "Use the [bold]-t / --target[/] option in your commands:"
+
+msgid "Para sesiones continuas"
+msgstr "For persistent sessions"
+
+msgid "La búsqueda '[bold]{query}[/]' arrojó múltiples coincidencias ({count} chats)."
+msgstr "Search '[bold]{query}[/]' yielded multiple matches ({count} chats)."
+
+msgid "Coincidencias encontradas en Telegram"
+msgstr "Matches found on Telegram"
+
+msgid "ID Directo"
+msgstr "Direct ID"
+
+msgid "Username / Alias"
+msgstr "Username / Alias"
+
+msgid "Para evitar ambigüedad, usa el ID numérico directo en lugar del nombre:"
+msgstr "To avoid ambiguity, use the direct numeric ID instead of the name:"
+
+msgid "Destinos conocidos en este equipo"
+msgstr "Known targets on this machine"
+
+msgid "Destino"
+msgstr "Target"
+
+msgid "Identificador / -t"
+msgstr "Identifier / -t"
+
+msgid "Última verificación"
+msgstr "Last verification"
+
+msgid "Mensajes Guardados (Buzón personal)"
+msgstr "Saved Messages (Personal inbox)"
+
+msgid "Personal"
+msgstr "Personal"
+
+msgid "[dim]Siempre disponible[/dim]"
+msgstr "[dim]Always available[/dim]"
+
+msgid "[magenta]Canal[/magenta]"
+msgstr "[magenta]Channel[/magenta]"
+
+msgid "[dim red]{type}[/dim red]"
+msgstr "[dim red]{type}[/dim red]"
+
+msgid "[dim]Desconocida[/dim]"
+msgstr "[dim]Unknown[/dim]"
+
+msgid "Puedes usar cualquiera de estos nombres o IDs con la opción [bold]-t[/]:"
+msgstr "You can use any of these names or IDs with the [bold]-t[/] option:"
+
+
+# snapshots.py
+msgid "[bold blue]BALANCE DEL ESCANEO:[/bold blue]"
+msgstr "[bold blue]SCAN BALANCE:[/bold blue]"
+
+msgid "• Total procesados:     [bold]{count}[/] snapshots"
+msgstr "• Total processed:      [bold]{count}[/] snapshots"
+
+msgid "• Ya sincronizados:     [bold green]{count}[/] completos al 100% [dim](sin cambios requeridos)[/]"
+msgstr "• Already synced:       [bold green]{count}[/] 100% complete [dim](no changes required)[/]"
+
+msgid "• Acciones pendientes:  [bold cyan]{count}[/] snapshots por aplicar"
+msgstr "• Pending actions:      [bold cyan]{count}[/] snapshots to apply"
+
+msgid "• Acciones pendientes:  [dim]0 snapshots por aplicar[/dim]"
+msgstr "• Pending actions:      [dim]0 snapshots to apply[/dim]"
+
+msgid "• Con advertencias:     [bold yellow]{warnings}[/] snapshots [dim]({conflicts} conflictos, {outdated} desactualizados, {corrupted} corruptos)[/]"
+msgstr "• With warnings:        [bold yellow]{warnings}[/] snapshots [dim]({conflicts} conflicts, {outdated} outdated, {corrupted} corrupted)[/]"
+
+msgid "Todos los snapshots ([bold]{total}[/]) ya se encuentran al 100% sincronizados en la base de datos."
+msgstr "All snapshots ([bold]{total}[/]) are already 100% synchronized in the database."
+
+msgid "Base de datos al día. No se requirieron cambios."
+msgstr "Database up to date. No changes required."
+
+msgid "ACCIONES A REALIZAR EN BASE DE DATOS"
+msgstr "ACTIONS TO PERFORM ON DATABASE"
+
+msgid "Acción"
+msgstr "Action"
+
+msgid "Estructura"
+msgstr "Structure"
+
+msgid "Recurso"
+msgstr "Resource"
+
+msgid "Chat Destino"
+msgstr "Destination Chat"
+
+msgid "Operaciones en BD"
+msgstr "DB Operations"
+
+msgid "[green]NUEVO[/]"
+msgstr "[green]NEW[/]"
+
+msgid "[cyan]RAMIFICAR[/]"
+msgstr "[cyan]BRANCH[/]"
+
+msgid "[yellow]PARCIAL[/]"
+msgstr "[yellow]PARTIAL[/]"
+
+msgid "[bold red]CONFLICTO[/]"
+msgstr "[bold red]CONFLICT[/]"
+
+msgid "1 parte"
+msgstr "1 part"
+
+msgid "{n} partes"
+msgstr "{n} parts"
+
+msgid "[bold red]BLOQUEADO (Inconsistente)[/]"
+msgstr "[bold red]BLOCKED (Inconsistent)[/]"
+
+msgid "Leyenda BD: +Source (Origen), +Job (Trabajo), +P (Payloads/Piezas), +Remotes (Mensajes en TG), +Files (Cinta TAR)"
+msgstr "DB Legend: +Source (Origin), +Job (Work), +P (Payloads/Chunks), +Remotes (TG Messages), +Files (TAR Tape)"
+
+msgid "[bold blue]DETALLE DE INCONSISTENCIAS Y DISCREPANCIAS:[/bold blue]"
+msgstr "[bold blue]DETAIL OF INCONSISTENCIES AND DISCREPANCIES:[/bold blue]"
+
+msgid "Parte {cur}/{tot} (msg: {msg_id})"
+msgstr "Part {cur}/{tot} (msg: {msg_id})"
+
+msgid "✓ {part} ya registrada en DB (omitida)"
+msgstr "✓ {part} already registered in DB (skipped)"
+
+msgid "+ {part} será vinculada a la DB"
+msgstr "+ {part} will be linked to DB"
+
+msgid "✗ {part}: {detail}"
+msgstr "✗ {part}: {detail}"
+
+msgid "+ {count} archivos de la cinta TAR serán indexados en base de datos"
+msgstr "+ {count} TAR tape files will be indexed in database"
+
+msgid "[red]Conflicto:[/] {reason}"
+msgstr "[red]Conflict:[/] {reason}"
+
+msgid "ATENCIÓN REQUERIDA"
+msgstr "ATTENTION REQUIRED"
+
+msgid "[bold red]ATENCIÓN REQUERIDA:[/bold red]"
+msgstr "[bold red]ATTENTION REQUIRED:[/bold red]"
+
+msgid "  [bold red]▲[/] [bold]{count}[/] snapshot(s) generados por una versión más reciente de toTelegram:"
+msgstr "  [bold red]▲[/] [bold]{count}[/] snapshot(s) generated by a newer version of toTelegram:"
+
+msgid "Tu versión de toTelegram no puede leer estos snapshots porque fueron creados con una versión más nueva.\nActualiza toTelegram para habilitar la compatibilidad."
+msgstr "Your version of toTelegram cannot read these snapshots because they were created with a newer version.\nUpdate toTelegram to enable compatibility."
+
+msgid "Actualización requerida"
+msgstr "Update required"
+
+msgid "  [yellow]![/] [bold]{count}[/] snapshot(s) en formato antiguo no son compatibles con este estándar:"
+msgstr "  [yellow]![/] [bold]{count}[/] snapshot(s) in old format are not compatible with this standard:"
+
+msgid "antigua"
+msgstr "ancient"
+
+msgid "      [dim]... y {count} archivos más.[/dim]"
+msgstr "      [dim]... and {count} more files.[/dim]"
+
+msgid "Esta versión de toTelegram opera exclusivamente con el estándar v6.0 (.ttape y .json.xz).\nLos snapshots de versiones descontinuadas deben regenerarse o volver a subirse."
+msgstr "This version of toTelegram operates exclusively with standard v6.0 (.ttape and .json.xz).\nSnapshots from discontinued versions must be regenerated or uploaded again."
+
+msgid "Snapshots descontinuados"
+msgstr "Discontinued snapshots"
+
+msgid "  [bold red]X[/] [bold]{count}[/] snapshot(s) corruptos o con formato inválido:"
+msgstr "  [bold red]X[/] [bold]{count}[/] corrupted or invalid format snapshot(s):"
+
+msgid "Error de parsing"
+msgstr "Parsing error"

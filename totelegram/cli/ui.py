@@ -14,6 +14,7 @@ from rich.text import Text
 from rich.theme import Theme
 
 from totelegram.database import DatabaseSession, db_proxy
+from totelegram.i18n import _
 from totelegram.models import TelegramChat
 from totelegram.schemas import VALUE_NOT_SET
 
@@ -72,9 +73,9 @@ def get_friendly_chat_name(
 
     if val in ("me", "self", VALUE_NOT_SET):
         return (
-            "Mensajes Guardados (me)"
+            _("Mensajes Guardados (me)")
             if val in ("me", "self")
-            else "[yellow]Pendiente[/]"
+            else _("[yellow]Pendiente[/]")
         )
 
     if val.startswith("@"):
@@ -111,18 +112,21 @@ class UI:
         if seconds <= 0:
             return
 
-        UI.info(f"Iniciando pausa ({seconds // 60} min)...")
-        with console.status("[bold blue]Pausa activa...", spinner="line") as status:
+        UI.info(_("Iniciando pausa ({minutes} min)...").format(minutes=seconds // 60))
+        status_label = f"[bold blue]{_('Pausa activa...')}"
+        with console.status(status_label, spinner="line") as status:
             for i in range(seconds, 0, -1):
                 time.sleep(1)
                 if i % 60 == 0 or i <= 10:
                     mins = i // 60
                     secs = i % 60
                     status.update(
-                        f"[bold blue]Pausa activa: Siguiente parte en {mins}m {secs}s..."
+                        _(
+                            "[bold blue]Pausa activa: Siguiente parte en {mins}m {secs}s..."
+                        ).format(mins=mins, secs=secs)
                     )
 
-        UI.success("Pausa finalizada. Reanudando subida.")
+        UI.success(_("Pausa finalizada. Reanudando subida."))
 
     @staticmethod
     def _print(

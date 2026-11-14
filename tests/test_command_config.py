@@ -6,6 +6,7 @@ from typer.testing import CliRunner
 
 from totelegram.cli.commands.config import app
 from totelegram.cli.state import CLIState
+from totelegram.i18n import setup_i18n
 from totelegram.identity import Settings, SettingsManager
 from totelegram.schemas import AccessLevel
 
@@ -14,6 +15,7 @@ runner = CliRunner()
 
 class TestCliConfig(unittest.TestCase):
     def setUp(self):
+        setup_i18n("es")
         self.tmp_dir = TemporaryDirectory()
         self.config_path = Path(self.tmp_dir.name)
 

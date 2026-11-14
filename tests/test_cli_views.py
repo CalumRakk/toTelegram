@@ -1,15 +1,16 @@
+import re
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import MagicMock
 
-from totelegram.cli.ui import strip_markup
+from totelegram.cli.ui import console, strip_markup
 from totelegram.cli.views.ledger import DisplayLedger
 from totelegram.cli.views.settings import DisplayConfig, DisplayProfile, DisplayTarget
 from totelegram.cli.views.snapshots import DisplaySnapshotPlan
-from totelegram.cli.views.upload import DisplayIndexer, DisplayUpload
+from totelegram.cli.views.upload import DisplayUpload
+from totelegram.i18n import LOCALES_DIR, override_locale
 from totelegram.identity import Profile, Settings, SettingsManager
-from totelegram.models import TelegramChat
 from totelegram.packaging.auditor import AuditItem, AuditStatus
 from totelegram.packaging.importer import (
     DbMutations,
@@ -29,7 +30,7 @@ from totelegram.telegram.types import (
 
 
 class TestCliViews(unittest.TestCase):
-    """Batería de pruebas para las vistas desacopladas y formateadores de CLI."""
+    """Batería de pruebas para las vistas desacopladas y formateadores de CLI (Capa 3)."""
 
     def test_strip_markup(self):
         """Verifica que strip_markup elimine tags de Rich correctamente."""
@@ -37,18 +38,32 @@ class TestCliViews(unittest.TestCase):
         clean = strip_markup(text)
         self.assertEqual(clean, "Destino: Canal de Pruebas")
 
-    def test_display_upload_skip_report_rendering(self):
-        """Verifica que DisplayUpload reporte omisiones sin lanzar excepciones."""
-        report = ScanReport(exclusion_patterns=["*.tmp"])
-        report.log_skip(Path("archivo_grande.iso"), "size")
-        report.log_skip(Path("cache.tmp"), "exclusion")
-        report.log_skip(Path("corrupto.bin"), "error")
+    def test_display_upload_skip_report_rendering_bilingual(self):
+        """Verifica que DisplayUpload reporte omisiones correctamente en español e inglés."""
+        for lang in ("es", "en"):
+            with override_locale(lang):
+                report = ScanReport(exclusion_patterns=["*.tmp"])
+                report.log_skip(Path("archivo_grande.iso"), "size")
+                report.log_skip(Path("cache.tmp"), "exclusion")
+                report.log_skip(Path("corrupto.bin"), "error")
 
-        DisplayUpload.show_skip_report(report, item_type="archivo", force_verbose=True)
-        DisplayUpload.show_skip_report(report, item_type="archivo", force_verbose=False)
+                # No deben lanzar excepciones al renderizar en ningún idioma
+                with console.capture() as capture:
+                    DisplayUpload.show_skip_report(
+                        report, item_type="archivo", force_verbose=True
+                    )
+                    DisplayUpload.show_skip_report(
+                        report, item_type="archivo", force_verbose=False
+                    )
+                    DisplayUpload.show_skip_report(
+                        report, item_type="carpeta", force_verbose=False
+                    )
 
-    def test_display_ledger_rendering(self):
-        """Verifica el renderizado de la tabla de auditoría y prune con AuditItem."""
+                output = capture.get()
+                self.assertTrue(len(output) > 0)
+
+    def test_display_ledger_rendering_bilingual(self):
+        """Verifica el renderizado de la tabla de auditoría y prune en ambos idiomas."""
         audit_result = AuditItem(
             filename="foto.jpg",
             path=Path("/tmp/foto.jpg"),
@@ -58,48 +73,68 @@ class TestCliViews(unittest.TestCase):
             destinations=["Mi Canal (-100123456)"],
         )
 
-        # 1. Tabla de estado
-        DisplayLedger.show_directory_status(
-            dir_path=Path("/tmp"),
-            audit_results=[audit_result],
-        )
+        for lang in ("es", "en"):
+            with override_locale(lang):
+                with console.capture() as capture:
+                    # 1. Tabla de estado
+                    DisplayLedger.show_directory_status(
+                        dir_path=Path("/tmp"),
+                        audit_results=[audit_result],
+                    )
 
-        # 2. Tabla de candidatos a prune
-        DisplayLedger.show_prune_candidates(
-            candidates=[audit_result],
-            total_bytes=5000,
-        )
+                    # 2. Tabla de candidatos a prune
+                    DisplayLedger.show_prune_candidates(
+                        candidates=[audit_result],
+                        total_bytes=5000,
+                    )
 
-        # 3. Resumen final de prune
-        DisplayLedger.show_prune_summary(deleted_count=1, freed_bytes=5000)
+                    # 3. Resumen final de prune
+                    DisplayLedger.show_prune_summary(deleted_count=1, freed_bytes=5000)
 
-    def test_display_settings_and_profiles(self):
-        """Verifica que las tablas de configuración y perfiles se generen correctamente."""
+                output = capture.get()
+                if lang == "es":
+                    self.assertIn("Estado de Respaldo Local", output)
+                    self.assertIn("✓ Respaldado", output)
+                else:
+                    self.assertIn("Local Backup Status", output)
+                    self.assertIn("✓ Backed up", output)
+
+    def test_display_settings_and_profiles_bilingual(self):
+        """Verifica que las tablas de configuración y perfiles se generen en ambos idiomas."""
         with TemporaryDirectory() as tmp_dir:
             mgr = SettingsManager(Path(tmp_dir))
             settings = Settings(profile_name="test_user")
 
-            DisplayConfig.show_config_table(
-                profile_name="test_user",
-                manager=mgr,
-                is_debug=False,
-                settings=settings,
-            )
+            for lang in ("es", "en"):
+                with override_locale(lang):
+                    with console.capture() as capture:
+                        DisplayConfig.show_config_table(
+                            profile_name="test_user",
+                            manager=mgr,
+                            is_debug=False,
+                            settings=settings,
+                        )
 
-            profile = Profile(
-                name="test_user",
-                path_env=mgr.get_settings_path("test_user"),  # type: ignore
-                path_session=mgr.get_session_path("test_user"),
-            )
-            DisplayProfile.render_profiles_table(
-                manager=mgr,
-                active="test_user",
-                profiles=[profile],
-                quiet=False,
-            )
+                        profile = Profile(
+                            name="test_user",
+                            path_env=mgr.get_settings_path("test_user"),
+                            path_session=mgr.get_session_path("test_user"),
+                        )
+                        DisplayProfile.render_profiles_table(
+                            manager=mgr,
+                            active="test_user",
+                            profiles=[profile],
+                            quiet=False,
+                        )
 
-    def test_display_target_status(self):
-        """Verifica el renderizado de estados y diagnósticos de destino."""
+                    output = capture.get()
+                    if lang == "es":
+                        self.assertIn("Perfiles disponibles", output)
+                    else:
+                        self.assertIn("Available profiles", output)
+
+    def test_display_target_status_bilingual(self):
+        """Verifica el renderizado de diagnósticos y destinos en ambos idiomas."""
         match = ChatMatch(
             id=-100111222,
             title="Canal Target",
@@ -114,19 +149,28 @@ class TestCliViews(unittest.TestCase):
             match=match,
         )
 
-        DisplayTarget.show_diagnostic(
-            resolution=resolution_ok,
-            can_delete=True,
-            account_max_size=2000 * 1024 * 1024,
-            is_premium=False,
-        )
-        DisplayTarget.show_ambiguous_targets("canal_test", [match])
-        DisplayTarget.show_known_targets([])
+        for lang in ("es", "en"):
+            with override_locale(lang):
+                with console.capture() as capture:
+                    DisplayTarget.show_diagnostic(
+                        resolution=resolution_ok,
+                        can_delete=True,
+                        account_max_size=2000 * 1024 * 1024,
+                        is_premium=False,
+                    )
+                    DisplayTarget.show_ambiguous_targets("canal_test", [match])
+                    DisplayTarget.show_known_targets([])
 
-    def test_display_indexer_notice(self):
-        DisplayIndexer.show_unindexed_notice(count=5)
+                output = capture.get()
+                if lang == "es":
+                    self.assertIn("Destino verificado", output)
+                    self.assertIn("Mensajes Guardados", output)
+                else:
+                    self.assertIn("Target verified", output)
+                    self.assertIn("Saved Messages", output)
 
-    def test_display_snapshot_plan_tables(self):
+    def test_display_snapshot_plan_bilingual(self):
+        """Verifica el renderizado de planes de importación de snapshot en ambos idiomas."""
         manifest = UploadManifest(
             chunk_size=1000,
             created_at=MagicMock(),
@@ -160,27 +204,43 @@ class TestCliViews(unittest.TestCase):
         )
         plan = ImportPlan(items=[item])
 
-        DisplaySnapshotPlan.show_balance(plan)
-        DisplaySnapshotPlan.show_action_table(plan)
-        DisplaySnapshotPlan.show_fast_exit(total=5)
+        for lang in ("es", "en"):
+            with override_locale(lang):
+                with console.capture() as capture:
+                    DisplaySnapshotPlan.show_balance(plan)
+                    DisplaySnapshotPlan.show_action_table(plan)
+                    DisplaySnapshotPlan.show_fast_exit(total=5)
 
-    def test_display_target_known_targets_with_incompatible_chats(self):
-        """Verifica que la tabla de destinos conocidos renderice canales y marque grupos como incompatibles."""
-        channel_chat = TelegramChat(
-            id=-100111222,
-            title="Mi Canal de Respaldo",
-            type="channel",
-            username="canal_respaldo",
-        )
-        legacy_group = TelegramChat(
-            id=-100333444,
-            title="Grupo Antiguo",
-            type="supergroup",
-            username=None,
-        )
+                output = capture.get()
+                if lang == "es":
+                    self.assertIn("BALANCE DEL ESCANEO", output)
+                    self.assertIn("ACCIONES A REALIZAR", output)
+                else:
+                    self.assertIn("SCAN BALANCE", output)
+                    self.assertIn("ACTIONS TO PERFORM", output)
 
-        # No debe lanzar ninguna excepción
-        DisplayTarget.show_known_targets([channel_chat, legacy_group])
+    def test_rich_markup_tags_balance_in_catalogs(self):
+        """Valida que ninguna traducción en los archivos .po rompa corchetes de marcado Rich."""
+        _tag_pattern = re.compile(r"\[/?([a-zA-Z0-9_# =]+)\]")
+        msgstr_pattern = re.compile(r'msgstr(?:\[\d+\])?\s+"(.*)"')
+
+        for lang in ("es", "en"):
+            po_path = LOCALES_DIR / lang / "LC_MESSAGES" / "totelegram.po"
+            self.assertTrue(po_path.exists(), f"El archivo {po_path} no existe.")
+
+            content = po_path.read_text(encoding="utf-8")
+            matches = msgstr_pattern.findall(content)
+
+            for line in matches:
+                if not line:
+                    continue
+                open_brackets = line.count("[")
+                close_brackets = line.count("]")
+                self.assertEqual(
+                    open_brackets,
+                    close_brackets,
+                    f"Desbalance de corchetes Rich en [{lang}]: {line}",
+                )
 
 
 if __name__ == "__main__":

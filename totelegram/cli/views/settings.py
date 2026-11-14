@@ -8,6 +8,7 @@ from rich.table import Table
 from tartape.units import format_size
 
 from totelegram.cli.ui import UI, console, log_table
+from totelegram.i18n import _
 from totelegram.identity import Profile, Settings, SettingsManager
 from totelegram.models import TelegramChat
 from totelegram.schemas import (
@@ -26,36 +27,47 @@ class DisplayConfig:
         if not values:
             return False
 
+        action_verb = _("agregar") if action == "agregar" else _("eliminar")
         is_unique = len(values) == 1
         file_example = Path(values[0])
         cmd_example = f"{Commands.CONFIG_ADD_LIST if action == 'agregar' else Commands.CONFIG_REMOVE_LIST} {key} '*{file_example.suffix}'"
 
         if is_unique:
             UI.warn(
-                f"No se detectó un patrón comodin (*), pero el valor coincide con el archivo existente: {file_example.name}"
+                _(
+                    "No se detectó un patrón comodin (*), pero el valor coincide con el archivo existente: {name}"
+                ).format(name=file_example.name)
             )
         else:
             UI.warn(
-                f"No se detectó un patrón, pero se detectaron {len(values)} archivos existentes."
+                _(
+                    "No se detectó un patrón, pero se detectaron {count} archivos existentes."
+                ).format(count=len(values))
             )
             UI.print(
-                "[i]Esto sugiere que tu terminal expandió un comodín antes de que el programa lo recibiera.[/]"
+                _(
+                    "[i]Esto sugiere que tu terminal expandió un comodín antes de que el programa lo recibiera.[/]"
+                )
             )
 
         UI.tip(
-            f"Para {action} un patrón que aplique a archivos futuros, usa comillas simples:",
+            _(
+                "Para {action} un patrón que aplique a archivos futuros, usa comillas simples:"
+            ).format(action=action_verb),
             commands=[cmd_example],
             spacing="top",
         )
 
         indicative = (
-            f"el archivo '{file_example.name}'"
+            _("el archivo '{name}'").format(name=file_example.name)
             if is_unique
-            else f"estos {len(values)} archivos"
+            else _("estos {count} archivos").format(count=len(values))
         )
 
         return typer.confirm(
-            f"\n¿Deseas {action} {indicative} literalmente en la configuración?",
+            _(
+                "\n¿Deseas {action} {indicative} literalmente en la configuración?"
+            ).format(action=action_verb, indicative=indicative),
             default=False,
         )
 
@@ -77,12 +89,13 @@ class DisplayConfig:
         is_debug: bool,
         settings: Settings,
     ):
-        UI.info(f"Configuración del perfil: [green]{profile_name}[/green]")
+        table_title = _("Configuración del perfil: {name}").format(name=profile_name)
+        UI.info(table_title)
         table = Table(show_header=True, title_style=COLORS.TABLE_TITLE)
-        table.add_column("Opción (Key)", no_wrap=True)
-        table.add_column("Tipo")
-        table.add_column("Valor Actual")
-        table.add_column("Descripción")
+        table.add_column(_("Opción (Key)"), no_wrap=True)
+        table.add_column(_("Tipo"))
+        table.add_column(_("Valor Actual"))
+        table.add_column(_("Descripción"))
 
         default_settings = Settings.get_default_settings()
         for field_name, default_value in default_settings.model_dump().items():
@@ -115,7 +128,7 @@ class DisplayConfig:
                 )
 
         console.print(table)
-        log_table(table, f"Configuración del perfil: {profile_name}")
+        log_table(table, table_title)
 
 
 class DisplayProfile:
@@ -131,16 +144,17 @@ class DisplayProfile:
     ) -> None:
         console.print()
         if quiet:
-            console.print("Perfiles disponibles:")
+            console.print(_("Perfiles disponibles:"))
             for profile in profiles:
                 console.print(f" - {profile.name}")
             return
 
-        table = Table(title="Perfiles disponibles", title_style=COLORS.TABLE_TITLE)
-        table.add_column("Estado", no_wrap=True)
-        table.add_column("Perfil", style="bold white")
-        table.add_column("Sesión (.session)", justify="center")
-        table.add_column("Configuración (.json)", justify="center")
+        table_title = _("Perfiles disponibles")
+        table = Table(title=table_title, title_style=COLORS.TABLE_TITLE)
+        table.add_column(_("Estado"), no_wrap=True)
+        table.add_column(_("Perfil"), style="bold white")
+        table.add_column(_("Sesión (.session)"), justify="center")
+        table.add_column(_("Configuración (.json)"), justify="center")
 
         was_orphan = False
         for profile in profiles:
@@ -148,10 +162,14 @@ class DisplayProfile:
             active_marker = "[bold green]*[/]" if is_active else " "
 
             auth_status = (
-                "[bold green]OK[/]" if profile.has_session else "[bold red]FALTA[/]"
+                _("[bold green]OK[/]")
+                if profile.has_session
+                else _("[bold red]FALTA[/]")
             )
             config_status = (
-                "[bold green]OK[/]" if profile.has_config else "[bold red]FALTA[/]"
+                _("[bold green]OK[/]")
+                if profile.has_config
+                else _("[bold red]FALTA[/]")
             )
 
             if not profile.is_trinity:
@@ -165,16 +183,16 @@ class DisplayProfile:
             )
 
         console.print(table)
-        log_table(table, "Perfiles disponibles")
+        log_table(table, table_title)
 
         if was_orphan:
             console.print()
-            UI.warn("Se detectó al menos un perfil huérfano o incompleto.")
-            UI.info("Usa 'totelegram logout <PERFIL>' para limpiarlo.")
+            UI.warn(_("Se detectó al menos un perfil huérfano o incompleto."))
+            UI.info(_("Usa 'totelegram logout <PERFIL>' para limpiarlo."))
 
     @staticmethod
     def announce_profile_used(profile_name: str) -> None:
-        UI.info(f"Perfil Actual: [bold]{profile_name}[/]")
+        UI.info(_("Perfil Actual: [bold]{name}[/]").format(name=profile_name))
 
 
 class DisplayTarget:
@@ -192,29 +210,31 @@ class DisplayTarget:
         assert match is not None
 
         content = [
-            f"• Título:       [bold cyan]{match.title}[/]",
-            f"• ID del chat:  [dim]{match.id}[/]",
-            f"• Tipo de chat: [magenta]{match.type}[/]",
+            f"• {_('Título')}:       [bold cyan]{match.title}[/]",
+            f"• {_('ID del chat')}:  [dim]{match.id}[/]",
+            f"• {_('Tipo de chat')}: [magenta]{match.type}[/]",
         ]
         if match.username:
-            content.append(f"• Alias:        @{match.username}")
+            content.append(f"• {_('Alias')}:        @{match.username}")
 
         # Permisos y capacidades
-        tier_label = "Premium (4 GB)" if is_premium else "Estándar (2 GB)"
+        tier_label = _("Premium (4 GB)") if is_premium else _("Estándar (2 GB)")
         content.append(
-            f"• Capacidad:    [bold green]{format_size(account_max_size)}[/] [dim]({tier_label})[/dim]"
+            f"• {_('Capacidad')}:    [bold green]{format_size(account_max_size)}[/] [dim]({tier_label})[/dim]"
         )
 
         delete_perm = (
-            "[bold green]Sí[/] [dim](permite reorganización limpia)[/]"
+            _("[bold green]Sí[/] [dim](permite reorganización limpia)[/]")
             if can_delete
-            else "[yellow]No[/] [dim](solo subidas continuas sin limpieza)[/]"
+            else _("[yellow]No[/] [dim](solo subidas continuas sin limpieza)[/]")
         )
-        content.append(f"• Borrar msgs:  {delete_perm}")
+        content.append(f"• {_('Borrar msgs')}:  {delete_perm}")
 
         panel = Panel(
             "\n".join(content),
-            title="[bold green]✓ Destino verificado y listo para operar[/bold green]",
+            title=_(
+                "[bold green]✓ Destino verificado y listo para operar[/bold green]"
+            ),
             border_style="green",
             padding=(1, 2),
         )
@@ -223,12 +243,13 @@ class DisplayTarget:
         # Sugerencias prácticas listas para copiar
         target_param = f'"{match.title}"' if " " in match.title else match.title
         UI.educational_tip(
-            title="Cómo usar este destino",
-            message="Usa la opción [bold]-t / --target[/] en tus operaciones:",
+            title=_("Cómo usar este destino"),
+            message=_("Usa la opción [bold]-t / --target[/] en tus operaciones:"),
             commands=[
                 f"totelegram send archivo.mp4 -t {target_param}",
                 f"totelegram backup ./mi_carpeta -t {target_param}",
-                f'export TOTELEGRAM_TARGET="{match.title}"  # Para sesiones continuas',
+                f'export TOTELEGRAM_TARGET="{match.title}"  # '
+                + _("Para sesiones continuas"),
             ],
             spacing="top",
             border_style="cyan",
@@ -238,19 +259,22 @@ class DisplayTarget:
     def show_ambiguous_targets(query: str, candidates: list[ChatMatch]) -> None:
         """Muestra los candidatos cuando un nombre coincide con múltiples chats."""
         UI.warn(
-            f"La búsqueda '[bold]{query}[/]' arrojó múltiples coincidencias ({len(candidates)} chats)."
+            _(
+                "La búsqueda '[bold]{query}[/]' arrojó múltiples coincidencias ({count} chats)."
+            ).format(query=query, count=len(candidates))
         )
+        table_title = _("Coincidencias encontradas en Telegram")
         table = Table(
-            title="Coincidencias encontradas en Telegram",
+            title=table_title,
             show_header=True,
             header_style="bold cyan",
             title_style="bold blue",
             expand=True,
         )
-        table.add_column("ID Directo", style="bold yellow", no_wrap=True)
-        table.add_column("Título", style="white")
-        table.add_column("Tipo", style="magenta")
-        table.add_column("Username / Alias", style="dim")
+        table.add_column(_("ID Directo"), style="bold yellow", no_wrap=True)
+        table.add_column(_("Título"), style="white")
+        table.add_column(_("Tipo"), style="magenta")
+        table.add_column(_("Username / Alias"), style="dim")
 
         for c in candidates:
             alias = f"@{c.username}" if c.username else "[dim]--[/dim]"
@@ -258,7 +282,9 @@ class DisplayTarget:
 
         console.print(table)
         UI.tip(
-            "Para evitar ambigüedad, usa el ID numérico directo en lugar del nombre:",
+            _(
+                "Para evitar ambigüedad, usa el ID numérico directo en lugar del nombre:"
+            ),
             commands=[f"totelegram send ... -t {candidates[0].id}"],
             spacing="top",
         )
@@ -266,24 +292,25 @@ class DisplayTarget:
     @staticmethod
     def show_known_targets(chats: list[TelegramChat]) -> None:
         """Renderiza la tabla de destinos conocidos en este equipo."""
+        table_title = _("Destinos conocidos en este equipo")
         table = Table(
-            title="Destinos conocidos en este equipo",
+            title=table_title,
             show_header=True,
             header_style="bold cyan",
             title_style="bold blue",
             expand=True,
         )
-        table.add_column("Destino", style="bold white")
-        table.add_column("Identificador / -t", style="bold yellow")
-        table.add_column("Tipo", style="magenta")
-        table.add_column("Última verificación", style="dim")
+        table.add_column(_("Destino"), style="bold white")
+        table.add_column(_("Identificador / -t"), style="bold yellow")
+        table.add_column(_("Tipo"), style="magenta")
+        table.add_column(_("Última verificación"), style="dim")
 
         # Siempre incluimos Mensajes Guardados en primer lugar
         table.add_row(
-            "Mensajes Guardados (Buzón personal)",
+            _("Mensajes Guardados (Buzón personal)"),
             "me",
-            "Personal",
-            "[dim]Siempre disponible[/dim]",
+            _("Personal"),
+            _("[dim]Siempre disponible[/dim]"),
         )
 
         for chat in chats:
@@ -302,21 +329,25 @@ class DisplayTarget:
                     if (chat.title and " " in chat.title)
                     else str(chat.id)
                 )
-                type_display = "[magenta]Canal[/magenta]"
+                type_display = _("[magenta]Canal[/magenta]")
             else:
                 identifier = "[dim red]Incompatible[/dim red]"
-                type_display = f"[dim red]{chat.type.capitalize()}[/dim red]"
+                type_display = _("[dim red]{type}[/dim red]").format(
+                    type=chat.type.capitalize()
+                )
 
             last_v = (
                 chat.last_verified.strftime("%Y-%m-%d %H:%M")
                 if chat.last_verified
-                else "[dim]Desconocida[/dim]"
+                else _("[dim]Desconocida[/dim]")
             )
             table.add_row(title, identifier, type_display, str(last_v))
 
         console.print(table)
         UI.tip(
-            "Puedes usar cualquiera de estos nombres o IDs con la opción [bold]-t[/]:",
+            _(
+                "Puedes usar cualquiera de estos nombres o IDs con la opción [bold]-t[/]:"
+            ),
             commands=[
                 "totelegram send archivo.mp4 -t me",
                 'totelegram send archivo.mp4 -t "Nombre del Canal"',

@@ -15,6 +15,7 @@ from totelegram.cli.logic import (
 )
 from totelegram.cli.state import CLIState
 from totelegram.database import DatabaseSession
+from totelegram.i18n import setup_i18n
 from totelegram.identity import SettingsManager
 from totelegram.types import JobExecutionResult, StrategyResult
 
@@ -25,6 +26,7 @@ class TestCliUploadFlow(unittest.TestCase):
     """Pruebas del runner unificado de subidas y los objetos de orquestación."""
 
     def setUp(self):
+        setup_i18n("es")
         # Base de datos SQLite en memoria para que db_proxy esté inicializado
         self.db_session = DatabaseSession("sqlite:///:memory:", auto_init_schema=True)
         self.db = self.db_session.start()

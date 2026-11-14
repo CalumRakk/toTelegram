@@ -12,19 +12,19 @@ from rich.progress import (
 )
 
 from totelegram.cli.ui import UI, console
+from totelegram.i18n import _, _n
 from totelegram.types import DuplicateCandidate
 
 if TYPE_CHECKING:
     from totelegram.models import Job, Payload
 
 # Umbral mínimo para mostrar la barra (100 MB)
-# Archivos menores a esto se procesan en menos de 200ms y no parpadean en la UI
 HASH_VISUAL_THRESHOLD = 100 * 1024 * 1024
 
 
 class RichUploadObserver:
-    """
-    Implementación visual de UploadObserver utilizando Rich.
+    """Implementación visual de UploadObserver utilizando Rich.
+
     Maneja barras de progreso reactivas, cálculo de velocidad/ETA y cuentas regresivas de pausas.
     """
 
@@ -40,8 +40,10 @@ class RichUploadObserver:
     def on_relocation_start(self, pieces_count: int) -> None:
         """Notifica al usuario sobre la reubicación de piezas al fondo del canal."""
         UI.info(
-            f"Reorganizando [bold]{pieces_count}[/] piezas previas al fondo del canal "
-            f"[dim cyan](Anti-Waste TOC: 0 bytes transferidos)[/]..."
+            _(
+                "Reorganizando [bold]{count}[/] piezas previas al fondo del canal "
+                "[dim cyan](Anti-Waste TOC: 0 bytes transferidos)[/]..."
+            ).format(count=pieces_count)
         )
 
     def on_potential_duplicates(self, duplicates: list["DuplicateCandidate"]) -> None:
@@ -53,7 +55,9 @@ class RichUploadObserver:
         from tartape.units import format_size
 
         lines = [
-            "[yellow]Se detectaron archivos con nombres similares en el chat de destino:[/yellow]",
+            _(
+                "[yellow]Se detectaron archivos con nombres similares en el chat de destino:[/yellow]"
+            ),
             "",
         ]
         for d in duplicates[:4]:
@@ -65,12 +69,14 @@ class RichUploadObserver:
 
         lines.append("")
         lines.append(
-            "[dim]Continuando con la subida... [italic](Presiona Ctrl+C si prefieres cancelar)[/italic][/dim]"
+            _(
+                "[dim]Continuando con la subida... [italic](Presiona Ctrl+C si prefieres cancelar)[/italic][/dim]"
+            )
         )
 
         panel = Panel(
             "\n".join(lines),
-            title="[bold yellow]Posible duplicado en Telegram[/bold yellow]",
+            title=_("[bold yellow]Posible duplicado en Telegram[/bold yellow]"),
             border_style="yellow",
             padding=(1, 2),
         )
@@ -104,7 +110,7 @@ class RichUploadObserver:
             description="hashing",
             total=total_bytes,
             filename=filename,
-            label="[Indexando MD5]",
+            label=_("[Indexando MD5]"),
         )
 
     def on_hash_progress(self, current_bytes: int, total_bytes: int) -> None:
@@ -124,9 +130,11 @@ class RichUploadObserver:
             self._hash_progress.stop()
             self._hash_progress = None
 
-            # Mensaje sutil y elegante de confirmación
-            short_hash = md5sum
-            UI.info(f"Huella digital verificada: [bold dim]{short_hash}[/bold dim]")
+            UI.info(
+                _("Huella digital verificada: [bold dim]{hash}[/bold dim]").format(
+                    hash=md5sum
+                )
+            )
 
     def on_job_start(self, job: "Job", total_payloads: int) -> None:
         pass
@@ -202,14 +210,22 @@ class RichUploadObserver:
             self._progress.stop()
             self._progress = None
 
-        UI.success(f"Pieza [bold]{payload.filename}[/] subida y verificada.")
+        UI.success(
+            _("Pieza [bold]{filename}[/] subida y verificada.").format(
+                filename=payload.filename
+            )
+        )
 
     def on_pause_start(self, total_seconds: int, reason: str) -> None:
         """Inicia una pausa visual activa."""
         mins = total_seconds // 60
         secs = total_seconds % 60
         dur_str = f"{mins}m {secs}s" if mins > 0 else f"{secs}s"
-        UI.info(f"Iniciando pausa de seguridad ({dur_str}) [{reason}]...")
+        UI.info(
+            _("Iniciando pausa de seguridad ({duration}) [{reason}]...").format(
+                duration=dur_str, reason=reason
+            )
+        )
 
     def on_pause_tick(self, remaining_seconds: int, total_seconds: int) -> None:
         """Actualiza la cuenta regresiva en vivo segundo a segundo."""
@@ -217,35 +233,39 @@ class RichUploadObserver:
         secs = remaining_seconds % 60
         time_str = f"{mins:02d}:{secs:02d}"
 
-        console.print(
-            f"  [italic blue] Pausa activa: Siguiente operación en {time_str}... [dim](Lease renovado)[/][/]",
-            end="\r",
-        )
+        msg = _(
+            "  [italic blue] Pausa activa: Siguiente operación en {time}... [dim](Lease renovado)[/][/]"
+        ).format(time=time_str)
+        console.print(msg, end="\r")
 
     def on_pause_end(self) -> None:
         """Limpia el mensaje de pausa."""
         console.print(" " * 80, end="\r")
-        UI.success("Pausa finalizada. Reanudando operaciones.")
+        UI.success(_("Pausa finalizada. Reanudando operaciones."))
 
     def on_forward_success(self, job: "Job", pieces_count: int) -> None:
         """Confirma la finalización instantánea por Smart Forward."""
         UI.success(
-            f"Smart Forward exitoso: [bold]{pieces_count}[/] piezas vinculadas instantáneamente (0 bytes transferidos)."
+            _(
+                "Smart Forward exitoso: [bold]{count}[/] piezas vinculadas instantáneamente (0 bytes transferidos)."
+            ).format(count=pieces_count)
         )
 
     def on_job_complete(self, job: "Job", snapshot_created: bool) -> None:
         """Notifica el cierre de un Job."""
         if job.snapshot_message_id:
             UI.success(
-                f"Snapshot publicado en Telegram [bold cyan](Msg ID: {job.snapshot_message_id})[/]"
+                _(
+                    "Snapshot publicado en Telegram [bold cyan](Msg ID: {msg_id})[/]"
+                ).format(msg_id=job.snapshot_message_id)
             )
         elif snapshot_created:
-            UI.info("Snapshot local generado e indexado.")
+            UI.info(_("Snapshot local generado e indexado."))
 
 
 class RichDownloadObserver:
-    """
-    Implementación visual de DownloadObserver utilizando Rich.
+    """Implementación visual de DownloadObserver utilizando Rich.
+
     Maneja barras de progreso para descarga de piezas de Telegram y extracción de archivos.
     """
 
@@ -258,7 +278,9 @@ class RichDownloadObserver:
     def on_part_skipped(self, part_index: int, total_parts: int, filename: str):
         label = f"[{part_index}/{total_parts}]" if total_parts > 1 else "[1/1]"
         UI.info(
-            f"{label} Pieza [bold]{filename}[/] ya en disco y verificada [dim](Reutilizada)[/dim]."
+            _(
+                "{label} Pieza [bold]{filename}[/] ya en disco y verificada [dim](Reutilizada)[/dim]."
+            ).format(label=label, filename=filename)
         )
 
     def on_part_download_start(
@@ -306,17 +328,25 @@ class RichDownloadObserver:
             self._dl_progress.stop()
             self._dl_progress = None
 
-        UI.success(f"Pieza [bold]{filename}[/] descargada y verificada (MD5 OK).")
+        UI.success(
+            _("Pieza [bold]{filename}[/] descargada y verificada (MD5 OK).").format(
+                filename=filename
+            )
+        )
 
     def on_extraction_start(self, total_files: int):
         console.print()
         UI.info(
-            f"Iniciando extracción y verificación de [bold]{total_files}[/] archivos..."
+            _n(
+                "Iniciando extracción y verificación de [bold]{n}[/] archivo...",
+                "Iniciando extracción y verificación de [bold]{n}[/] archivos...",
+                total_files,
+            ).format(n=total_files)
         )
         if self._extract_progress is None:
             self._extract_progress = Progress(
                 SpinnerColumn(),
-                TextColumn("[bold green]Extrayendo:[/]"),
+                TextColumn(f"[bold green]{_('Extrayendo:')}[/]"),
                 TextColumn("[white]{task.fields[filename]}[/]"),
                 BarColumn(bar_width=None),
                 "[progress.percentage]{task.percentage:>3.0f}%",
@@ -330,7 +360,7 @@ class RichDownloadObserver:
         self._extract_task_id = self._extract_progress.add_task(
             description="extract",
             total=total_files,
-            filename="Iniciando...",
+            filename=_("Iniciando..."),
         )
 
     def on_file_extracted(
@@ -357,5 +387,9 @@ class RichDownloadObserver:
             self._extract_progress = None
 
         UI.success(
-            f"Extracción completada: [bold]{total_files}[/] archivos validados al 100%."
+            _n(
+                "Extracción completada: [bold]{n}[/] archivo validado al 100%.",
+                "Extracción completada: [bold]{n}[/] archivos validados al 100%.",
+                total_files,
+            ).format(n=total_files)
         )

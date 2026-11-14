@@ -25,6 +25,7 @@ from totelegram.exceptions import (
     TargetNotSetError,
     UnsupportedTargetTypeError,
 )
+from totelegram.i18n import _, _n
 from totelegram.identity import Settings
 from totelegram.models import Source, TelegramUser
 from totelegram.packaging.indexer import TapeIndexService
@@ -98,12 +99,12 @@ class UploadRequest:
     @property
     def item_label(self) -> str:
         """Etiqueta en singular según la naturaleza del recurso."""
-        return "carpeta" if self.is_backup else "archivo"
+        return _("carpeta") if self.is_backup else _("archivo")
 
     @property
     def item_plural_label(self) -> str:
         """Etiqueta en plural según la naturaleza del recurso."""
-        return "carpetas" if self.is_backup else "archivos"
+        return _("carpetas") if self.is_backup else _("archivos")
 
     def confirm_cleanup(self, count: int, filename: str) -> bool:
         """Gestiona la confirmación interactiva para eliminar partes previas ante un --force."""
@@ -112,10 +113,12 @@ class UploadRequest:
 
         console.print()
         UI.warn(
-            f"Existen [bold]{count}[/] partes previas en Telegram del archivo '[bold]{filename}[/]'.\n"
-            f"Al continuar con [bold]--force[/], se eliminarán de Telegram para reiniciar la subida desde cero."
+            _(
+                "Existen [bold]{count}[/] partes previas en Telegram del archivo '[bold]{filename}[/]'.\n"
+                "Al continuar con [bold]--force[/], se eliminarán de Telegram para reiniciar la subida desde cero."
+            ).format(count=count, filename=filename)
         )
-        return typer.confirm("¿Deseas eliminarlas y continuar?", default=False)
+        return typer.confirm(_("¿Deseas eliminarlas y continuar?"), default=False)
 
     @contextmanager
     def open_database(self) -> Generator[peewee.Database, None, None]:
@@ -133,7 +136,9 @@ class UploadRequest:
 
         if self.force:
             UI.warn(
-                f"Forzando la subida de {self.item_plural_label} sin comprobar el estado previo."
+                _(
+                    "Forzando la subida de {items} sin comprobar el estado previo."
+                ).format(items=self.item_plural_label)
             )
 
         with self.state.scope() as (client, _):
@@ -145,9 +150,6 @@ class UploadRequest:
                 target_override=self.target,
             )
             yield session
-
-    # Alias para retrocompatibilidad
-    open_session = open_preflight_session
 
 
 class CandidateItem:
@@ -174,7 +176,7 @@ class CandidateItem:
 
     @property
     def label(self) -> str:
-        return "Carpeta" if self.is_backup else "Archivo"
+        return _("Carpeta") if self.is_backup else _("Archivo")
 
     def announce_incompatible_capacity(self, err: IncompatibleCapacityError) -> None:
         """Informa que el elemento fue omitido por requerir una cuenta con mayor capacidad."""
@@ -184,7 +186,7 @@ class CandidateItem:
         """Emite el encabezado y análisis visual previo al inicio de la subida."""
         if self.is_backup:
             DisplayUpload.show_backup_header(self.path.name, self.index, self.total)
-            with UI.loading("Analizando contenido..."):
+            with UI.loading(_("Analizando contenido...")):
                 report_internal = self.inventory_engine.scan_backup_internal(self.path)
                 time.sleep(0.3)
             DisplayUpload.show_internal_scan_result(report_internal)
@@ -194,7 +196,9 @@ class CandidateItem:
     def announce_already_fulfilled(self) -> None:
         """Informa que el recurso ya se encuentra al 100% en el canal."""
         UI.info(
-            f"{self.label} [bold]{self.path.name}[/] ya está 100% completado en Telegram."
+            _("{label} [bold]{name}[/] ya está 100% completado en Telegram.").format(
+                label=self.label, name=self.path.name
+            )
         )
 
     def announce_success(self, result: JobExecutionResult) -> None:
@@ -236,7 +240,7 @@ class UploadInventory:
         )
 
         if request.is_backup:
-            with console.status("[dim]Escaneando directorios...[/]"):
+            with console.status(_("[dim]Escaneando directorios...[/]")):
                 scan_report = engine.scan_backup_inventory(request.paths)
 
             # Auto-healing o aviso del catálogo de cintas en Telegram
@@ -244,12 +248,17 @@ class UploadInventory:
             tape_report = indexer.auto_heal_or_report(session.tg_chat.id)
             if tape_report.auto_healed:
                 UI.info(
-                    f"Auto-sanadas [bold]{tape_report.healed_count}[/] cintas no indexadas en segundo plano."
+                    _(
+                        "Auto-sanadas [bold]{count}[/] cintas no indexadas en segundo plano."
+                    ).format(count=tape_report.healed_count)
                 )
             elif tape_report.needs_manual_sync:
                 DisplayIndexer.show_unindexed_notice(tape_report.unindexed_count)
         else:
-            with console.status(f"[dim]Escaneando {len(request.paths)} rutas...[/dim]"):
+            scan_msg = _("[dim]Escaneando {count} rutas...[/dim]").format(
+                count=len(request.paths)
+            )
+            with console.status(scan_msg):
                 scan_report = engine.scan_granular(request.paths)
 
         chat_title = (
@@ -296,16 +305,20 @@ def announce_session_connection(session: UploadSession) -> None:
     """Muestra el banner informativo de conexión y estado de cuenta/destino."""
     status = get_patch_status()
     if not status["applied"]:
-        UI.error("Core Engine: Pyrogram Runtime Patches [FAILED]")
+        UI.error(_("Core Engine: Pyrogram Runtime Patches [FAILED]"))
 
     user = session.owner.first_name or session.owner.username
     chat_n = session.tg_chat.title or session.tg_chat.username
-    UI.success(f"Conectado como [bold]{user}[/]")
+    UI.success(_("Conectado como [bold]{user}[/]").format(user=user))
 
     if not session.settings.has_custom_app:
-        UI.warn("Cuenta en modo público compartido (my.telegram.org recomendado).")
+        UI.warn(_("Cuenta en modo público compartido (my.telegram.org recomendado)."))
 
-    UI.info(f"Destino: [bold cyan]{chat_n}[/] [dim](ID: {session.tg_chat.id})[/]")
+    UI.info(
+        _("Destino: [bold cyan]{chat}[/] [dim](ID: {chat_id})[/]").format(
+            chat=chat_n, chat_id=session.tg_chat.id
+        )
+    )
     UI.print("", indent=False)
 
 
@@ -323,7 +336,10 @@ def prepare_upload_session(
     resolver = TargetResolver(client, db)
     resolved_chat_id: int | str | None = None
 
-    with UI.loading(f"Resolviendo destino '[bold]{target_override}[/]'..."):
+    resolve_msg = _("Resolviendo destino '[bold]{target}[/]'...").format(
+        target=target_override
+    )
+    with UI.loading(resolve_msg):
         resolution = resolver.resolve(target_override)
 
     if resolution.status == TargetResolutionStatus.RESOLVED:
@@ -347,7 +363,7 @@ def prepare_upload_session(
         )
 
     # Sincronización con Telegram
-    with UI.loading("Sincronizando con Telegram..."):
+    with UI.loading(_("Sincronizando con Telegram...")):
         try:
             tg_chat = cast("Chat", client.get_chat(resolved_chat_id))
             time.sleep(0.5)
@@ -364,9 +380,12 @@ def prepare_upload_session(
                 )
 
         except Exception as e:
+            err_msg = _(
+                "Error de conexión con el chat destino ({chat_id}): {error}"
+            ).format(chat_id=resolved_chat_id, error=e)
             raise InfrastructureError(
-                f"Error de conexión con el chat destino ({resolved_chat_id}): {e}",
-                title="Error de Conexión",
+                err_msg,
+                title=_("Error de Conexión"),
                 exit_code=1,
             ) from e
 

@@ -5,6 +5,7 @@ from rich.table import Table
 from tartape.units import format_size
 
 from totelegram.cli.ui import UI, console, log_table
+from totelegram.i18n import _, _n
 from totelegram.packaging.auditor import AuditStatus
 
 if TYPE_CHECKING:
@@ -22,21 +23,24 @@ class DisplayLedger:
     ) -> None:
         if not audit_results:
             UI.info(
-                f"El directorio '[bold]{dir_path.name}[/]' no contiene elementos para auditar."
+                _(
+                    "El directorio '[bold]{name}[/]' no contiene elementos para auditar."
+                ).format(name=dir_path.name)
             )
             return
 
+        table_title = _("Estado de Respaldo Local — {name}").format(name=dir_path.name)
         table = Table(
-            title=f"Estado de Respaldo Local — {dir_path.name}",
+            title=table_title,
             show_header=True,
             header_style="bold cyan",
             title_style="bold blue",
             expand=True,
         )
-        table.add_column("Elemento", style="white")
-        table.add_column("Tamaño", justify="right", style="dim")
-        table.add_column("Destinos en Telegram", style="dim")
-        table.add_column("Estado", justify="center")
+        table.add_column(_("Elemento"), style="white")
+        table.add_column(_("Tamaño"), justify="right", style="dim")
+        table.add_column(_("Destinos en Telegram"), style="dim")
+        table.add_column(_("Estado"), justify="center")
 
         for res in audit_results:
             # Tamaño: para directorios neutrales no mostramos tamaño
@@ -51,39 +55,40 @@ class DisplayLedger:
             else:
                 dest_str = "[dim]--[/dim]"
 
-            # Matriz de estados acordada
+            # Matriz de estados traducida
             if res.status == AuditStatus.DIRECTORY:
-                status_str = "[dim]Directorio[/dim]"
+                status_str = _("[dim]Directorio[/dim]")
             elif res.status == AuditStatus.TAPE_BACKUP:
-                status_str = "[bold green]✓ Cinta TAR[/bold green]"
+                status_str = _("[bold green]✓ Cinta TAR[/bold green]")
             elif res.status == AuditStatus.LOCAL_SNAPSHOT:
-                status_str = "[cyan]✓ Respaldado (Snapshot local)[/cyan]"
+                status_str = _("[cyan]✓ Respaldado (Snapshot local)[/cyan]")
             elif res.status == AuditStatus.REMOTE_ONLY:
-                status_str = "[dim red]☁ Solo en Telegram[/dim red]"
+                status_str = _("[dim red]☁ Solo en Telegram[/dim red]")
             elif res.status == AuditStatus.MODIFIED:
-                status_str = "[bold yellow]! Modificado localmente[/bold yellow]"
+                status_str = _("[bold yellow]! Modificado localmente[/bold yellow]")
             elif res.status == AuditStatus.BACKED_UP:
-                status_str = "[bold green]✓ Respaldado[/bold green]"
+                status_str = _("[bold green]✓ Respaldado[/bold green]")
             else:  # AuditStatus.PENDING
-                status_str = "[dim]Pendiente de subida[/dim]"
+                status_str = _("[dim]Pendiente de subida[/dim]")
 
             table.add_row(res.filename, size_str, dest_str, status_str)
 
         console.print(table)
-        log_table(table, f"Estado de Respaldo Local — {dir_path.name}")
+        log_table(table, table_title)
 
     @staticmethod
     def show_prune_candidates(candidates: list["AuditItem"], total_bytes: int) -> None:
+        table_title = _("Archivos Respaldados Listos para Liberar Espacio")
         table = Table(
-            title="Archivos Respaldados Listos para Liberar Espacio",
+            title=table_title,
             show_header=True,
             header_style="bold green",
             title_style="bold green",
             expand=True,
         )
-        table.add_column("Archivo a eliminar", style="bold white")
-        table.add_column("Tamaño", justify="right", style="dim cyan")
-        table.add_column("Verificado en Telegram", style="dim")
+        table.add_column(_("Archivo a eliminar"), style="bold white")
+        table.add_column(_("Tamaño"), justify="right", style="dim cyan")
+        table.add_column(_("Verificado en Telegram"), style="dim")
 
         for c in candidates:
             dest_str = ", ".join(c.destinations) if c.destinations else "[dim]--[/dim]"
@@ -91,16 +96,27 @@ class DisplayLedger:
 
         console.print(table)
         UI.info(
-            f"Total de espacio a recuperar: [bold cyan]{format_size(total_bytes)}[/] en [bold]{len(candidates)}[/] archivos."
+            _n(
+                "Total de espacio a recuperar: [bold cyan]{size}[/] en [bold]{n}[/] archivo.",
+                "Total de espacio a recuperar: [bold cyan]{size}[/] en [bold]{n}[/] archivos.",
+                len(candidates),
+            ).format(size=format_size(total_bytes), n=len(candidates))
         )
 
     @staticmethod
     def show_prune_summary(deleted_count: int, freed_bytes: int) -> None:
         UI.success(
-            f"Liberación completada: Se eliminaron [bold]{deleted_count}[/] archivos locales "
-            f"recuperando [bold cyan]{format_size(freed_bytes)}[/] de espacio en disco."
+            _n(
+                "Liberación completada: Se eliminó [bold]{n}[/] archivo local "
+                "recuperando [bold cyan]{size}[/] de espacio en disco.",
+                "Liberación completada: Se eliminaron [bold]{n}[/] archivos locales "
+                "recuperando [bold cyan]{size}[/] de espacio en disco.",
+                deleted_count,
+            ).format(n=deleted_count, size=format_size(freed_bytes))
         )
         UI.tip(
-            "El registro se conserva en la base de datos local ('☁ Solo en Telegram'). "
-            "Puedes restaurar cualquiera de estos archivos cuando lo necesites usando 'totelegram download'."
+            _(
+                "El registro se conserva en la base de datos local ('☁ Solo en Telegram'). "
+                "Puedes restaurar cualquiera de estos archivos cuando lo necesites usando 'totelegram download'."
+            )
         )
