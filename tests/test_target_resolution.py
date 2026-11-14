@@ -315,6 +315,8 @@ class TestTargetResolutionAndMandatoryPolicy(unittest.TestCase):
             self.assertEqual(res.chat_id, -100222)
 
     def test_prepare_upload_session_raises_unsupported_target_type(self):
+        from totelegram.i18n import override_locale
+
         mock_state = MagicMock(spec=CLIState)
         mock_settings = Settings(profile_name="demo")
 
@@ -325,17 +327,18 @@ class TestTargetResolutionAndMandatoryPolicy(unittest.TestCase):
         mock_group.username = None
         self.mock_client.get_chat.return_value = mock_group
 
-        with self.assertRaises(UnsupportedTargetTypeError) as ctx:
-            prepare_upload_session(
-                state=mock_state,
-                client=self.mock_client,
-                db=self.db,
-                settings=mock_settings,
-                target_override="-100999",
-            )
+        with override_locale("es"):
+            with self.assertRaises(UnsupportedTargetTypeError) as ctx:
+                prepare_upload_session(
+                    state=mock_state,
+                    client=self.mock_client,
+                    db=self.db,
+                    settings=mock_settings,
+                    target_override="-100999",
+                )
 
-        self.assertIn("Supergrupo", ctx.exception.message)
-        self.assertEqual(ctx.exception.chat_id, -100999)
+            self.assertIn("Supergrupo", ctx.exception.message)
+            self.assertEqual(ctx.exception.chat_id, -100999)
 
 
 if __name__ == "__main__":

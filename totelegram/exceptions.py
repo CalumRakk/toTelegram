@@ -1,10 +1,13 @@
 """
 Jerarquía centralizada de excepciones de dominio para toTelegram.
 Permite encapsular metadatos de presentación (título, hint, comandos sugeridos y severidad)
+adaptados al sistema internacional de localización (i18n).
 """
 
 from pathlib import Path
 from typing import Literal
+
+from totelegram.i18n import _
 
 SeverityLevel = Literal["info", "warning", "error"]
 
@@ -85,14 +88,30 @@ class NoPendingCandidatesError(OperationAbortNotice):
         item_type: str = "archivo",
         destination_title: str | None = None,
     ):
-        target_info = (
-            f" para el destino '{destination_title}'" if destination_title else ""
-        )
+        is_folder = str(item_type).lower() in ("carpeta", "folder")
+
+        if destination_title:
+            if is_folder:
+                msg = _(
+                    "No se encontraron carpetas pendientes para subir para el destino '{destination}'."
+                ).format(destination=destination_title)
+            else:
+                msg = _(
+                    "No se encontraron archivos pendientes para subir para el destino '{destination}'."
+                ).format(destination=destination_title)
+        else:
+            if is_folder:
+                msg = _("No se encontraron carpetas pendientes para subir.")
+            else:
+                msg = _("No se encontraron archivos pendientes para subir.")
+
         super().__init__(
-            message=f"No se encontraron {item_type}s pendientes para subir{target_info}.",
+            message=msg,
             exit_code=0,
             severity="warning",
-            hint="Todos los elementos ya están respaldados en este destino o fueron omitidos por reglas de exclusión/integridad.",
+            hint=_(
+                "Todos los elementos ya están respaldados en este destino o fueron omitidos por reglas de exclusión/integridad."
+            ),
         )
 
 
@@ -101,7 +120,9 @@ class TargetNotSetError(ConfigurationError):
 
     def __init__(self):
         super().__init__(
-            message="No indicaste el destino. Usa [bold cyan]-t <chat>[/] o [bold cyan]-t me[/] para el chat de Mensajes Guardados.\n",
+            message=_(
+                "No indicaste el destino. Usa [bold cyan]-t <chat>[/] o [bold cyan]-t me[/] para el chat de Mensajes Guardados.\n"
+            ),
             exit_code=1,
             severity="error",
         )
@@ -116,12 +137,15 @@ class TargetAmbiguousError(ConfigurationError):
 
         commands = []
         for c in candidates[:4]:
-            commands.append(f'--target {c.id}  # Para: "{c.title}"')
+            comment = _('Para: "{title}"').format(title=c.title)
+            commands.append(f"--target {c.id}  # {comment}")
 
         super().__init__(
-            message=f"El destino '{query}' es ambiguo ({len(candidates)} coincidencias encontradas).",
-            title="Destino Ambiguo",
-            hint="Especifica el ID directo del chat para resolver la ambigüedad:",
+            message=_(
+                "El destino '{query}' es ambiguo ({count} coincidencias encontradas)."
+            ).format(query=query, count=len(candidates)),
+            title=_("Destino Ambiguo"),
+            hint=_("Especifica el ID directo del chat para resolver la ambigüedad:"),
             suggested_commands=commands,
             exit_code=1,
             severity="error",
@@ -131,15 +155,12 @@ class TargetAmbiguousError(ConfigurationError):
 class PipelineCancelledError(OperationAbortNotice):
     """Lanzada cuando el usuario cancela interactivamente una operación destructiva."""
 
-    def __init__(self, message: str = "Operación cancelada por el usuario."):
+    def __init__(self, message: str | None = None):
         super().__init__(
-            message=message,
+            message=message or _("Operación cancelada por el usuario."),
             exit_code=0,
             severity="info",
         )
-
-
-# Excepciones movidas de  totelegram.types
 
 
 class PipelineExecutionError(ToTelegramError):
@@ -164,18 +185,22 @@ class IncompatibleCapacityError(DomainError):
         size_to_report = pending_payload_size or job_chunk_size
         part_mb = size_to_report // (1024 * 1024)
         acc_mb = account_max_size // (1024 * 1024)
-        account_type = "Premium" if is_premium else "Estándar"
+        account_type = _("Premium") if is_premium else _("Estándar")
 
         super().__init__(
-            message=(
-                f"Este archivo tiene una parte pendiente de {part_mb} MB, "
-                f"pero la cuenta activa actual es {account_type} y solo puede transferir bloques de hasta {acc_mb} MB."
+            message=_(
+                "Este archivo tiene una parte pendiente de {part_mb} MB, "
+                "pero la cuenta activa actual es {account_type} y solo puede transferir bloques de hasta {acc_mb} MB."
+            ).format(part_mb=part_mb, account_type=account_type, acc_mb=acc_mb),
+            title=_("Incompatibilidad de Capacidad"),
+            hint=_(
+                "Para mantener la integridad matemática de los fragmentos, no se pueden mezclar trozos de diferente tamaño."
             ),
-            title="Incompatibilidad de Capacidad",
-            hint="Para mantener la integridad matemática de los fragmentos, no se pueden mezclar trozos de diferente tamaño.",
             suggested_commands=[
-                "totelegram switch <cuenta_premium>    # Cambiar a una cuenta con capacidad suficiente",
-                "totelegram send ... --force           # Descartar intento previo y reiniciar con la capacidad actual",
+                "totelegram switch <cuenta_premium>    # "
+                + _("Cambiar a una cuenta con capacidad suficiente"),
+                "totelegram send ... --force           # "
+                + _("Descartar intento previo y reiniciar con la capacidad actual"),
             ],
             exit_code=1,
             severity="error",
@@ -188,28 +213,34 @@ class PermissionDeniedCleanupError(InfrastructureError):
     def __init__(
         self,
         chat_id: int | str,
-        reason: str = "Permiso 'can_delete_messages' requerido",
+        reason: str | None = None,
     ):
         self.chat_id = chat_id
-        self.reason = reason
+        resolved_reason = reason or _("Permiso 'can_delete_messages' requerido")
+        self.reason = resolved_reason
 
         super().__init__(
-            message=(
-                f"Se requiere limpiar o reorganizar mensajes antiguos en el chat {chat_id}, "
-                f"pero la cuenta activa carece del permiso de administrador 'Eliminar mensajes' ({reason})."
+            message=_(
+                "Se requiere limpiar o reorganizar mensajes antiguos en el chat {chat_id}, "
+                "pero la cuenta activa carece del permiso de administrador 'Eliminar mensajes' ({reason})."
+            ).format(chat_id=chat_id, reason=resolved_reason),
+            title=_("Permisos Insuficientes en Telegram"),
+            hint=_(
+                "toTelegram se detiene para proteger la higiene del canal y no dejar trozos huérfanos abandonados."
             ),
-            title="Permisos Insuficientes en Telegram",
-            hint="toTelegram se detiene para proteger la higiene del canal y no dejar trozos huérfanos abandonados.",
             suggested_commands=[
-                "# Otorga a esta cuenta el permiso 'Eliminar mensajes' en los ajustes de administradores del canal.",
-                "totelegram send ... --use <cuenta_admin>  # Usar una cuenta que tenga permisos de administración",
+                "# "
+                + _(
+                    "Otorga a esta cuenta el permiso 'Eliminar mensajes' en los ajustes de administradores del canal."
+                ),
+                "totelegram send ... --use <cuenta_admin>  # "
+                + _("Usar una cuenta que tenga permisos de administración"),
             ],
             exit_code=1,
             severity="error",
         )
 
 
-# Excepciones movidas de  totelegram.engine.planner
 class JobPlanningError(DomainError):
     """Excepción base para errores de planificación de Jobs."""
 
@@ -220,9 +251,11 @@ class PathLengthExceededError(JobPlanningError):
     def __init__(self, path: Path):
         self.path = path
         super().__init__(
-            message=f"Error al empaquetar la carpeta: '{path.name}'.",
-            title="Nombres de archivo demasiado largos",
-            hint=(
+            message=_("Error al empaquetar la carpeta: '{name}'.").format(
+                name=path.name
+            ),
+            title=_("Nombres de archivo demasiado largos"),
+            hint=_(
                 "El formato TAR tiene un límite estricto para la longitud de los nombres y rutas de archivos.\n"
                 "Tienes dos opciones para resolver esto:\n"
                 "1. Renombrar manualmente los archivos con rutas largas.\n"
@@ -237,9 +270,6 @@ class PathLengthExceededError(JobPlanningError):
         )
 
 
-# Excepciones movidas de  totelegram.concurrency
-
-
 class ConcurrencyError(InfrastructureError):
     """Excepción base para conflictos de concurrencia."""
 
@@ -250,10 +280,15 @@ class AccountBusyError(ConcurrencyError):
     def __init__(self, account_id: int, holder_node_id: str | None = None):
         self.account_id = account_id
         self.holder_node_id = holder_node_id
+        holder = holder_node_id or _("desconocido")
         super().__init__(
-            message=f"La cuenta de Telegram '{account_id}' está en uso activo por el nodo: {holder_node_id or 'desconocido'}.",
-            title="Cuenta en uso",
-            hint="Espera a que la otra subida finalice o que expire el lease de concurrencia.",
+            message=_(
+                "La cuenta de Telegram '{account_id}' está en uso activo por el nodo: {holder}."
+            ).format(account_id=account_id, holder=holder),
+            title=_("Cuenta en uso"),
+            hint=_(
+                "Espera a que la otra subida finalice o que expire el lease de concurrencia."
+            ),
             exit_code=1,
             severity="error",
         )
@@ -265,6 +300,17 @@ class PayloadClaimError(ConcurrencyError):
 
 class SystemSuspendedError(ConcurrencyError):
     """Lanzada cuando se detecta que el sistema entró en suspensión/hibernación."""
+
+    def __init__(self, message: str | None = None):
+        super().__init__(
+            message=message
+            or _(
+                "El sistema operativo se suspendió o hibernó durante la ejecución. "
+                "Abortando para proteger la integridad de los datos y reconectar limpiamente."
+            ),
+            title=_("Sistema Suspendido"),
+            severity="error",
+        )
 
 
 class UnsupportedTargetTypeError(ConfigurationError):
@@ -281,27 +327,35 @@ class UnsupportedTargetTypeError(ConfigurationError):
         self.chat_type = str(chat_type).lower() if chat_type else "desconocido"
 
         type_labels = {
-            "group": "Grupo",
-            "supergroup": "Supergrupo",
-            "private": "Chat privado",
-            "bot": "Bot",
+            "group": _("Grupo"),
+            "supergroup": _("Supergrupo"),
+            "private": _("Chat privado"),
+            "bot": _("Bot"),
         }
         type_label = type_labels.get(self.chat_type, self.chat_type.capitalize())
 
         commands = [
-            "# 1. Crea un canal privado en Telegram y añade tu cuenta como Administrador.",
-            "# 2. Asegúrate de conceder permisos de publicación y eliminación de mensajes.",
-            'totelegram target "Nombre de tu Canal"  # Para verificar sus permisos y acceso',
-            "totelegram send ... -t me              # Para enviar a tu chat de Mensajes Guardados",
+            "# "
+            + _(
+                "1. Crea un canal privado en Telegram y añade tu cuenta como Administrador."
+            ),
+            "# "
+            + _(
+                "2. Asegúrate de conceder permisos de publicación y eliminación de mensajes."
+            ),
+            'totelegram target "Nombre de tu Canal"  # '
+            + _("Para verificar sus permisos y acceso"),
+            "totelegram send ... -t me              # "
+            + _("Para enviar a tu chat de Mensajes Guardados"),
         ]
 
         super().__init__(
-            message=(
-                f"El destino '[bold]{self.chat_title}[/]' es de tipo [bold magenta]{type_label}[/], "
+            message=_(
+                "El destino '[bold]{chat_title}[/]' es de tipo [bold magenta]{type_label}[/], "
                 "pero toTelegram solo admite [bold cyan]Canales de difusión[/] o [bold cyan]Mensajes Guardados ('me')[/]."
-            ),
-            title="Destino No Compatible",
-            hint=(
+            ).format(chat_title=self.chat_title, type_label=type_label),
+            title=_("Destino No Compatible"),
+            hint=_(
                 "Los canales operan como un almacén de objetos y evitan la mezcla visual "
                 "entre cuentas y permiten que cualquier cuenta edite o reorganice metadatos. "
                 "Los grupos de Telegram no soportan estas capacidades."

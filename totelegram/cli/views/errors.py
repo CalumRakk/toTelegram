@@ -24,11 +24,13 @@ class CLIExceptionHandler:
         # Si la excepción incluye contexto enriquecido (título, hint o comandos sugeridos)
         # la renderizamos en un panel educativo estructurado
         if err.title or err.suggested_commands or err.hint:
-            content = (
-                f"{err.message}\n\n{err.hint}"
-                if err.hint and err.hint != err.message
-                else (err.hint or err.message)
-            )
+            clean_msg = err.message.strip()
+            clean_hint = err.hint.strip() if err.hint else None
+
+            if clean_hint and clean_hint != clean_msg:
+                content = f"{clean_msg}\n\n{clean_hint}"
+            else:
+                content = clean_hint or clean_msg
 
             UI.educational_tip(
                 title=err.title,
@@ -38,10 +40,10 @@ class CLIExceptionHandler:
                 spacing="block",
             )
         else:
-            # Mensajes planos según severidad
+            clean_msg = err.message.strip()
             if err.severity == "warning":
-                UI.warn(err.message, spacing="top")
+                UI.warn(clean_msg, spacing="top")
             elif err.severity == "info":
-                UI.info(err.message, spacing="top")
+                UI.info(clean_msg, spacing="top")
             else:
-                UI.error(err.message, spacing="top")
+                UI.error(clean_msg, spacing="top")

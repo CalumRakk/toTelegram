@@ -12,6 +12,7 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
+# Semillas de verificación de motor
 msgid "Hello World"
 msgstr "Hello World"
 
@@ -19,3 +20,137 @@ msgid "{n} file"
 msgid_plural "{n} files"
 msgstr[0] "{n} file"
 msgstr[1] "{n} files"
+
+# Capa 2: Excepciones
+
+msgid "No se encontraron carpetas pendientes para subir para el destino '{destination}'."
+msgstr "No pending folders found to upload for destination '{destination}'."
+
+msgid "No se encontraron archivos pendientes para subir para el destino '{destination}'."
+msgstr "No pending files found to upload for destination '{destination}'."
+
+msgid "No se encontraron carpetas pendientes para subir."
+msgstr "No pending folders found to upload."
+
+msgid "No se encontraron archivos pendientes para subir."
+msgstr "No pending files found to upload."
+
+msgid "Todos los elementos ya están respaldados en este destino o fueron omitidos por reglas de exclusión/integridad."
+msgstr "All items are already backed up to this destination or were skipped due to exclusion/integrity rules."
+
+msgid "No indicaste el destino. Usa [bold cyan]-t <chat>[/] o [bold cyan]-t me[/] para el chat de Mensajes Guardados.\n"
+msgstr "No destination specified. Use [bold cyan]-t <chat>[/] or [bold cyan]-t me[/] for Saved Messages.\n"
+
+msgid "Para: \"{title}\""
+msgstr "For: \"{title}\""
+
+msgid "El destino '{query}' es ambiguo ({count} coincidencias encontradas)."
+msgstr "Target '{query}' is ambiguous ({count} matches found)."
+
+msgid "Destino Ambiguo"
+msgstr "Ambiguous Target"
+
+msgid "Especifica el ID directo del chat para resolver la ambigüedad:"
+msgstr "Specify the direct chat ID to resolve ambiguity:"
+
+msgid "Operación cancelada por el usuario."
+msgstr "Operation cancelled by user."
+
+msgid "Premium"
+msgstr "Premium"
+
+msgid "Estándar"
+msgstr "Standard"
+
+msgid "Este archivo tiene una parte pendiente de {part_mb} MB, pero la cuenta activa actual es {account_type} y solo puede transferir bloques de hasta {acc_mb} MB."
+msgstr "This file has a pending part of {part_mb} MB, but the active account is {account_type} and can only transfer blocks up to {acc_mb} MB."
+
+msgid "Incompatibilidad de Capacidad"
+msgstr "Capacity Incompatibility"
+
+msgid "Para mantener la integridad matemática de los fragmentos, no se pueden mezclar trozos de diferente tamaño."
+msgstr "To maintain mathematical integrity across chunks, parts of different sizes cannot be mixed."
+
+msgid "Cambiar a una cuenta con capacidad suficiente"
+msgstr "Switch to an account with sufficient capacity"
+
+msgid "Descartar intento previo y reiniciar con la capacidad actual"
+msgstr "Discard previous attempt and restart with current capacity"
+
+msgid "Permiso 'can_delete_messages' requerido"
+msgstr "Permission 'can_delete_messages' required"
+
+msgid "Se requiere limpiar o reorganizar mensajes antiguos en el chat {chat_id}, pero la cuenta activa carece del permiso de administrador 'Eliminar mensajes' ({reason})."
+msgstr "Cleaning or reorganizing old messages in chat {chat_id} is required, but the active account lacks the administrator permission 'Delete messages' ({reason})."
+
+msgid "Permisos Insuficientes en Telegram"
+msgstr "Insufficient Telegram Permissions"
+
+msgid "toTelegram se detiene para proteger la higiene del canal y no dejar trozos huérfanos abandonados."
+msgstr "toTelegram halts to protect channel cleanliness and avoid leaving orphaned chunks abandoned."
+
+msgid "Otorga a esta cuenta el permiso 'Eliminar mensajes' en los ajustes de administradores del canal."
+msgstr "Grant this account the 'Delete messages' permission in the channel administrator settings."
+
+msgid "Usar una cuenta que tenga permisos de administración"
+msgstr "Use an account with administrator permissions"
+
+msgid "Error al empaquetar la carpeta: '{name}'."
+msgstr "Error packing folder: '{name}'."
+
+msgid "Nombres de archivo demasiado largos"
+msgstr "Filenames Too Long"
+
+msgid "El formato TAR tiene un límite estricto para la longitud de los nombres y rutas de archivos.\nTienes dos opciones para resolver esto:\n1. Renombrar manualmente los archivos con rutas largas.\n2. Dejar que toTelegram trunque los nombres automáticamente al subirlos."
+msgstr "The TAR format has a strict limit for filename and path lengths.\nYou have two options to resolve this:\n1. Manually rename files with long paths.\n2. Let toTelegram truncate names automatically when uploading."
+
+msgid "desconocido"
+msgstr "unknown"
+
+msgid "La cuenta de Telegram '{account_id}' está en uso activo por el nodo: {holder}."
+msgstr "Telegram account '{account_id}' is actively in use by node: {holder}."
+
+msgid "Cuenta en uso"
+msgstr "Account in Use"
+
+msgid "Espera a que la otra subida finalice o que expire el lease de concurrencia."
+msgstr "Wait for the other upload to finish or for the concurrency lease to expire."
+
+msgid "El sistema operativo se suspendió o hibernó durante la ejecución. Abortando para proteger la integridad de los datos y reconectar limpiamente."
+msgstr "The operating system suspended or hibernated during execution. Aborting to protect data integrity and reconnect cleanly."
+
+msgid "Sistema Suspendido"
+msgstr "System Suspended"
+
+msgid "Grupo"
+msgstr "Group"
+
+msgid "Supergrupo"
+msgstr "Supergroup"
+
+msgid "Chat privado"
+msgstr "Private chat"
+
+msgid "Bot"
+msgstr "Bot"
+
+msgid "1. Crea un canal privado en Telegram y añade tu cuenta como Administrador."
+msgstr "1. Create a private channel on Telegram and add your account as an Administrator."
+
+msgid "2. Asegúrate de conceder permisos de publicación y eliminación de mensajes."
+msgstr "2. Ensure you grant post and delete message permissions."
+
+msgid "Para verificar sus permisos y acceso"
+msgstr "To verify its permissions and access"
+
+msgid "Para enviar a tu chat de Mensajes Guardados"
+msgstr "To send to your Saved Messages chat"
+
+msgid "El destino '[bold]{chat_title}[/]' es de tipo [bold magenta]{type_label}[/], pero toTelegram solo admite [bold cyan]Canales de difusión[/] o [bold cyan]Mensajes Guardados ('me')[/]."
+msgstr "Target '[bold]{chat_title}[/]' is of type [bold magenta]{type_label}[/], but toTelegram only supports [bold cyan]Broadcast Channels[/] or [bold cyan]Saved Messages ('me')[/]."
+
+msgid "Destino No Compatible"
+msgstr "Unsupported Target"
+
+msgid "Los canales operan como un almacén de objetos y evitan la mezcla visual entre cuentas y permiten que cualquier cuenta edite o reorganice metadatos. Los grupos de Telegram no soportan estas capacidades."
+msgstr "Channels operate as an object store, prevent visual clutter across accounts, and allow any account to edit or reorganize metadata. Telegram groups do not support these capabilities."

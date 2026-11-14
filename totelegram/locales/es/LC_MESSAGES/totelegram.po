@@ -12,12 +12,145 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
-# Cadena semilla para verificar el motor
+# Semillas de verificación de motor
 msgid "Hello World"
 msgstr "Hola Mundo"
 
-# Cadena semilla con plural para verificar _n()
 msgid "{n} file"
 msgid_plural "{n} files"
 msgstr[0] "{n} archivo"
 msgstr[1] "{n} archivos"
+
+# Capa 2: Excepciones
+
+msgid "No se encontraron carpetas pendientes para subir para el destino '{destination}'."
+msgstr "No se encontraron carpetas pendientes para subir para el destino '{destination}'."
+
+msgid "No se encontraron archivos pendientes para subir para el destino '{destination}'."
+msgstr "No se encontraron archivos pendientes para subir para el destino '{destination}'."
+
+msgid "No se encontraron carpetas pendientes para subir."
+msgstr "No se encontraron carpetas pendientes para subir."
+
+msgid "No se encontraron archivos pendientes para subir."
+msgstr "No se encontraron archivos pendientes para subir."
+
+msgid "Todos los elementos ya están respaldados en este destino o fueron omitidos por reglas de exclusión/integridad."
+msgstr "Todos los elementos ya están respaldados en este destino o fueron omitidos por reglas de exclusión/integridad."
+
+msgid "No indicaste el destino. Usa [bold cyan]-t <chat>[/] o [bold cyan]-t me[/] para el chat de Mensajes Guardados.\n"
+msgstr "No indicaste el destino. Usa [bold cyan]-t <chat>[/] o [bold cyan]-t me[/] para el chat de Mensajes Guardados.\n"
+
+msgid "Para: \"{title}\""
+msgstr "Para: \"{title}\""
+
+msgid "El destino '{query}' es ambiguo ({count} coincidencias encontradas)."
+msgstr "El destino '{query}' es ambiguo ({count} coincidencias encontradas)."
+
+msgid "Destino Ambiguo"
+msgstr "Destino Ambiguo"
+
+msgid "Especifica el ID directo del chat para resolver la ambigüedad:"
+msgstr "Especifica el ID directo del chat para resolver la ambigüedad:"
+
+msgid "Operación cancelada por el usuario."
+msgstr "Operación cancelada por el usuario."
+
+msgid "Premium"
+msgstr "Premium"
+
+msgid "Estándar"
+msgstr "Estándar"
+
+msgid "Este archivo tiene una parte pendiente de {part_mb} MB, pero la cuenta activa actual es {account_type} y solo puede transferir bloques de hasta {acc_mb} MB."
+msgstr "Este archivo tiene una parte pendiente de {part_mb} MB, pero la cuenta activa actual es {account_type} y solo puede transferir bloques de hasta {acc_mb} MB."
+
+msgid "Incompatibilidad de Capacidad"
+msgstr "Incompatibilidad de Capacidad"
+
+msgid "Para mantener la integridad matemática de los fragmentos, no se pueden mezclar trozos de diferente tamaño."
+msgstr "Para mantener la integridad matemática de los fragmentos, no se pueden mezclar trozos de diferente tamaño."
+
+msgid "Cambiar a una cuenta con capacidad suficiente"
+msgstr "Cambiar a una cuenta con capacidad suficiente"
+
+msgid "Descartar intento previo y reiniciar con la capacidad actual"
+msgstr "Descartar intento previo y reiniciar con la capacidad actual"
+
+msgid "Permiso 'can_delete_messages' requerido"
+msgstr "Permiso 'can_delete_messages' requerido"
+
+msgid "Se requiere limpiar o reorganizar mensajes antiguos en el chat {chat_id}, pero la cuenta activa carece del permiso de administrador 'Eliminar mensajes' ({reason})."
+msgstr "Se requiere limpiar o reorganizar mensajes antiguos en el chat {chat_id}, pero la cuenta activa carece del permiso de administrador 'Eliminar mensajes' ({reason})."
+
+msgid "Permisos Insuficientes en Telegram"
+msgstr "Permisos Insuficientes en Telegram"
+
+msgid "toTelegram se detiene para proteger la higiene del canal y no dejar trozos huérfanos abandonados."
+msgstr "toTelegram se detiene para proteger la higiene del canal y no dejar trozos huérfanos abandonados."
+
+msgid "Otorga a esta cuenta el permiso 'Eliminar mensajes' en los ajustes de administradores del canal."
+msgstr "Otorga a esta cuenta el permiso 'Eliminar mensajes' en los ajustes de administradores del canal."
+
+msgid "Usar una cuenta que tenga permisos de administración"
+msgstr "Usar una cuenta que tenga permisos de administración"
+
+msgid "Error al empaquetar la carpeta: '{name}'."
+msgstr "Error al empaquetar la carpeta: '{name}'."
+
+msgid "Nombres de archivo demasiado largos"
+msgstr "Nombres de archivo demasiado largos"
+
+msgid "El formato TAR tiene un límite estricto para la longitud de los nombres y rutas de archivos.\nTienes dos opciones para resolver esto:\n1. Renombrar manualmente los archivos con rutas largas.\n2. Dejar que toTelegram trunque los nombres automáticamente al subirlos."
+msgstr "El formato TAR tiene un límite estricto para la longitud de los nombres y rutas de archivos.\nTienes dos opciones para resolver esto:\n1. Renombrar manualmente los archivos con rutas largas.\n2. Dejar que toTelegram trunque los nombres automáticamente al subirlos."
+
+msgid "desconocido"
+msgstr "desconocido"
+
+msgid "La cuenta de Telegram '{account_id}' está en uso activo por el nodo: {holder}."
+msgstr "La cuenta de Telegram '{account_id}' está en uso activo por el nodo: {holder}."
+
+msgid "Cuenta en uso"
+msgstr "Cuenta en uso"
+
+msgid "Espera a que la otra subida finalice o que expire el lease de concurrencia."
+msgstr "Espera a que la otra subida finalice o que expire el lease de concurrencia."
+
+msgid "El sistema operativo se suspendió o hibernó durante la ejecución. Abortando para proteger la integridad de los datos y reconectar limpiamente."
+msgstr "El sistema operativo se suspendió o hibernó durante la ejecución. Abortando para proteger la integridad de los datos y reconectar limpiamente."
+
+msgid "Sistema Suspendido"
+msgstr "Sistema Suspendido"
+
+msgid "Grupo"
+msgstr "Grupo"
+
+msgid "Supergrupo"
+msgstr "Supergrupo"
+
+msgid "Chat privado"
+msgstr "Chat privado"
+
+msgid "Bot"
+msgstr "Bot"
+
+msgid "1. Crea un canal privado en Telegram y añade tu cuenta como Administrador."
+msgstr "1. Crea un canal privado en Telegram y añade tu cuenta como Administrador."
+
+msgid "2. Asegúrate de conceder permisos de publicación y eliminación de mensajes."
+msgstr "2. Asegúrate de conceder permisos de publicación y eliminación de mensajes."
+
+msgid "Para verificar sus permisos y acceso"
+msgstr "Para verificar sus permisos y acceso"
+
+msgid "Para enviar a tu chat de Mensajes Guardados"
+msgstr "Para enviar a tu chat de Mensajes Guardados"
+
+msgid "El destino '[bold]{chat_title}[/]' es de tipo [bold magenta]{type_label}[/], pero toTelegram solo admite [bold cyan]Canales de difusión[/] o [bold cyan]Mensajes Guardados ('me')[/]."
+msgstr "El destino '[bold]{chat_title}[/]' es de tipo [bold magenta]{type_label}[/], pero toTelegram solo admite [bold cyan]Canales de difusión[/] o [bold cyan]Mensajes Guardados ('me')[/]."
+
+msgid "Destino No Compatible"
+msgstr "Destino No Compatible"
+
+msgid "Los canales operan como un almacén de objetos y evitan la mezcla visual entre cuentas y permiten que cualquier cuenta edite o reorganice metadatos. Los grupos de Telegram no soportan estas capacidades."
+msgstr "Los canales operan como un almacén de objetos y evitan la mezcla visual entre cuentas y permiten que cualquier cuenta edite o reorganice metadatos. Los grupos de Telegram no soportan estas capacidades."
