@@ -33,6 +33,8 @@ from totelegram.schemas import VALUE_NOT_SET, AccessLevel, InfoField
 
 logger = logging.getLogger(__name__)
 
+LanguageSetting = Literal["auto", "es", "en"]
+
 # Anotaciones de tipos de Pydantic
 IntList = Annotated[
     List[int],
@@ -131,6 +133,11 @@ class Settings(BaseModel):
     log_path: Path | None = Field(
         default=None,
         description="Ruta del archivo de log. Si está vacío, se usa la ruta por defecto.",
+    )
+    language: LanguageSetting = Field(
+        default="auto",
+        description="Idioma de la interfaz: 'auto' (detecta el SO), 'es' (español) o 'en' (inglés).",
+        json_schema_extra={"is_sensitive": False, "access": AccessLevel.EDITABLE},
     )
 
     model_config = ConfigDict(extra="ignore")

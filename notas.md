@@ -1,6 +1,6 @@
 
 
-
+- Eliminar pydantic-settings?
 - RemotePayload debe guardar de Message solo lo basico, no es necesario todo el JSON enorme.
 - verificar si se puede especificar otra ruta para la DB
 - ~~error de lock de cuenta al cerrarla forzosamente ¿nodo determinista es la solucion?~~

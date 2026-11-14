@@ -1,10 +1,56 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "totelegram"
+dynamic = ["version", "readme"]
+description = "toTelegram sube archivos a telegram sin importar el tamaño."
+authors = [{ name = "CalumRakk" }]
+requires-python = ">=3.10.0"
+dependencies = [
+    "filetype==1.2.0",
+    "peewee>=3.17.9",
+    "pydantic>=2.11.7",
+    "pydantic-settings>=2.10.1",
+    "pyrogram==2.0.106",
+    "TgCrypto>=1.2.5",
+    "typer>=0.21.1",
+    "filelock>=3.20.3",
+    "tartape>=v3.0.7",
+]
+
+[project.optional-dependencies]
+# pip install -e ".[dev]"
+dev = [
+    "babel>=2.14.0",
+]
+
+[project.scripts]
+totelegram = "totelegram.cli.__main__:run_script"
+
+[project.urls]
+Homepage = "https://github.com/CalumRakk/toTelegram"
+
+# Resolución declarativa sin ejecutar código Python en build time
+[tool.setuptools.dynamic]
+version = { attr = "totelegram.__VERSION__" }
+readme = { file = ["README.md"], content-type = "text/markdown" }
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["totelegram*"]
+
+# Inclusión obligatoria de los binarios de traducción (.mo) en la rueda (wheel)
+[tool.setuptools.package-data]
+totelegram = ["locales/*/*/*.mo"]
+
+# configuración de Pyright
 [tool.pyright]
-typeCheckingMode = "basic" # Opciones: "off", "basic", "strict"
+typeCheckingMode = "basic"
 include = ["src"]
 exclude = ["**/node_modules", "**/__pycache__", ".venv"]
-
-# Configura o apaga reglas específicas de diagnóstico
 reportUnusedCoroutine = false
-reportArgumentType= false
-reportReturnType= false
-reportAttributeAccessIssue= false
+reportArgumentType = false
+reportReturnType = false
+reportAttributeAccessIssue = false

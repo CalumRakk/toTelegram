@@ -21,6 +21,7 @@ from totelegram.cli.commands import (
 from totelegram.cli.state import CLIState
 from totelegram.cli.ui import console
 from totelegram.common.files import get_user_config_dir
+from totelegram.i18n import setup_i18n
 from totelegram.identity import SettingsManager
 from totelegram.logging_config import setup_logging
 from totelegram.schemas import APP_NAME
@@ -90,6 +91,20 @@ def main(
     worktable = get_user_config_dir(APP_NAME)
     config_manager = SettingsManager(worktable)
 
+    # Resolver idioma configurado en el perfil activo (si existe)
+    profile_name = use or config_manager.get_active_profile_name()
+    forced_lang = "auto"
+
+    if profile_name and config_manager.settings_exists(profile_name):
+        try:
+            profile_settings = config_manager.get_settings(profile_name)
+            forced_lang = profile_settings.language
+        except Exception:  # noqa: S110
+            pass
+
+    # Inicializar el catálogo de traducción correspondiente
+    setup_i18n(forced_lang)
+
     cmd_name = ctx.invoked_subcommand or "sys"
     timestamp = datetime.now(tz=timezone.utc).strftime("%Y%m%d_%H%M%S")
 
@@ -98,12 +113,10 @@ def main(
 
     setup_logging(log_path, debug)
 
-    # main resuelve la intencion del nombre del perfil a usar; las validaciones dependen del contexto del comando.
-    profile_name = use or config_manager.get_active_profile_name()
     ctx.obj = CLIState(
         manager=config_manager, profile_name=profile_name, is_debug=debug
     )
-    logger.debug(f"--- Nueva Ejecución: {sys.argv}")
+    logger.debug(f"--- Nueva Ejecución: {sys.argv} [Lang: {forced_lang}]")
 
 
 def run_script():

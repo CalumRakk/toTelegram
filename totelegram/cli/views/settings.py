@@ -79,7 +79,7 @@ class DisplayConfig:
     ):
         UI.info(f"Configuración del perfil: [green]{profile_name}[/green]")
         table = Table(show_header=True, title_style=COLORS.TABLE_TITLE)
-        table.add_column("Opción (Key)")
+        table.add_column("Opción (Key)", no_wrap=True)
         table.add_column("Tipo")
         table.add_column("Valor Actual")
         table.add_column("Descripción")
